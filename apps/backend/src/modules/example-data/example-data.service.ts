@@ -5,6 +5,24 @@ import path from "node:path";
 interface TrackPoint {
   lat: number;
   lng: number;
+  ele?: number;
+}
+
+interface ElevationSection {
+  type: "climb" | "descent";
+  startIndex: number;
+  endIndex: number;
+  distanceMeters: number;
+  elevationChangeMeters: number;
+}
+
+interface ElevationProfile {
+  totalAscentMeters: number;
+  totalDescentMeters: number;
+  maxElevationMeters: number | null;
+  minElevationMeters: number | null;
+  segmentSlopes: number[];
+  sections: ElevationSection[];
 }
 
 interface RaceTrack {
@@ -12,6 +30,7 @@ interface RaceTrack {
   label: string;
   gpxFile: string;
   points: TrackPoint[];
+  elevationProfile: ElevationProfile;
 }
 
 interface ExampleRunnerRecord {
@@ -144,7 +163,15 @@ export class ExampleDataService {
   }
 
   listTracks(): RaceTrack[] {
-    return this.tracks.map((track) => ({ ...track, points: [...track.points] }));
+    return this.tracks.map((track) => ({
+      ...track,
+      points: [...track.points],
+      elevationProfile: {
+        ...track.elevationProfile,
+        segmentSlopes: [...track.elevationProfile.segmentSlopes],
+        sections: track.elevationProfile.sections.map((section) => ({ ...section })),
+      },
+    }));
   }
 
   listMarkers(eventId: string): ExampleMapMarker[] {
@@ -232,12 +259,14 @@ export class ExampleDataService {
           this.logger.warn(`No track points in GPX file: ${descriptor.gpxFile}`);
           return null;
         }
+        const elevationProfile = this.computeElevationProfile(points);
 
         return {
           id: descriptor.id,
           label: descriptor.label,
           gpxFile: descriptor.gpxFile,
           points,
+          elevationProfile,
         } satisfies RaceTrack;
       })
       .filter((track): track is RaceTrack => Boolean(track));
@@ -246,25 +275,165 @@ export class ExampleDataService {
   }
 
   private parseTrackPoints(xml: string): TrackPoint[] {
-    const trkptRegex = /<trkpt\b([^>]*)>/g;
+    const trkptRegex = /<trkpt\b([^>]*)>([\s\S]*?)<\/trkpt>/g;
     const points: TrackPoint[] = [];
     let match = trkptRegex.exec(xml);
 
     while (match) {
       const attrs = match[1];
+      const body = match[2] ?? "";
       const latMatch = attrs.match(/\blat="([^"]+)"/);
       const lonMatch = attrs.match(/\blon="([^"]+)"/);
+      const eleMatch = body.match(/<ele>([^<]+)<\/ele>/);
       if (latMatch?.[1] && lonMatch?.[1]) {
         const lat = Number(latMatch[1]);
         const lng = Number(lonMatch[1]);
         if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          points.push({ lat, lng });
+          const ele = eleMatch?.[1] ? Number(eleMatch[1]) : undefined;
+          points.push({ lat, lng, ele: Number.isFinite(ele) ? ele : undefined });
         }
       }
       match = trkptRegex.exec(xml);
     }
 
     return points;
+  }
+
+  private computeElevationProfile(points: TrackPoint[]): ElevationProfile {
+    if (points.length < 2) {
+      return {
+        totalAscentMeters: 0,
+        totalDescentMeters: 0,
+        maxElevationMeters: null,
+        minElevationMeters: null,
+        segmentSlopes: [],
+        sections: [],
+      };
+    }
+
+    let totalAscentMeters = 0;
+    let totalDescentMeters = 0;
+    const segmentSlopes: number[] = [];
+    const sections: ElevationSection[] = [];
+
+    const elevations = points.map((point) => point.ele).filter((ele): ele is number => Number.isFinite(ele));
+    const maxElevationMeters = elevations.length > 0 ? Math.max(...elevations) : null;
+    const minElevationMeters = elevations.length > 0 ? Math.min(...elevations) : null;
+
+    let currentSection:
+      | {
+          type: "climb" | "descent";
+          startIndex: number;
+          endIndex: number;
+          distanceMeters: number;
+          elevationChangeMeters: number;
+        }
+      | null = null;
+
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      const distanceMeters = Math.max(this.distanceMeters(current, next), 1);
+      const eleCurrent = current.ele ?? next.ele;
+      const eleNext = next.ele ?? current.ele;
+      const hasElevation = typeof eleCurrent === "number" && typeof eleNext === "number";
+      const elevationDelta = hasElevation ? eleNext - eleCurrent : 0;
+      const gradePercent = (elevationDelta / distanceMeters) * 100;
+      const normalizedSlope = Math.max(-1, Math.min(1, gradePercent / 16));
+
+      segmentSlopes.push(normalizedSlope);
+
+      if (elevationDelta > 0) {
+        totalAscentMeters += elevationDelta;
+      } else if (elevationDelta < 0) {
+        totalDescentMeters += Math.abs(elevationDelta);
+      }
+
+      const nextType = elevationDelta >= 1 ? "climb" : elevationDelta <= -1 ? "descent" : null;
+      if (!nextType) {
+        if (currentSection) {
+          this.pushSectionIfMeaningful(sections, currentSection);
+          currentSection = null;
+        }
+        continue;
+      }
+
+      if (!currentSection) {
+        currentSection = {
+          type: nextType,
+          startIndex: index,
+          endIndex: index + 1,
+          distanceMeters,
+          elevationChangeMeters: elevationDelta,
+        };
+        continue;
+      }
+
+      if (currentSection.type === nextType) {
+        currentSection.endIndex = index + 1;
+        currentSection.distanceMeters += distanceMeters;
+        currentSection.elevationChangeMeters += elevationDelta;
+      } else {
+        this.pushSectionIfMeaningful(sections, currentSection);
+        currentSection = {
+          type: nextType,
+          startIndex: index,
+          endIndex: index + 1,
+          distanceMeters,
+          elevationChangeMeters: elevationDelta,
+        };
+      }
+    }
+
+    if (currentSection) {
+      this.pushSectionIfMeaningful(sections, currentSection);
+    }
+
+    return {
+      totalAscentMeters: Math.round(totalAscentMeters),
+      totalDescentMeters: Math.round(totalDescentMeters),
+      maxElevationMeters: maxElevationMeters !== null ? Math.round(maxElevationMeters) : null,
+      minElevationMeters: minElevationMeters !== null ? Math.round(minElevationMeters) : null,
+      segmentSlopes,
+      sections,
+    };
+  }
+
+  private pushSectionIfMeaningful(
+    sections: ElevationSection[],
+    section: {
+      type: "climb" | "descent";
+      startIndex: number;
+      endIndex: number;
+      distanceMeters: number;
+      elevationChangeMeters: number;
+    },
+  ): void {
+    const meaningfulDistance = section.distanceMeters >= 80;
+    const meaningfulElevation = Math.abs(section.elevationChangeMeters) >= 4;
+    if (!meaningfulDistance && !meaningfulElevation) {
+      return;
+    }
+
+    sections.push({
+      type: section.type,
+      startIndex: section.startIndex,
+      endIndex: section.endIndex,
+      distanceMeters: Math.round(section.distanceMeters),
+      elevationChangeMeters: Math.round(section.elevationChangeMeters * 10) / 10,
+    });
+  }
+
+  private distanceMeters(pointA: TrackPoint, pointB: TrackPoint): number {
+    const toRadians = (value: number) => (value * Math.PI) / 180;
+    const earthRadiusMeters = 6_371_000;
+    const dLat = toRadians(pointB.lat - pointA.lat);
+    const dLng = toRadians(pointB.lng - pointA.lng);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRadians(pointA.lat)) * Math.cos(toRadians(pointB.lat)) * Math.sin(dLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusMeters * c;
   }
 
   private resolveGpxPath(fileName: string): string | null {

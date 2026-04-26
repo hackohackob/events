@@ -1,7 +1,9 @@
 import { useSessionStore } from "../security/session-store";
 import { resolveLocalhostUrl } from "./runtime-host";
 
-const API_BASE_URL = resolveLocalhostUrl(process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:6000/api");
+const API_BASE_URL = resolveLocalhostUrl(
+  process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
+);
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const state = useSessionStore.getState();

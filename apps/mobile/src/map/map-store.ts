@@ -20,6 +20,20 @@ export interface RaceTrack {
   id: string;
   label: string;
   points: Array<{ lat: number; lng: number }>;
+  elevationProfile?: {
+    totalAscentMeters: number;
+    totalDescentMeters: number;
+    maxElevationMeters: number | null;
+    minElevationMeters: number | null;
+    segmentSlopes: number[];
+    sections: Array<{
+      type: "climb" | "descent";
+      startIndex: number;
+      endIndex: number;
+      distanceMeters: number;
+      elevationChangeMeters: number;
+    }>;
+  };
 }
 
 interface MapState {

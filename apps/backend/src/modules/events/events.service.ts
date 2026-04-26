@@ -13,6 +13,20 @@ export interface EventTrack {
   id: string;
   label: string;
   points: Array<{ lat: number; lng: number }>;
+  elevationProfile: {
+    totalAscentMeters: number;
+    totalDescentMeters: number;
+    maxElevationMeters: number | null;
+    minElevationMeters: number | null;
+    segmentSlopes: number[];
+    sections: Array<{
+      type: "climb" | "descent";
+      startIndex: number;
+      endIndex: number;
+      distanceMeters: number;
+      elevationChangeMeters: number;
+    }>;
+  };
 }
 
 @Injectable()
@@ -37,7 +51,12 @@ export class EventsService {
     return this.exampleDataService.listTracks().map((track) => ({
       id: track.id,
       label: track.label,
-      points: track.points,
+      points: track.points.map((point) => ({ lat: point.lat, lng: point.lng })),
+      elevationProfile: {
+        ...track.elevationProfile,
+        segmentSlopes: [...track.elevationProfile.segmentSlopes],
+        sections: track.elevationProfile.sections.map((section) => ({ ...section })),
+      },
     }));
   }
 }

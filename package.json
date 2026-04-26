@@ -21,6 +21,7 @@
     "test": "npm run test --workspaces --if-present",
     "dev:backend": "npm run start:dev -w @events/backend",
     "dev:mobile": "npm run start -w @events/mobile",
-    "load:test": "node scripts/load-test.mjs"
+    "load:test": "node scripts/load-test.mjs",
+    "docker:up": "docker compose up --build"
   }
 }

@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "version": ">= 18.8.1",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://events-api.hackohackob.com/api",
+        "EXPO_PUBLIC_WS_URL": "https://events-api.hackohackob.com/realtime",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAuZ-Ouo7GraJxTZLIYDvuiK_9AGSNVTsE",
+        "EXPO_PUBLIC_MAPY_API_KEY": "_00cVb6UCYhfdEOBUSlPdS3hyVSOg3_X-2068lLjNHI"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://events-api.hackohackob.com/api",
+        "EXPO_PUBLIC_WS_URL": "https://events-api.hackohackob.com/realtime",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAuZ-Ouo7GraJxTZLIYDvuiK_9AGSNVTsE",
+        "EXPO_PUBLIC_MAPY_API_KEY": "_00cVb6UCYhfdEOBUSlPdS3hyVSOg3_X-2068lLjNHI"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://events-api.hackohackob.com/api",
+        "EXPO_PUBLIC_WS_URL": "https://events-api.hackohackob.com/realtime",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyAuZ-Ouo7GraJxTZLIYDvuiK_9AGSNVTsE",
+        "EXPO_PUBLIC_MAPY_API_KEY": "_00cVb6UCYhfdEOBUSlPdS3hyVSOg3_X-2068lLjNHI"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
