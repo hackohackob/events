@@ -8,7 +8,8 @@
   ],
   "dependencies": {
     "react": "19.1.0",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "expo": "~54.0.33"
   },
   "overrides": {
     "react": "19.1.0",
@@ -22,6 +23,10 @@
     "dev:backend": "npm run start:dev -w @events/backend",
     "dev:mobile": "npm run start -w @events/mobile",
     "load:test": "node scripts/load-test.mjs",
-    "docker:up": "docker compose up --build"
+    "docker:up": "docker compose up --build",
+    "reverse:proxy": "adb reverse tcp:8081 tcp:8081"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10"
   }
 }

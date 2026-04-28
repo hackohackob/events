@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  Easing,
+  Dimensions,
   PanResponder,
   Pressable,
   ScrollView,
@@ -10,7 +10,17 @@ import {
   View,
 } from "react-native";
 import * as ExpoLocation from "expo-location";
-import MapView, { Circle, Marker, Polyline, UrlTile } from "react-native-maps";
+import {
+  Camera,
+  type CameraRef,
+  GeoJSONSource,
+  Layer,
+  Map as MapLibreMap,
+  type MapRef,
+  Marker,
+  RasterSource,
+  UserLocation,
+} from "@maplibre/maplibre-react-native";
 import { getSocket } from "../realtime/socket-client";
 import { apiFetch } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
@@ -19,9 +29,24 @@ import { useMapStore } from "./map-store";
 const CURRENT_USER_ID = "mobile-user";
 const FALLBACK_LAT = 42.6977;
 const FALLBACK_LNG = 23.3219;
-const SHEET_HIDDEN_Y = 420;
-const SHEET_COLLAPSED_Y = 0;
-const SHEET_EXPANDED_Y = -210;
+const FALLBACK_ZOOM = 12.4;
+const USER_FOCUS_ZOOM = 15.8;
+const SCREEN_HEIGHT = Dimensions.get("window").height;
+const BOTTOM_MENU_HEIGHT = 60;
+const SHEET_BOTTOM_OFFSET = BOTTOM_MENU_HEIGHT;
+const SHEET_TOP_MARGIN_EXPANDED = 88;
+const SHEET_PEEK_HEIGHT = 320;
+const SHEET_HEIGHT = Math.max(320, SCREEN_HEIGHT - SHEET_TOP_MARGIN_EXPANDED - SHEET_BOTTOM_OFFSET);
+const SHEET_EXPANDED_Y = 0;
+const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
+const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
+const USE_MAPY_TILES = process.env.EXPO_PUBLIC_USE_MAPY_TILES === "true";
+const TRACK_STUDIO_CAMERA_PADDING = {
+  top: 92,
+  right: 28,
+  bottom: 330,
+  left: 28,
+};
 
 type AppViewMode = "runner" | "paramedic";
 type IncidentTab = "details" | "responders";
@@ -44,6 +69,12 @@ interface EventTrackResponse {
       elevationChangeMeters: number;
     }>;
   };
+}
+
+interface NormalizedTrackPoint {
+  lat: number;
+  lng: number;
+  ele?: number;
 }
 
 interface EventLocationResponse {
@@ -69,26 +100,551 @@ interface LayerVisibility {
   participantsHeatmap: boolean;
   paramedics: boolean;
   incidents: boolean;
+  trackGradient: boolean;
 }
 
-interface HeatSpot {
-  key: string;
-  lat: number;
-  lng: number;
-  count: number;
-}
+type TrackVisibility = Record<string, boolean>;
 
 interface TrackVisual {
   id: string;
   label: string;
   coordinates: Array<{ latitude: number; longitude: number }>;
+  lineOffset: number;
   color: string;
   gradientSegments: Array<{ coordinates: Array<{ latitude: number; longitude: number }>; color: string }>;
 }
 
-interface RegionLike {
-  longitudeDelta: number;
+interface TrackProfilePoint {
+  progress: number;
+  distanceMeters: number;
+  elevationMeters: number;
+  lat: number;
+  lng: number;
 }
+
+interface TrackProfileData {
+  points: TrackProfilePoint[];
+  totalDistanceMeters: number;
+  minElevationMeters: number;
+  maxElevationMeters: number;
+}
+
+type TrackElevationSection = NonNullable<EventTrackResponse["elevationProfile"]>["sections"][number];
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeTrackPoint(candidate: unknown): NormalizedTrackPoint | null {
+  if (Array.isArray(candidate)) {
+    const lng = toFiniteNumber(candidate[0]);
+    const lat = toFiniteNumber(candidate[1]);
+    if (lat === null || lng === null) {
+      return null;
+    }
+    const ele = toFiniteNumber(candidate[2]);
+    return {
+      lat,
+      lng,
+      ele: ele ?? undefined,
+    };
+  }
+
+  if (!candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  const point = candidate as Record<string, unknown>;
+  const lat = toFiniteNumber(point.lat ?? point.latitude);
+  const lng = toFiniteNumber(point.lng ?? point.lon ?? point.longitude ?? point.long);
+  if (lat === null || lng === null) {
+    return null;
+  }
+
+  const ele = toFiniteNumber(point.ele ?? point.elevation ?? point.altitude ?? point.alt);
+  return {
+    lat,
+    lng,
+    ele: ele ?? undefined,
+  };
+}
+
+function normalizeTrackPoints(source: unknown): NormalizedTrackPoint[] {
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  return source.map((item) => normalizeTrackPoint(item)).filter((item): item is NormalizedTrackPoint => Boolean(item));
+}
+
+function hasElevationSignal(profile: EventTrackResponse["elevationProfile"] | undefined): boolean {
+  if (!profile) {
+    return false;
+  }
+  if (profile.segmentSlopes.some((slope) => Math.abs(slope) > 0.000001)) {
+    return true;
+  }
+  return profile.sections.some((section) => Math.abs(section.elevationChangeMeters) > 0.000001);
+}
+
+function mergeTracksPreservingElevation(
+  incomingTracks: EventTrackResponse[],
+  existingTracks: EventTrackResponse[],
+): EventTrackResponse[] {
+  if (incomingTracks.length === 0) {
+    return incomingTracks;
+  }
+  const existingById = new Map(existingTracks.map((track) => [track.id, track]));
+  return incomingTracks.map((track) => {
+    if (hasElevationSignal(track.elevationProfile)) {
+      return track;
+    }
+    const existing = existingById.get(track.id);
+    if (!existing || !hasElevationSignal(existing.elevationProfile)) {
+      return track;
+    }
+    return {
+      ...track,
+      elevationProfile: existing.elevationProfile,
+    };
+  });
+}
+
+function pushSectionIfMeaningful(
+  sections: TrackElevationSection[],
+  section: {
+    type: "climb" | "descent";
+    startIndex: number;
+    endIndex: number;
+    distanceMeters: number;
+    elevationChangeMeters: number;
+  },
+): void {
+  const meaningfulDistance = section.distanceMeters >= 80;
+  const meaningfulElevation = Math.abs(section.elevationChangeMeters) >= 4;
+  if (!meaningfulDistance && !meaningfulElevation) {
+    return;
+  }
+  sections.push({
+    type: section.type,
+    startIndex: section.startIndex,
+    endIndex: section.endIndex,
+    distanceMeters: Math.round(section.distanceMeters),
+    elevationChangeMeters: Math.round(section.elevationChangeMeters * 10) / 10,
+  });
+}
+
+function buildElevationProfileFromPoints(
+  points: NormalizedTrackPoint[],
+): EventTrackResponse["elevationProfile"] | undefined {
+  if (points.length < 2) {
+    return undefined;
+  }
+
+  const elevations = points.map((point) => point.ele).filter((ele): ele is number => Number.isFinite(ele));
+  if (elevations.length < 2) {
+    return undefined;
+  }
+
+  let totalAscentMeters = 0;
+  let totalDescentMeters = 0;
+  const segmentSlopes: number[] = [];
+  const sections: TrackElevationSection[] = [];
+
+  let currentSection:
+    | {
+        type: "climb" | "descent";
+        startIndex: number;
+        endIndex: number;
+        distanceMeters: number;
+        elevationChangeMeters: number;
+      }
+    | null = null;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const distanceMeters = Math.max(
+      pointDistanceMeters({ lat: current.lat, lng: current.lng }, { lat: next.lat, lng: next.lng }),
+      1,
+    );
+    const eleCurrent = current.ele ?? next.ele;
+    const eleNext = next.ele ?? current.ele;
+    const hasElevation = typeof eleCurrent === "number" && typeof eleNext === "number";
+    const elevationDelta = hasElevation ? eleNext - eleCurrent : 0;
+    const gradePercent = (elevationDelta / distanceMeters) * 100;
+    const normalizedSlope = Math.max(-1, Math.min(1, gradePercent / 16));
+    segmentSlopes.push(normalizedSlope);
+
+    if (elevationDelta > 0) {
+      totalAscentMeters += elevationDelta;
+    } else if (elevationDelta < 0) {
+      totalDescentMeters += Math.abs(elevationDelta);
+    }
+
+    const nextType = elevationDelta >= 1 ? "climb" : elevationDelta <= -1 ? "descent" : null;
+    if (!nextType) {
+      if (currentSection) {
+        pushSectionIfMeaningful(sections, currentSection);
+        currentSection = null;
+      }
+      continue;
+    }
+
+    if (!currentSection) {
+      currentSection = {
+        type: nextType,
+        startIndex: index,
+        endIndex: index + 1,
+        distanceMeters,
+        elevationChangeMeters: elevationDelta,
+      };
+      continue;
+    }
+
+    if (currentSection.type === nextType) {
+      currentSection.endIndex = index + 1;
+      currentSection.distanceMeters += distanceMeters;
+      currentSection.elevationChangeMeters += elevationDelta;
+    } else {
+      pushSectionIfMeaningful(sections, currentSection);
+      currentSection = {
+        type: nextType,
+        startIndex: index,
+        endIndex: index + 1,
+        distanceMeters,
+        elevationChangeMeters: elevationDelta,
+      };
+    }
+  }
+
+  if (currentSection) {
+    pushSectionIfMeaningful(sections, currentSection);
+  }
+
+  return {
+    totalAscentMeters: Math.round(totalAscentMeters),
+    totalDescentMeters: Math.round(totalDescentMeters),
+    maxElevationMeters: Math.round(Math.max(...elevations)),
+    minElevationMeters: Math.round(Math.min(...elevations)),
+    segmentSlopes,
+    sections,
+  };
+}
+
+function normalizeElevationProfile(
+  candidate: unknown,
+  normalizedPoints: NormalizedTrackPoint[],
+): EventTrackResponse["elevationProfile"] | undefined {
+  const fallbackProfile = buildElevationProfileFromPoints(normalizedPoints);
+  if (!candidate || typeof candidate !== "object") {
+    return fallbackProfile;
+  }
+
+  const raw = candidate as Record<string, unknown>;
+  const segmentSlopes = Array.isArray(raw.segmentSlopes)
+    ? raw.segmentSlopes.map((value) => toFiniteNumber(value)).filter((value): value is number => value !== null)
+    : [];
+  const rawSections = Array.isArray(raw.sections) ? raw.sections : [];
+  const sections = rawSections
+    .map((section) => {
+      if (!section || typeof section !== "object") {
+        return null;
+      }
+      const item = section as Record<string, unknown>;
+      const type = item.type === "climb" || item.type === "descent" ? item.type : null;
+      const startIndex = toFiniteNumber(item.startIndex);
+      const endIndex = toFiniteNumber(item.endIndex);
+      const distanceMeters = toFiniteNumber(item.distanceMeters);
+      const elevationChangeMeters = toFiniteNumber(item.elevationChangeMeters);
+      if (
+        type === null ||
+        startIndex === null ||
+        endIndex === null ||
+        distanceMeters === null ||
+        elevationChangeMeters === null
+      ) {
+        return null;
+      }
+      return {
+        type,
+        startIndex: Math.max(0, Math.round(startIndex)),
+        endIndex: Math.max(0, Math.round(endIndex)),
+        distanceMeters,
+        elevationChangeMeters,
+      } satisfies TrackElevationSection;
+    })
+    .filter((section): section is TrackElevationSection => Boolean(section));
+
+  const minElevationMetersRaw = raw.minElevationMeters;
+  const maxElevationMetersRaw = raw.maxElevationMeters;
+  const minElevationMeters =
+    minElevationMetersRaw === null ? null : (toFiniteNumber(minElevationMetersRaw) ?? fallbackProfile?.minElevationMeters ?? null);
+  const maxElevationMeters =
+    maxElevationMetersRaw === null ? null : (toFiniteNumber(maxElevationMetersRaw) ?? fallbackProfile?.maxElevationMeters ?? null);
+
+  const totalAscentMeters = toFiniteNumber(raw.totalAscentMeters) ?? fallbackProfile?.totalAscentMeters ?? 0;
+  const totalDescentMeters = toFiniteNumber(raw.totalDescentMeters) ?? fallbackProfile?.totalDescentMeters ?? 0;
+  const normalized: EventTrackResponse["elevationProfile"] = {
+    totalAscentMeters,
+    totalDescentMeters,
+    maxElevationMeters,
+    minElevationMeters,
+    segmentSlopes,
+    sections,
+  };
+
+  if (!hasElevationSignal(normalized) && fallbackProfile && hasElevationSignal(fallbackProfile)) {
+    return fallbackProfile;
+  }
+  return normalized;
+}
+
+function normalizeTrack(track: unknown, index: number): EventTrackResponse | null {
+  if (!track || typeof track !== "object") {
+    return null;
+  }
+
+  const raw = track as Record<string, unknown>;
+  const idCandidate = raw.id;
+  const labelCandidate = raw.label ?? raw.name;
+  const id = typeof idCandidate === "string" && idCandidate.length > 0 ? idCandidate : `track-${index + 1}`;
+  const label = typeof labelCandidate === "string" && labelCandidate.length > 0 ? labelCandidate : id;
+
+  const pointsFromPoints = normalizeTrackPoints(raw.points);
+  const geometry = raw.geometry && typeof raw.geometry === "object" ? (raw.geometry as Record<string, unknown>) : null;
+  const pointsFromGeometry = normalizeTrackPoints(geometry?.coordinates);
+  const pointsFromCoordinates = normalizeTrackPoints(raw.coordinates);
+  const normalizedPoints = pointsFromPoints.length > 0 ? pointsFromPoints : pointsFromGeometry.length > 0 ? pointsFromGeometry : pointsFromCoordinates;
+  if (normalizedPoints.length < 2) {
+    return null;
+  }
+
+  return {
+    id,
+    label,
+    points: normalizedPoints.map((point) => ({ lat: point.lat, lng: point.lng })),
+    elevationProfile: normalizeElevationProfile(raw.elevationProfile, normalizedPoints),
+  };
+}
+
+const ELEVATION_ENRICHMENT_SAMPLE_POINTS = 140;
+const ELEVATION_API_BATCH_SIZE = 50;
+const ELEVATION_API_RETRY_ATTEMPTS = 3;
+
+function buildSampleIndices(pointCount: number, targetSampleCount: number): number[] {
+  if (pointCount <= 0) {
+    return [];
+  }
+  const sampleCount = Math.max(2, Math.min(pointCount, targetSampleCount));
+  const indices = new Set<number>();
+  for (let index = 0; index < sampleCount; index += 1) {
+    const ratio = sampleCount <= 1 ? 0 : index / (sampleCount - 1);
+    indices.add(Math.round(ratio * (pointCount - 1)));
+  }
+  return Array.from(indices).sort((a, b) => a - b);
+}
+
+function interpolatePointElevations(
+  sampleIndices: number[],
+  sampleElevations: number[],
+  pointCount: number,
+): number[] {
+  if (pointCount <= 0) {
+    return [];
+  }
+  if (sampleIndices.length === 0 || sampleElevations.length === 0) {
+    return Array.from({ length: pointCount }, () => 0);
+  }
+  if (sampleIndices.length === 1 || sampleElevations.length === 1) {
+    return Array.from({ length: pointCount }, () => sampleElevations[0] ?? 0);
+  }
+
+  const elevations = Array.from({ length: pointCount }, () => sampleElevations[0] ?? 0);
+  let segmentCursor = 0;
+  for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+    while (
+      segmentCursor < sampleIndices.length - 2 &&
+      pointIndex > sampleIndices[segmentCursor + 1]
+    ) {
+      segmentCursor += 1;
+    }
+
+    const startIndex = sampleIndices[segmentCursor] ?? 0;
+    const endIndex = sampleIndices[Math.min(sampleIndices.length - 1, segmentCursor + 1)] ?? startIndex;
+    const startElevation = sampleElevations[segmentCursor] ?? sampleElevations[0] ?? 0;
+    const endElevation =
+      sampleElevations[Math.min(sampleElevations.length - 1, segmentCursor + 1)] ??
+      sampleElevations[sampleElevations.length - 1] ??
+      startElevation;
+    if (endIndex <= startIndex) {
+      elevations[pointIndex] = startElevation;
+      continue;
+    }
+    const ratio = Math.max(0, Math.min(1, (pointIndex - startIndex) / (endIndex - startIndex)));
+    elevations[pointIndex] = startElevation + (endElevation - startElevation) * ratio;
+  }
+
+  return elevations;
+}
+
+async function fetchElevationValues(points: Array<{ lat: number; lng: number }>): Promise<number[] | null> {
+  if (points.length === 0) {
+    return [];
+  }
+
+  const values: number[] = [];
+  for (let offset = 0; offset < points.length; offset += ELEVATION_API_BATCH_SIZE) {
+    const batch = points.slice(offset, offset + ELEVATION_API_BATCH_SIZE);
+    const latParam = batch.map((point) => point.lat.toFixed(6)).join(",");
+    const lngParam = batch.map((point) => point.lng.toFixed(6)).join(",");
+    let batchValues: number[] | null = null;
+    for (let attempt = 0; attempt < ELEVATION_API_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await fetch(
+          `https://api.open-meteo.com/v1/elevation?latitude=${latParam}&longitude=${lngParam}`,
+        );
+        if (!response.ok) {
+          if (attempt < ELEVATION_API_RETRY_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+            continue;
+          }
+          return null;
+        }
+        const body = (await response.json()) as { elevation?: unknown };
+        if (!Array.isArray(body.elevation)) {
+          if (attempt < ELEVATION_API_RETRY_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+            continue;
+          }
+          return null;
+        }
+        const normalizedBatch = body.elevation
+          .map((value) => toFiniteNumber(value))
+          .filter((value): value is number => value !== null);
+        if (normalizedBatch.length !== batch.length) {
+          if (attempt < ELEVATION_API_RETRY_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+            continue;
+          }
+          return null;
+        }
+        batchValues = normalizedBatch;
+        break;
+      } catch {
+        if (attempt < ELEVATION_API_RETRY_ATTEMPTS - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+          continue;
+        }
+        return null;
+      }
+    }
+    if (!batchValues) {
+      return null;
+    }
+    values.push(...batchValues);
+  }
+
+  return values.length === points.length ? values : null;
+}
+
+async function enrichTrackElevationProfile(track: EventTrackResponse): Promise<EventTrackResponse> {
+  if (track.points.length < 2) {
+    return track;
+  }
+
+  if (
+    hasElevationSignal(track.elevationProfile) &&
+    track.elevationProfile?.minElevationMeters !== null &&
+    track.elevationProfile?.minElevationMeters !== undefined &&
+    track.elevationProfile?.maxElevationMeters !== null &&
+    track.elevationProfile?.maxElevationMeters !== undefined
+  ) {
+    return track;
+  }
+
+  const sampleTargets = [
+    ELEVATION_ENRICHMENT_SAMPLE_POINTS,
+    Math.min(track.points.length, 96),
+    Math.min(track.points.length, 56),
+  ].filter((value, index, arr) => value >= 2 && arr.indexOf(value) === index);
+
+  for (const sampleTarget of sampleTargets) {
+    const sampleIndices = buildSampleIndices(track.points.length, sampleTarget);
+    const sampledPoints = sampleIndices.map((index) => track.points[index]).filter(Boolean);
+    const sampledElevations = await fetchElevationValues(sampledPoints);
+    if (!sampledElevations || sampledElevations.length !== sampleIndices.length) {
+      continue;
+    }
+
+    const pointElevations = interpolatePointElevations(sampleIndices, sampledElevations, track.points.length);
+    const pointsWithElevation = track.points.map((point, index) => ({
+      lat: point.lat,
+      lng: point.lng,
+      ele: pointElevations[index],
+    }));
+    const computedProfile = buildElevationProfileFromPoints(pointsWithElevation);
+    if (!computedProfile || !hasElevationSignal(computedProfile)) {
+      continue;
+    }
+
+    return {
+      ...track,
+      elevationProfile: computedProfile,
+    };
+  }
+
+  return track;
+}
+
+async function enrichTracksElevationProfiles(tracks: EventTrackResponse[]): Promise<EventTrackResponse[]> {
+  if (tracks.length === 0) {
+    return tracks;
+  }
+  const enriched: EventTrackResponse[] = [];
+  for (const track of tracks) {
+    enriched.push(await enrichTrackElevationProfile(track));
+  }
+  return enriched;
+}
+
+interface RunnerHeatFeature {
+  type: "Feature";
+  properties: {
+    count: number;
+  };
+  geometry: {
+    type: "Point";
+    coordinates: [number, number];
+  };
+}
+
+interface LineFeature {
+  type: "Feature";
+  properties: Record<string, never>;
+  geometry: {
+    type: "LineString";
+    coordinates: Array<[number, number]>;
+  };
+}
+
+interface FeatureCollection<TFeature> {
+  type: "FeatureCollection";
+  features: TFeature[];
+}
+
+const MARKER_RENDER_PRIORITY: Record<"runner" | "incident" | "paramedic" | "infrastructure", number> = {
+  runner: 0,
+  infrastructure: 0,
+  incident: 1,
+  paramedic: 2,
+};
 
 function markerInitials(label: string): string {
   const words = label
@@ -105,48 +661,6 @@ function markerInitials(label: string): string {
   return "PM";
 }
 
-function offsetTrackCoordinates(
-  points: Array<{ lat: number; lng: number }>,
-  lineOffsetMeters: number,
-): Array<{ latitude: number; longitude: number }> {
-  if (points.length === 0 || lineOffsetMeters === 0) {
-    return points.map((point) => ({ latitude: point.lat, longitude: point.lng }));
-  }
-
-  const toRadians = (value: number) => (value * Math.PI) / 180;
-  const metersPerDegreeLat = 111_132;
-  let fallbackEastNormal = 0;
-  let fallbackNorthNormal = 1;
-
-  return points.map((point, index) => {
-    const prev = points[Math.max(0, index - 1)];
-    const next = points[Math.min(points.length - 1, index + 1)];
-    const avgLatRad = toRadians((prev.lat + next.lat) / 2);
-    const metersPerDegreeLng = Math.max(1, 111_320 * Math.cos(avgLatRad));
-
-    const tangentEastMeters = (next.lng - prev.lng) * metersPerDegreeLng;
-    const tangentNorthMeters = (next.lat - prev.lat) * metersPerDegreeLat;
-    const tangentLength = Math.hypot(tangentEastMeters, tangentNorthMeters);
-
-    let rightEastNormal = fallbackEastNormal;
-    let rightNorthNormal = fallbackNorthNormal;
-    if (tangentLength > 0.001) {
-      rightEastNormal = tangentNorthMeters / tangentLength;
-      rightNorthNormal = -tangentEastMeters / tangentLength;
-      fallbackEastNormal = rightEastNormal;
-      fallbackNorthNormal = rightNorthNormal;
-    }
-
-    const eastOffsetMeters = rightEastNormal * lineOffsetMeters;
-    const northOffsetMeters = rightNorthNormal * lineOffsetMeters;
-
-    return {
-      latitude: point.lat + northOffsetMeters / metersPerDegreeLat,
-      longitude: point.lng + eastOffsetMeters / metersPerDegreeLng,
-    };
-  });
-}
-
 function distanceKm(latA: number, lngA: number, latB: number, lngB: number): number {
   const toRadians = (value: number) => (value * Math.PI) / 180;
   const earthRadiusKm = 6371;
@@ -157,6 +671,13 @@ function distanceKm(latA: number, lngA: number, latB: number, lngB: number): num
     Math.cos(toRadians(latA)) * Math.cos(toRadians(latB)) * Math.sin(dLng / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadiusKm * c;
+}
+
+function pointDistanceMeters(
+  pointA: { lat: number; lng: number },
+  pointB: { lat: number; lng: number },
+): number {
+  return distanceKm(pointA.lat, pointA.lng, pointB.lat, pointB.lng) * 1000;
 }
 
 function trackColor(trackId: string): string {
@@ -170,6 +691,35 @@ function trackColor(trackId: string): string {
     return "#ff3d61";
   }
   return "#14b8a6";
+}
+
+function buildSegmentSlopesFromSections(
+  sections: TrackElevationSection[],
+  segmentCount: number,
+): number[] {
+  if (segmentCount <= 0) {
+    return [];
+  }
+
+  const slopes = Array.from({ length: segmentCount }, () => 0);
+  for (const section of sections) {
+    const startSegmentIndex = Math.max(0, Math.min(segmentCount - 1, section.startIndex));
+    const endSegmentExclusive = Math.max(
+      startSegmentIndex + 1,
+      Math.min(segmentCount, section.endIndex),
+    );
+    const segmentLength = endSegmentExclusive - startSegmentIndex;
+    if (segmentLength <= 0 || section.distanceMeters <= 0) {
+      continue;
+    }
+
+    const slopePerMeter = section.elevationChangeMeters / section.distanceMeters;
+    for (let index = startSegmentIndex; index < endSegmentExclusive; index += 1) {
+      slopes[index] = slopePerMeter;
+    }
+  }
+
+  return slopes;
 }
 
 function mixHexColor(baseHex: string, mixHex: string, ratio: number): string {
@@ -193,74 +743,313 @@ function mixHexColor(baseHex: string, mixHex: string, ratio: number): string {
 
 function slopeColor(baseColor: string, normalizedSlope: number): string {
   if (normalizedSlope > 0) {
-    return mixHexColor(baseColor, "#0b1628", Math.min(0.58, normalizedSlope * 0.58));
+    return mixHexColor(baseColor, "#141d2a", Math.min(0.45, normalizedSlope * 0.45));
   }
   if (normalizedSlope < 0) {
-    return mixHexColor(baseColor, "#f1f5f9", Math.min(0.58, Math.abs(normalizedSlope) * 0.58));
+    return mixHexColor(baseColor, "#f1f4f9", Math.min(0.49, Math.abs(normalizedSlope) * 0.49));
   }
   return baseColor;
 }
 
-function buildGradientSegments(
+function normalizedSegmentSlopes(rawSlopes: number[], segmentCount: number): number[] {
+  if (segmentCount <= 0) {
+    return [];
+  }
+  if (rawSlopes.length === 0) {
+    return Array.from({ length: segmentCount }, () => 0);
+  }
+  if (rawSlopes.length === segmentCount) {
+    return rawSlopes;
+  }
+  if (rawSlopes.length === segmentCount + 1) {
+    return rawSlopes.slice(0, segmentCount);
+  }
+
+  if (segmentCount === 1) {
+    return [rawSlopes[0] ?? 0];
+  }
+
+  return Array.from({ length: segmentCount }, (_, index) => {
+    const sourceIndex = Math.round((index / (segmentCount - 1)) * (rawSlopes.length - 1));
+    return rawSlopes[sourceIndex] ?? 0;
+  });
+}
+
+function normalizedSlopeToGradeRatio(normalizedSlope: number): number {
+  return normalizedSlope * 0.16;
+}
+
+function gradeRatioToNormalizedSlope(gradeRatio: number): number {
+  return Math.max(-1, Math.min(1, gradeRatio / 0.16));
+}
+
+function getTrackSegmentNormalizedSlopes(track: EventTrackResponse, segmentCount: number): number[] {
+  const rawNormalized = normalizedSegmentSlopes(track.elevationProfile?.segmentSlopes ?? [], segmentCount);
+  const rawHasSignal = rawNormalized.some((value) => Math.abs(value) > 0.000001);
+  if (rawHasSignal) {
+    return rawNormalized;
+  }
+
+  const sectionGradeRatios = buildSegmentSlopesFromSections(track.elevationProfile?.sections ?? [], segmentCount);
+  const sectionHasSignal = sectionGradeRatios.some((value) => Math.abs(value) > 0.000001);
+  if (sectionHasSignal) {
+    return sectionGradeRatios.map(gradeRatioToNormalizedSlope);
+  }
+
+  return rawNormalized;
+}
+
+function getTrackSegmentGradeRatios(track: EventTrackResponse, segmentCount: number): number[] {
+  const rawNormalized = normalizedSegmentSlopes(track.elevationProfile?.segmentSlopes ?? [], segmentCount);
+  const rawHasSignal = rawNormalized.some((value) => Math.abs(value) > 0.000001);
+  if (rawHasSignal) {
+    return rawNormalized.map(normalizedSlopeToGradeRatio);
+  }
+
+  return buildSegmentSlopesFromSections(track.elevationProfile?.sections ?? [], segmentCount);
+}
+
+function buildTrackGradientSegments(
+  track: EventTrackResponse,
   coordinates: Array<{ latitude: number; longitude: number }>,
-  slopes: number[],
   baseColor: string,
 ): Array<{ coordinates: Array<{ latitude: number; longitude: number }>; color: string }> {
   if (coordinates.length < 2) {
-    return [];
+    return [{ coordinates, color: baseColor }];
   }
 
   const segmentCount = coordinates.length - 1;
-  const effectiveSlopes =
-    slopes.length === segmentCount
-      ? slopes
-      : Array.from({ length: segmentCount }, () => 0);
-
+  const rawSlopes = getTrackSegmentNormalizedSlopes(track, segmentCount);
+  const gradientBucketCount = Math.max(
+    TRACK_GRADIENT_MIN_BUCKETS,
+    Math.min(TRACK_GRADIENT_MAX_BUCKETS, Math.round(segmentCount / 20)),
+  );
+  const slopes = smoothSeriesToBuckets(rawSlopes, gradientBucketCount);
+  const maxAbsSlope = Math.max(0.0001, ...slopes.map((value) => Math.abs(value)));
   const segments: Array<{ coordinates: Array<{ latitude: number; longitude: number }>; color: string }> = [];
-  let chunkStart = 0;
-  let bucket = Math.round((effectiveSlopes[0] ?? 0) * 7);
-  let chunkColor = slopeColor(baseColor, (effectiveSlopes[0] ?? 0));
+  const slopeBucket = (value: number) => Math.round((Math.max(-1, Math.min(1, value)) * 10));
+
+  let startIndex = 0;
+  let currentBucket = slopeBucket((slopes[0] ?? 0) / maxAbsSlope);
 
   for (let index = 1; index < segmentCount; index += 1) {
-    const slope = effectiveSlopes[index] ?? 0;
-    const nextBucket = Math.round(slope * 7);
-    if (nextBucket === bucket) {
+    const normalized = (slopes[index] ?? 0) / maxAbsSlope;
+    const nextBucket = slopeBucket(normalized);
+    if (nextBucket === currentBucket) {
       continue;
     }
 
     segments.push({
-      coordinates: coordinates.slice(chunkStart, index + 1),
-      color: chunkColor,
+      coordinates: coordinates.slice(startIndex, index + 1),
+      color: slopeColor(baseColor, currentBucket / 10),
     });
 
-    chunkStart = index;
-    bucket = nextBucket;
-    chunkColor = slopeColor(baseColor, slope);
+    startIndex = index;
+    currentBucket = nextBucket;
   }
 
   segments.push({
-    coordinates: coordinates.slice(chunkStart, coordinates.length),
-    color: chunkColor,
+    coordinates: coordinates.slice(startIndex, coordinates.length),
+    color: slopeColor(baseColor, currentBucket / 10),
   });
 
   return segments;
 }
 
-function trackOffsetStepMetersForZoom(zoom: number): number {
-  if (zoom <= 10) {
-    return 80;
+function buildTrackProfile(track: EventTrackResponse): TrackProfileData | null {
+  if (track.points.length < 2) {
+    return null;
   }
-  const clamped = Math.max(11, Math.min(15, zoom));
-  const t = (clamped - 11) / 4;
-  return Math.round(30 - t * 20);
+
+  const segmentCount = track.points.length - 1;
+  const rawSegmentGradeRatios = getTrackSegmentGradeRatios(track, segmentCount);
+  const profileBucketCount = Math.max(
+    TRACK_PROFILE_MIN_BUCKETS,
+    Math.min(TRACK_PROFILE_MAX_BUCKETS, Math.round(segmentCount / 8)),
+  );
+  const segmentGradeRatios = smoothSeriesToBuckets(rawSegmentGradeRatios, profileBucketCount);
+  const distances = Array.from({ length: segmentCount }, (_, index) =>
+    pointDistanceMeters(track.points[index], track.points[index + 1]),
+  );
+
+  const cumulativeDistances: number[] = [0];
+  const rawElevations: number[] = [0];
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    cumulativeDistances.push(cumulativeDistances[index] + distances[index]);
+    rawElevations.push(rawElevations[index] + (segmentGradeRatios[index] ?? 0) * distances[index]);
+  }
+
+  const totalDistanceMeters = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
+  const rawMinElevation = Math.min(...rawElevations);
+  const rawMaxElevation = Math.max(...rawElevations);
+  const rawRange = rawMaxElevation - rawMinElevation;
+  const minElevationHint = track.elevationProfile?.minElevationMeters;
+  const maxElevationHint = track.elevationProfile?.maxElevationMeters;
+  let normalizedElevations = rawElevations;
+
+  if (
+    minElevationHint !== null &&
+    minElevationHint !== undefined &&
+    maxElevationHint !== null &&
+    maxElevationHint !== undefined &&
+    rawRange > 0.0001 &&
+    maxElevationHint > minElevationHint
+  ) {
+    const targetRange = maxElevationHint - minElevationHint;
+    normalizedElevations = rawElevations.map(
+      (value) => minElevationHint + ((value - rawMinElevation) / rawRange) * targetRange,
+    );
+  } else if (minElevationHint !== null && minElevationHint !== undefined) {
+    normalizedElevations = rawElevations.map((value) => value - rawMinElevation + minElevationHint);
+  }
+
+  const points = track.points.map((point, index) => ({
+    progress: totalDistanceMeters > 0 ? cumulativeDistances[index] / totalDistanceMeters : index / segmentCount,
+    distanceMeters: cumulativeDistances[index],
+    elevationMeters: normalizedElevations[index] ?? normalizedElevations[normalizedElevations.length - 1] ?? 0,
+    lat: point.lat,
+    lng: point.lng,
+  }));
+
+  return {
+    points,
+    totalDistanceMeters,
+    minElevationMeters: Math.min(...normalizedElevations),
+    maxElevationMeters: Math.max(...normalizedElevations),
+  };
 }
 
-function approximateZoomFromRegion(region: RegionLike): number {
-  const delta = Math.max(0.000001, region.longitudeDelta);
-  return Math.log2(360 / delta);
+function sampleTrackProfile(profile: TrackProfileData, progress: number): TrackProfilePoint {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const points = profile.points;
+  if (points.length === 1) {
+    return points[0];
+  }
+
+  for (let index = 1; index < points.length; index += 1) {
+    const prev = points[index - 1];
+    const next = points[index];
+    if (clamped > next.progress) {
+      continue;
+    }
+
+    const span = Math.max(0.000001, next.progress - prev.progress);
+    const ratio = (clamped - prev.progress) / span;
+    return {
+      progress: clamped,
+      distanceMeters: prev.distanceMeters + (next.distanceMeters - prev.distanceMeters) * ratio,
+      elevationMeters: prev.elevationMeters + (next.elevationMeters - prev.elevationMeters) * ratio,
+      lat: prev.lat + (next.lat - prev.lat) * ratio,
+      lng: prev.lng + (next.lng - prev.lng) * ratio,
+    };
+  }
+
+  return {
+    ...points[points.length - 1],
+    progress: clamped,
+  };
 }
 
-function buildTrackVisuals(tracks: EventTrackResponse[], trackOffsetStepMeters: number): TrackVisual[] {
+function elevationToChartTopPercent(
+  elevationMeters: number,
+  minElevationMeters: number,
+  maxElevationMeters: number,
+): number {
+  const range = Math.max(1, maxElevationMeters - minElevationMeters);
+  const normalized = Math.max(0, Math.min(1, (elevationMeters - minElevationMeters) / range));
+  return 78 - normalized * 56;
+}
+
+function smoothSeriesToBuckets(values: number[], bucketCount: number): number[] {
+  if (values.length <= 1) {
+    return [...values];
+  }
+
+  const clampedBucketCount = Math.max(1, Math.min(values.length, Math.round(bucketCount)));
+  if (clampedBucketCount >= values.length) {
+    return [...values];
+  }
+
+  const bucketAverages = Array.from({ length: clampedBucketCount }, (_, bucketIndex) => {
+    const start = Math.floor((bucketIndex * values.length) / clampedBucketCount);
+    const end = Math.max(start + 1, Math.floor(((bucketIndex + 1) * values.length) / clampedBucketCount));
+    let sum = 0;
+    let count = 0;
+    for (let index = start; index < Math.min(values.length, end); index += 1) {
+      sum += values[index] ?? 0;
+      count += 1;
+    }
+    return count > 0 ? sum / count : 0;
+  });
+
+  return Array.from({ length: values.length }, (_, index) => {
+    const bucketIndex = Math.min(
+      bucketAverages.length - 1,
+      Math.floor((index * clampedBucketCount) / values.length),
+    );
+    return bucketAverages[bucketIndex] ?? 0;
+  });
+}
+
+function smoothSeriesMovingAverage(values: number[], radius: number): number[] {
+  if (values.length <= 2 || radius <= 0) {
+    return [...values];
+  }
+
+  return values.map((_, index) => {
+    const start = Math.max(0, index - radius);
+    const end = Math.min(values.length - 1, index + radius);
+    let sum = 0;
+    let count = 0;
+    for (let cursor = start; cursor <= end; cursor += 1) {
+      sum += values[cursor] ?? 0;
+      count += 1;
+    }
+    return count > 0 ? sum / count : 0;
+  });
+}
+
+const TRACK_OFFSET_STEP_PIXELS = 8;
+const HEATMAP_WEIGHT_MIN = 0.01;
+const HEATMAP_WEIGHT_MAX = 1;
+const HEATMAP_WEIGHT_STEP = 0.01;
+const HEATMAP_SLIDER_WIDTH = 170;
+const TRACK_GRADIENT_MIN_BUCKETS = 14;
+const TRACK_GRADIENT_MAX_BUCKETS = 48;
+const TRACK_ELEVATION_CHART_MIN_POINTS = 120;
+const TRACK_ELEVATION_CHART_MAX_POINTS = 260;
+const TRACK_PROFILE_MIN_BUCKETS = 28;
+const TRACK_PROFILE_MAX_BUCKETS = 140;
+const FUTURE_MENU_PAGES = [
+  {
+    id: "event-dashboard",
+    title: "Event Dashboard",
+    subtitle: "Race timeline, checkpoints, and status overview",
+  },
+  {
+    id: "medical-ops",
+    title: "Medical Operations",
+    subtitle: "Incidents, team load, and dispatch queue",
+  },
+  {
+    id: "participants",
+    title: "Participants",
+    subtitle: "Search, groups, and live participant states",
+  },
+  {
+    id: "communications",
+    title: "Communications",
+    subtitle: "Broadcasts, unit channels, and alerts",
+  },
+  {
+    id: "resources",
+    title: "Resources",
+    subtitle: "Equipment, stations, and route assets",
+  },
+];
+
+function buildTrackVisuals(tracks: EventTrackResponse[]): TrackVisual[] {
   if (tracks.length === 0) {
     return [];
   }
@@ -268,30 +1057,53 @@ function buildTrackVisuals(tracks: EventTrackResponse[], trackOffsetStepMeters: 
   return tracks.map((track, index) => {
     const centerIndex = (tracks.length - 1) / 2;
     const offsetFactor = index - centerIndex;
-    const lineOffsetMeters = offsetFactor * trackOffsetStepMeters;
-    const coordinates = offsetTrackCoordinates(track.points, lineOffsetMeters);
+    const lineOffset = offsetFactor * TRACK_OFFSET_STEP_PIXELS;
+    const coordinates = track.points.map((point) => ({ latitude: point.lat, longitude: point.lng }));
     const baseColor = trackColor(track.id);
 
     return {
       id: track.id,
       label: track.label,
       coordinates,
+      lineOffset,
       color: baseColor,
-      gradientSegments: buildGradientSegments(
+      gradientSegments: buildTrackGradientSegments(
+        track,
         coordinates,
-        track.elevationProfile?.segmentSlopes ?? [],
         baseColor,
       ),
     };
   });
 }
 
-function buildHeatSpots(runners: Array<{ id: string; lat: number; lng: number }>): HeatSpot[] {
+function lineFeatureFromCoordinates(
+  coordinates: Array<{ latitude: number; longitude: number }>,
+): FeatureCollection<LineFeature> {
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "LineString",
+          coordinates: coordinates.map((point) => [point.longitude, point.latitude]),
+        },
+      },
+    ],
+  };
+}
+
+const HEATMAP_GRID_SCALE = 280;
+
+function buildRunnerHeatFeatureCollection(
+  runners: Array<{ lat: number; lng: number }>,
+): FeatureCollection<RunnerHeatFeature> {
   const cells = new Map<string, { latSum: number; lngSum: number; count: number }>();
 
   for (const runner of runners) {
-    const gridLat = Math.round(runner.lat * 420);
-    const gridLng = Math.round(runner.lng * 420);
+    const gridLat = Math.round(runner.lat * HEATMAP_GRID_SCALE);
+    const gridLng = Math.round(runner.lng * HEATMAP_GRID_SCALE);
     const key = `${gridLat}:${gridLng}`;
     const existing = cells.get(key);
 
@@ -305,24 +1117,38 @@ function buildHeatSpots(runners: Array<{ id: string; lat: number; lng: number }>
     existing.count += 1;
   }
 
-  return Array.from(cells.entries())
-    .map(([key, cell]) => ({
-      key,
-      lat: cell.latSum / cell.count,
-      lng: cell.lngSum / cell.count,
-      count: cell.count,
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 90);
+  return {
+    type: "FeatureCollection",
+    features: Array.from(cells.values()).map((cell) => ({
+      type: "Feature",
+      properties: {
+        count: cell.count,
+      },
+      geometry: {
+        type: "Point",
+        coordinates: [cell.lngSum / cell.count, cell.latSum / cell.count],
+      },
+    })),
+  };
 }
 
-function heatRampColor(normalized: number): string {
-  const value = Math.max(0, Math.min(1, normalized));
-  if (value < 0.2) return "rgba(33,102,172,0.22)";
-  if (value < 0.4) return "rgba(103,169,207,0.26)";
-  if (value < 0.6) return "rgba(166,217,106,0.3)";
-  if (value < 0.8) return "rgba(253,174,97,0.35)";
-  return "rgba(215,48,39,0.4)";
+function padCollapsedBounds(
+  minLng: number,
+  minLat: number,
+  maxLng: number,
+  maxLat: number,
+): { minLng: number; minLat: number; maxLng: number; maxLat: number } {
+  const lngSpan = Math.max(maxLng - minLng, 0.0009);
+  const latSpan = Math.max(maxLat - minLat, 0.0009);
+  const lngPad = lngSpan * 0.08;
+  const latPad = latSpan * 0.08;
+
+  return {
+    minLng: minLng - lngPad,
+    minLat: minLat - latPad,
+    maxLng: maxLng + lngPad,
+    maxLat: maxLat + latPad,
+  };
 }
 
 export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
@@ -333,26 +1159,86 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const setMarkers = useMapStore((state) => state.setMarkers);
   const setTracks = useMapStore((state) => state.setTracks);
 
-  const mapRef = useRef<MapView | null>(null);
-  const incidentPulse = useRef(new Animated.Value(0)).current;
+  const mapRef = useRef<MapRef | null>(null);
+  const cameraRef = useRef<CameraRef | null>(null);
+  const didInitialEventFitRef = useRef(false);
   const sheetBaseTranslate = useRef(new Animated.Value(SHEET_HIDDEN_Y)).current;
   const sheetDragTranslate = useRef(new Animated.Value(0)).current;
   const sheetBaseValueRef = useRef(SHEET_HIDDEN_Y);
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [incidentTab, setIncidentTab] = useState<IncidentTab>("details");
-  const [activeTab, setActiveTab] = useState<"map" | "reports" | "units" | "profile">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "reports" | "profile">("map");
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [mapZoom, setMapZoom] = useState(13);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [trackPickerOpen, setTrackPickerOpen] = useState(false);
+  const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
+  const [trackProfileProgress, setTrackProfileProgress] = useState(0);
+  const [trackProfileWidth, setTrackProfileWidth] = useState(0);
+  const trackProfileChartRef = useRef<View | null>(null);
+  const trackProfileChartPageXRef = useRef(0);
+  const lastTrackSelectionLayerResetRef = useRef<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({
     participants: false,
-    participantsHeatmap: true,
+    participantsHeatmap: false,
     paramedics: true,
     incidents: true,
+    trackGradient: true,
   });
+  const [trackVisibility, setTrackVisibility] = useState<TrackVisibility>({});
+  const [heatWeightScale, setHeatWeightScale] = useState(0.12);
 
-  const mapyTilesTemplateUrl = getMapyTilesTemplateUrl();
+  const mapyTilesTemplateUrl = USE_MAPY_TILES ? getMapyTilesTemplateUrl() : null;
+  const baseTilesTemplateUrl = mapyTilesTemplateUrl ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  const baseRasterTileSize = mapyTilesTemplateUrl ? 512 : 256;
+  const heatWeightNormalized =
+    (heatWeightScale - HEATMAP_WEIGHT_MIN) / (HEATMAP_WEIGHT_MAX - HEATMAP_WEIGHT_MIN);
+  const heatSliderPosition = Math.max(0, Math.min(1, heatWeightNormalized)) * HEATMAP_SLIDER_WIDTH;
+  const heatSliderKnobLeft = Math.max(0, Math.min(HEATMAP_SLIDER_WIDTH - 14, heatSliderPosition - 7));
+  const densityScale = Math.max(0.01, heatWeightScale * 10);
+
+  const setHeatWeightFromTouch = (locationX: number) => {
+    const clampedX = Math.max(0, Math.min(HEATMAP_SLIDER_WIDTH, locationX));
+    const ratio = clampedX / HEATMAP_SLIDER_WIDTH;
+    const value = HEATMAP_WEIGHT_MIN + ratio * (HEATMAP_WEIGHT_MAX - HEATMAP_WEIGHT_MIN);
+    setHeatWeightScale(Number(value.toFixed(2)));
+  };
+
+  const heatWeightPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (event) => {
+        setHeatWeightFromTouch(event.nativeEvent.locationX);
+      },
+      onPanResponderMove: (event) => {
+        setHeatWeightFromTouch(event.nativeEvent.locationX);
+      },
+    }),
+  ).current;
+
+  const updateTrackProfileProgressFromX = (locationX: number) => {
+    if (trackProfileWidth <= 0) {
+      return;
+    }
+    const ratio = Math.max(0, Math.min(1, locationX / trackProfileWidth));
+    setTrackProfileProgress(ratio);
+  };
+
+  const measureTrackProfileChart = () => {
+    trackProfileChartRef.current?.measureInWindow((pageX, _pageY, width) => {
+      trackProfileChartPageXRef.current = pageX;
+      setTrackProfileWidth(width);
+    });
+  };
+
+  const updateTrackProfileProgressFromPageX = (pageX: number, locationX?: number) => {
+    if (typeof locationX === "number" && Number.isFinite(locationX)) {
+      trackProfileChartPageXRef.current = pageX - locationX;
+    }
+    updateTrackProfileProgressFromX(pageX - trackProfileChartPageXRef.current);
+  };
 
   const animateSheetTo = (toValue: number) => {
     sheetBaseValueRef.current = toValue;
@@ -375,7 +1261,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       },
       onPanResponderRelease: (_event, gesture) => {
         const projected = sheetBaseValueRef.current + gesture.dy + gesture.vy * 34;
-        const target = projected < -105 ? SHEET_EXPANDED_Y : SHEET_COLLAPSED_Y;
+        const midpoint = (SHEET_EXPANDED_Y + SHEET_COLLAPSED_Y) / 2;
+        const target = projected <= midpoint ? SHEET_EXPANDED_Y : SHEET_COLLAPSED_Y;
         sheetDragTranslate.setValue(0);
         animateSheetTo(target);
       },
@@ -393,38 +1280,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   });
 
   useEffect(() => {
-    const timer = setInterval(() => setTick((value) => value + 1), 650);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(incidentPulse, {
-          toValue: 1,
-          duration: 960,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(incidentPulse, {
-          toValue: 0,
-          duration: 0,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [incidentPulse]);
-
-  useEffect(() => {
     let mounted = true;
 
     const loadInitialData = async () => {
       try {
-        const [initialLocations, eventTracks] = await Promise.all([
+        const [initialLocations, eventTracksPayload] = await Promise.all([
           apiFetch<EventLocationResponse[]>("/locations/event"),
-          apiFetch<EventTrackResponse[]>("/events/tracks"),
+          apiFetch<unknown>("/events/tracks"),
         ]);
 
         if (!mounted) {
@@ -448,7 +1310,27 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             respondingParamedicIds: item.respondingParamedicIds,
           })),
         );
-        setTracks(eventTracks);
+        const normalizedTracks = Array.isArray(eventTracksPayload)
+          ? eventTracksPayload
+              .map((track, index) => normalizeTrack(track, index))
+              .filter((track): track is EventTrackResponse => Boolean(track))
+          : [];
+        const existingTracksBeforeNormalize = useMapStore.getState().tracks as EventTrackResponse[];
+        const normalizedMergedTracks = mergeTracksPreservingElevation(
+          normalizedTracks,
+          existingTracksBeforeNormalize,
+        );
+        setTracks(normalizedMergedTracks);
+        const enrichedTracks = await enrichTracksElevationProfiles(normalizedMergedTracks);
+        if (!mounted) {
+          return;
+        }
+        const existingTracksBeforeEnrichedSet = useMapStore.getState().tracks as EventTrackResponse[];
+        const enrichedMergedTracks = mergeTracksPreservingElevation(
+          enrichedTracks,
+          existingTracksBeforeEnrichedSet,
+        );
+        setTracks(enrichedMergedTracks);
       } catch {
         if (mounted) {
           setTracks([]);
@@ -513,15 +1395,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       }
 
       const location = await ExpoLocation.getCurrentPositionAsync({});
-      mapRef.current?.animateToRegion(
-        {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        },
-        450,
-      );
+      cameraRef.current?.easeTo({
+        center: [location.coords.longitude, location.coords.latitude],
+        zoom: USER_FOCUS_ZOOM,
+        duration: 450,
+      });
     };
 
     if (centerOnUserRequestId > 0) {
@@ -531,24 +1409,90 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   useEffect(() => {
     const resetNorth = async () => {
-      const camera = await mapRef.current?.getCamera();
-      if (!camera) {
+      const viewState = await mapRef.current?.getViewState();
+      if (!viewState) {
         return;
       }
 
-      mapRef.current?.animateCamera(
-        {
-          ...camera,
-          heading: 0,
-        },
-        { duration: 360 },
-      );
+      cameraRef.current?.easeTo({
+        center: viewState.center,
+        zoom: viewState.zoom,
+        bearing: 0,
+        duration: 360,
+      });
     };
 
     if (resetNorthRequestId > 0) {
       void resetNorth();
     }
   }, [resetNorthRequestId]);
+
+  useEffect(() => {
+    if (didInitialEventFitRef.current) {
+      return;
+    }
+
+    const trackPoints = tracks.flatMap((track) => track.points);
+    if (trackPoints.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const fitEventBounds = async () => {
+      if (!cameraRef.current || cancelled) {
+        return;
+      }
+
+      let minLat = Number.POSITIVE_INFINITY;
+      let minLng = Number.POSITIVE_INFINITY;
+      let maxLat = Number.NEGATIVE_INFINITY;
+      let maxLng = Number.NEGATIVE_INFINITY;
+
+      for (const point of trackPoints) {
+        minLat = Math.min(minLat, point.lat);
+        minLng = Math.min(minLng, point.lng);
+        maxLat = Math.max(maxLat, point.lat);
+        maxLng = Math.max(maxLng, point.lng);
+      }
+
+      const knownUserMarker = markers.find((marker) => marker.id === CURRENT_USER_ID);
+      if (knownUserMarker) {
+        minLat = Math.min(minLat, knownUserMarker.lat);
+        minLng = Math.min(minLng, knownUserMarker.lng);
+        maxLat = Math.max(maxLat, knownUserMarker.lat);
+        maxLng = Math.max(maxLng, knownUserMarker.lng);
+      } else {
+        const permission = await ExpoLocation.getForegroundPermissionsAsync();
+        if (permission.status === "granted") {
+          const knownLocation =
+            (await ExpoLocation.getLastKnownPositionAsync()) ?? (await ExpoLocation.getCurrentPositionAsync({}));
+          if (knownLocation && !cancelled) {
+            minLat = Math.min(minLat, knownLocation.coords.latitude);
+            minLng = Math.min(minLng, knownLocation.coords.longitude);
+            maxLat = Math.max(maxLat, knownLocation.coords.latitude);
+            maxLng = Math.max(maxLng, knownLocation.coords.longitude);
+          }
+        }
+      }
+
+      const padded = padCollapsedBounds(minLng, minLat, maxLng, maxLat);
+      cameraRef.current?.fitBounds([padded.minLng, padded.minLat, padded.maxLng, padded.maxLat], {
+        padding: { top: 92, right: 24, bottom: 172, left: 24 },
+        duration: 720,
+      });
+      didInitialEventFitRef.current = true;
+    };
+
+    const timer = setTimeout(() => {
+      void fitEventBounds();
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [markers, tracks]);
 
   const nonCurrentMarkers = useMemo(
     () => markers.filter((marker) => marker.id !== CURRENT_USER_ID),
@@ -581,16 +1525,111 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       }),
     [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, nonCurrentMarkers],
   );
-
-  const heatSpots = useMemo(() => buildHeatSpots(runners), [runners]);
-  const trackOffsetStepMeters = useMemo(() => trackOffsetStepMetersForZoom(mapZoom), [mapZoom]);
-  const trackVisuals = useMemo(
-    () => buildTrackVisuals(tracks, trackOffsetStepMeters),
-    [tracks, trackOffsetStepMeters],
+  const orderedVisibleMarkers = useMemo(
+    () =>
+      [...visibleMarkers].sort(
+        (a, b) => MARKER_RENDER_PRIORITY[a.type] - MARKER_RENDER_PRIORITY[b.type],
+      ),
+    [visibleMarkers],
   );
-  const maxHeatSpotCount = useMemo(
-    () => heatSpots.reduce((maxValue, spot) => Math.max(maxValue, spot.count), 0),
-    [heatSpots],
+
+  const runnerHeatFeatureCollection = useMemo(
+    () => buildRunnerHeatFeatureCollection(runners),
+    [runners],
+  );
+  const trackVisuals = useMemo(() => buildTrackVisuals(tracks), [tracks]);
+  const visibleTracks = useMemo(
+    () => tracks.filter((track) => trackVisibility[track.id] ?? true),
+    [trackVisibility, tracks],
+  );
+  const visibleTrackVisuals = useMemo(() => buildTrackVisuals(visibleTracks), [visibleTracks]);
+  const focusedTrack = useMemo(
+    () => (focusedTrackId ? tracks.find((track) => track.id === focusedTrackId) ?? null : null),
+    [focusedTrackId, tracks],
+  );
+  const focusedTrackVisual = useMemo(
+    () => (focusedTrackId ? trackVisuals.find((track) => track.id === focusedTrackId) ?? null : null),
+    [focusedTrackId, trackVisuals],
+  );
+  const trackModeActive = activeTab === "tracks";
+  const renderedTrackVisuals = useMemo(() => {
+    if (trackModeActive && focusedTrackVisual) {
+      return [focusedTrackVisual];
+    }
+    return visibleTrackVisuals;
+  }, [focusedTrackVisual, trackModeActive, visibleTrackVisuals]);
+  const focusedTrackProfile = useMemo(
+    () => (focusedTrack ? buildTrackProfile(focusedTrack) : null),
+    [focusedTrack],
+  );
+  const focusedTrackElevationLineColor = useMemo(
+    () => (focusedTrack ? mixHexColor(trackColor(focusedTrack.id), "#ffffff", 0.12) : "#b9c6d8"),
+    [focusedTrack],
+  );
+  const focusedTrackElevationLinePoints = useMemo(() => {
+    if (!focusedTrackProfile || focusedTrackProfile.points.length === 0) {
+      return [];
+    }
+
+    const pointCount = Math.max(
+      TRACK_ELEVATION_CHART_MIN_POINTS,
+      Math.min(TRACK_ELEVATION_CHART_MAX_POINTS, focusedTrackProfile.points.length),
+    );
+    const sampledPoints = Array.from({ length: pointCount }, (_, index) => {
+      const progress = pointCount > 1 ? index / (pointCount - 1) : 0;
+      return {
+        key: `elevation-line-${index}`,
+        progress,
+        value: sampleTrackProfile(focusedTrackProfile, progress).elevationMeters,
+      };
+    });
+    const smoothedValues = smoothSeriesMovingAverage(
+      sampledPoints.map((point) => point.value),
+      2,
+    );
+    return sampledPoints.map((point, index) => ({
+      ...point,
+      value: smoothedValues[index] ?? point.value,
+    }));
+  }, [focusedTrackProfile]);
+  const focusedTrackSample = useMemo(
+    () => (focusedTrackProfile ? sampleTrackProfile(focusedTrackProfile, trackProfileProgress) : null),
+    [focusedTrackProfile, trackProfileProgress],
+  );
+  const focusedTrackElevationCursorTopPercent = useMemo(() => {
+    if (!focusedTrackProfile || !focusedTrackSample) {
+      return 50;
+    }
+    return elevationToChartTopPercent(
+      focusedTrackSample.elevationMeters,
+      focusedTrackProfile.minElevationMeters,
+      focusedTrackProfile.maxElevationMeters,
+    );
+  }, [focusedTrackProfile, focusedTrackSample]);
+  const focusedTrackScrubSegmentFeature = useMemo(() => {
+    if (!focusedTrack || focusedTrack.points.length < 2) {
+      return null;
+    }
+    const segmentCount = focusedTrack.points.length - 1;
+    const segmentIndex = Math.min(
+      segmentCount - 1,
+      Math.max(0, Math.round(trackProfileProgress * (segmentCount - 1))),
+    );
+    const start = focusedTrack.points[segmentIndex];
+    const end = focusedTrack.points[segmentIndex + 1];
+    if (!start || !end) {
+      return null;
+    }
+    return lineFeatureFromCoordinates([
+      { latitude: start.lat, longitude: start.lng },
+      { latitude: end.lat, longitude: end.lng },
+    ]);
+  }, [focusedTrack, trackProfileProgress]);
+  const trackRenderOffsetOverride = trackModeActive ? 0 : null;
+  const shouldMuteTrackColors = layerVisibility.participantsHeatmap && !trackModeActive;
+  const allTracksVisible = useMemo(
+    () => trackVisuals.length > 0 && trackVisuals.every((track) => trackVisibility[track.id] ?? true),
+    [trackVisibility, trackVisuals],
   );
 
   const respondingParamedics = useMemo(
@@ -605,11 +1644,91 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     [layerVisibility.incidents, layerVisibility.paramedics, nonCurrentMarkers],
   );
 
+  useEffect(() => {
+    if (respondingParamedics.length === 0) {
+      return;
+    }
+
+    const timer = setInterval(() => setTick((value) => value + 1), 650);
+    return () => clearInterval(timer);
+  }, [respondingParamedics.length]);
+
+  const densityCountExpression = useMemo(
+    () => ["*", ["get", "count"], densityScale],
+    [densityScale],
+  );
+
   const selectedMarker = selectedMarkerId ? markerById.get(selectedMarkerId) : undefined;
   const selectedIncident = selectedMarker?.type === "incident" ? selectedMarker : undefined;
+  const overlayOpen = menuOpen || layersOpen;
 
   useEffect(() => {
-    if (selectedIncident) {
+    setTrackVisibility((previous) => {
+      const next: TrackVisibility = {};
+      for (const track of tracks) {
+        next[track.id] = previous[track.id] ?? true;
+      }
+      return next;
+    });
+  }, [tracks]);
+
+  useEffect(() => {
+    if (!trackModeActive) {
+      setTrackPickerOpen(false);
+      lastTrackSelectionLayerResetRef.current = null;
+      return;
+    }
+
+    if (tracks.length === 0) {
+      setFocusedTrackId(null);
+      return;
+    }
+
+    const hasFocusedTrack = focusedTrackId ? tracks.some((track) => track.id === focusedTrackId) : false;
+    if (!hasFocusedTrack) {
+      setFocusedTrackId(tracks[0].id);
+      setTrackProfileProgress(0);
+    }
+  }, [focusedTrackId, trackModeActive, tracks]);
+
+  useEffect(() => {
+    if (!trackModeActive || !focusedTrackId) {
+      return;
+    }
+    if (lastTrackSelectionLayerResetRef.current === focusedTrackId) {
+      return;
+    }
+    lastTrackSelectionLayerResetRef.current = focusedTrackId;
+    setLayerVisibility((state) => ({
+      ...state,
+      paramedics: false,
+      incidents: false,
+    }));
+  }, [focusedTrackId, trackModeActive]);
+
+  useEffect(() => {
+    if (!trackModeActive || !focusedTrack || focusedTrack.points.length === 0) {
+      return;
+    }
+    let minLat = focusedTrack.points[0].lat;
+    let minLng = focusedTrack.points[0].lng;
+    let maxLat = focusedTrack.points[0].lat;
+    let maxLng = focusedTrack.points[0].lng;
+    for (const point of focusedTrack.points) {
+      minLat = Math.min(minLat, point.lat);
+      minLng = Math.min(minLng, point.lng);
+      maxLat = Math.max(maxLat, point.lat);
+      maxLng = Math.max(maxLng, point.lng);
+    }
+    const padded = padCollapsedBounds(minLng, minLat, maxLng, maxLat);
+    cameraRef.current?.fitBounds([padded.minLng, padded.minLat, padded.maxLng, padded.maxLat], {
+      padding: TRACK_STUDIO_CAMERA_PADDING,
+      duration: 620,
+    });
+  }, [focusedTrack, trackModeActive]);
+
+  useEffect(() => {
+    if (selectedMarker) {
       sheetDragTranslate.setValue(0);
       animateSheetTo(SHEET_COLLAPSED_Y);
       return;
@@ -617,11 +1736,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
     sheetDragTranslate.setValue(0);
     animateSheetTo(SHEET_HIDDEN_Y);
-  }, [selectedIncident, sheetDragTranslate]);
+  }, [selectedMarker, sheetDragTranslate]);
 
   const closeSelection = () => {
     setSelectedMarkerId(null);
     setIncidentTab("details");
+  };
+
+  const toggleSheetSnap = () => {
+    if (!selectedMarker) {
+      return;
+    }
+    const midpoint = (SHEET_COLLAPSED_Y + SHEET_EXPANDED_Y) / 2;
+    const nextTarget = sheetBaseValueRef.current <= midpoint ? SHEET_COLLAPSED_Y : SHEET_EXPANDED_Y;
+    animateSheetTo(nextTarget);
   };
 
   const toggleLayer = (key: keyof LayerVisibility) => {
@@ -631,6 +1759,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     }));
   };
 
+  const toggleTrack = (trackId: string) => {
+    setTrackVisibility((state) => ({
+      ...state,
+      [trackId]: !(state[trackId] ?? true),
+    }));
+  };
+
+  const toggleAllTracks = () => {
+    setTrackVisibility((state) => {
+      const shouldShowAll = !allTracksVisible;
+      const next: TrackVisibility = { ...state };
+      for (const track of trackVisuals) {
+        next[track.id] = shouldShowAll;
+      }
+      return next;
+    });
+  };
+
   const centerOnCurrentPosition = async () => {
     const permission = await ExpoLocation.requestForegroundPermissionsAsync();
     if (permission.status !== "granted") {
@@ -638,30 +1784,25 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     }
 
     const location = await ExpoLocation.getCurrentPositionAsync({});
-    mapRef.current?.animateToRegion(
-      {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        latitudeDelta: 0.012,
-        longitudeDelta: 0.012,
-      },
-      420,
-    );
+    cameraRef.current?.easeTo({
+      center: [location.coords.longitude, location.coords.latitude],
+      zoom: USER_FOCUS_ZOOM,
+      duration: 420,
+    });
   };
 
   const resetMapNorth = async () => {
-    const camera = await mapRef.current?.getCamera();
-    if (!camera) {
+    const viewState = await mapRef.current?.getViewState();
+    if (!viewState) {
       return;
     }
 
-    mapRef.current?.animateCamera(
-      {
-        ...camera,
-        heading: 0,
-      },
-      { duration: 340 },
-    );
+    cameraRef.current?.easeTo({
+      center: viewState.center,
+      zoom: viewState.zoom,
+      bearing: 0,
+      duration: 340,
+    });
   };
 
   const incidentDistance = selectedIncident
@@ -670,95 +1811,287 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   return (
     <View style={styles.container}>
-      <MapView
+      <MapLibreMap
         ref={mapRef}
         style={styles.map}
-        mapType={mapyTilesTemplateUrl ? "none" : "standard"}
-        showsUserLocation
-        followsUserLocation
-        onRegionChangeComplete={(region) => {
-          setMapZoom(approximateZoomFromRegion(region));
+        mapStyle={{
+          version: 8,
+          sources: {},
+          layers: [
+            {
+              id: "base-bg",
+              type: "background",
+              paint: {
+                "background-color": mapyTilesTemplateUrl ? "#051325" : "#0b172a",
+              },
+            },
+          ],
         }}
-        initialRegion={{
-          latitude: FALLBACK_LAT,
-          longitude: FALLBACK_LNG,
-          latitudeDelta: 0.07,
-          longitudeDelta: 0.07,
-        }}
+        logo={false}
+        attribution={false}
+        compass={false}
       >
-        {mapyTilesTemplateUrl ? (
-          <UrlTile urlTemplate={mapyTilesTemplateUrl} maximumZ={19} flipY={false} zIndex={0} />
-        ) : null}
+        <Camera
+          ref={cameraRef}
+          initialViewState={{
+            center: [FALLBACK_LNG, FALLBACK_LAT],
+            zoom: FALLBACK_ZOOM,
+          }}
+          trackUserLocation="default"
+        />
+        <UserLocation />
 
-        {trackVisuals.map((track) => (
+        <RasterSource id="base-raster-source" tiles={[baseTilesTemplateUrl]} maxzoom={19} tileSize={baseRasterTileSize}>
+          <Layer
+            id="base-raster-layer"
+            type="raster"
+            paint={{
+              "raster-opacity": 1,
+            }}
+          />
+        </RasterSource>
+
+        {renderedTrackVisuals.map((track) => (
           <React.Fragment key={`track-${track.id}`}>
-            <Polyline
-              coordinates={track.coordinates}
-              strokeColor="rgba(6, 15, 28, 0.82)"
-              strokeWidth={10}
-              zIndex={2}
-            />
-            {track.gradientSegments.length > 0 ? (
-              track.gradientSegments.map((segment, index) => (
-                <Polyline
-                  key={`${track.id}-segment-${index}`}
-                  coordinates={segment.coordinates}
-                  strokeColor={segment.color}
-                  strokeWidth={6.4}
-                  zIndex={3}
-                />
+            <GeoJSONSource
+              id={`${track.id}-outline-source`}
+              data={lineFeatureFromCoordinates(track.coordinates)}
+            >
+              <Layer
+                id={`${track.id}-outline-layer`}
+                type="line"
+                layout={{
+                  "line-join": "round",
+                  "line-cap": "round",
+                }}
+                paint={{
+                  "line-color": shouldMuteTrackColors ? "rgba(105, 114, 126, 0.72)" : "rgba(6, 15, 28, 0.82)",
+                  "line-width": 10,
+                  "line-opacity": shouldMuteTrackColors ? 0.72 : 1,
+                  "line-offset": trackRenderOffsetOverride ?? track.lineOffset,
+                }}
+              />
+            </GeoJSONSource>
+            {layerVisibility.trackGradient ? (
+              track.gradientSegments.map((segment, segmentIndex) => (
+                <GeoJSONSource
+                  key={`${track.id}-segment-source-${segmentIndex}`}
+                  id={`${track.id}-segment-source-${segmentIndex}`}
+                  data={lineFeatureFromCoordinates(segment.coordinates)}
+                >
+                  <Layer
+                    id={`${track.id}-segment-layer-${segmentIndex}`}
+                    type="line"
+                    layout={{
+                      "line-join": "round",
+                      "line-cap": "round",
+                    }}
+                    paint={{
+                      "line-color": shouldMuteTrackColors ? "rgb(142,142,142)" : segment.color,
+                      "line-width": 6.4,
+                      "line-opacity": shouldMuteTrackColors ? 0.6 : 1,
+                      "line-offset": trackRenderOffsetOverride ?? track.lineOffset,
+                    }}
+                  />
+                </GeoJSONSource>
               ))
             ) : (
-              <Polyline
-                coordinates={track.coordinates}
-                strokeColor={track.color}
-                strokeWidth={6.4}
-                zIndex={3}
-              />
+              <GeoJSONSource id={`${track.id}-base-source`} data={lineFeatureFromCoordinates(track.coordinates)}>
+                <Layer
+                  id={`${track.id}-base-layer`}
+                  type="line"
+                  layout={{
+                    "line-join": "round",
+                    "line-cap": "round",
+                  }}
+                  paint={{
+                    "line-color": shouldMuteTrackColors ? "rgb(142,142,142)" : track.color,
+                    "line-width": 6.4,
+                    "line-opacity": shouldMuteTrackColors ? 0.6 : 1,
+                    "line-offset": trackRenderOffsetOverride ?? track.lineOffset,
+                  }}
+                />
+              </GeoJSONSource>
             )}
           </React.Fragment>
         ))}
 
-        {layerVisibility.participantsHeatmap
-          ? heatSpots.map((spot) => {
-              const normalized = maxHeatSpotCount > 0 ? spot.count / maxHeatSpotCount : 0;
-              const radiusOuter = 56 + normalized * 120;
-              const radiusMid = 24 + normalized * 66;
-              const radiusCore = 9 + normalized * 26;
-              const colorOuter = heatRampColor(normalized * 0.72);
-              const colorMid = heatRampColor(Math.min(1, normalized * 0.9));
-              const colorCore = heatRampColor(Math.min(1, normalized + 0.22));
+        {trackModeActive && focusedTrackScrubSegmentFeature ? (
+          <GeoJSONSource id="track-scrub-segment-source" data={focusedTrackScrubSegmentFeature}>
+            <Layer
+              id="track-scrub-segment-layer"
+              type="line"
+              layout={{
+                "line-join": "round",
+                "line-cap": "round",
+              }}
+              paint={{
+                "line-color": focusedTrackElevationLineColor,
+                "line-width": 9,
+                "line-opacity": 0.96,
+              }}
+            />
+          </GeoJSONSource>
+        ) : null}
 
-              return (
-                <React.Fragment key={`heat-${spot.key}`}>
-                  <Circle
-                    center={{ latitude: spot.lat, longitude: spot.lng }}
-                    radius={radiusOuter}
-                    fillColor={colorOuter}
-                    strokeColor="transparent"
-                    strokeWidth={0}
-                    zIndex={1}
-                  />
-                  <Circle
-                    center={{ latitude: spot.lat, longitude: spot.lng }}
-                    radius={radiusMid}
-                    fillColor={colorMid}
-                    strokeColor="transparent"
-                    strokeWidth={0}
-                    zIndex={1}
-                  />
-                  <Circle
-                    center={{ latitude: spot.lat, longitude: spot.lng }}
-                    radius={radiusCore}
-                    fillColor={colorCore}
-                    strokeColor="transparent"
-                    strokeWidth={0}
-                    zIndex={1}
-                  />
-                </React.Fragment>
-              );
-            })
-          : null}
+        {layerVisibility.participantsHeatmap && !trackModeActive ? (
+          <GeoJSONSource id="participants-heat-source" data={runnerHeatFeatureCollection}>
+            <Layer
+              id="participants-density-glow-layer"
+              type="circle"
+              filter={[">=", ["get", "count"], 1]}
+              paint={
+                {
+                  "circle-color": [
+                    "interpolate",
+                    ["linear"],
+                    densityCountExpression,
+                    0,
+                    "rgba(33,102,172,0)",
+                    0.8,
+                    "rgba(103,169,207,0.36)",
+                    2.5,
+                    "rgba(166,217,106,0.46)",
+                    5.5,
+                    "rgba(253,174,97,0.58)",
+                    9,
+                    "rgba(239,138,98,0.72)",
+                    14,
+                    "rgba(178,24,43,0.86)",
+                  ],
+                  "circle-radius": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    10,
+                    [
+                      "interpolate",
+                      ["linear"],
+                      densityCountExpression,
+                      0.6,
+                      14,
+                      2,
+                      26,
+                      6,
+                      38,
+                      12,
+                      54,
+                      20,
+                      68,
+                    ],
+                    14,
+                    [
+                      "interpolate",
+                      ["linear"],
+                      densityCountExpression,
+                      0.6,
+                      18,
+                      2,
+                      33,
+                      6,
+                      48,
+                      12,
+                      68,
+                      20,
+                      84,
+                    ],
+                    18,
+                    [
+                      "interpolate",
+                      ["linear"],
+                      densityCountExpression,
+                      0.6,
+                      24,
+                      2,
+                      44,
+                      6,
+                      64,
+                      12,
+                      88,
+                      20,
+                      108,
+                    ],
+                  ],
+                  "circle-opacity": 0.95,
+                  "circle-blur": 0.82,
+                } as any
+              }
+            />
+            <Layer
+              id="participants-density-core-layer"
+              type="circle"
+              filter={[">=", ["get", "count"], 1]}
+              paint={
+                {
+                  "circle-color": [
+                    "interpolate",
+                    ["linear"],
+                    densityCountExpression,
+                    0,
+                    "rgba(33,102,172,0)",
+                    1.2,
+                    "rgba(103,169,207,0.58)",
+                    4.5,
+                    "rgba(253,174,97,0.74)",
+                    8,
+                    "rgba(215,48,39,0.86)",
+                    12,
+                    "rgba(178,24,43,1)",
+                  ],
+                  "circle-radius": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    10,
+                    [
+                      "interpolate",
+                      ["linear"],
+                      densityCountExpression,
+                      0.6,
+                      7,
+                      2,
+                      13,
+                      6,
+                      20,
+                      12,
+                      30,
+                    ],
+                    14,
+                    [
+                      "interpolate",
+                      ["linear"],
+                      densityCountExpression,
+                      0.6,
+                      9,
+                      2,
+                      17,
+                      6,
+                      26,
+                      12,
+                      39,
+                    ],
+                    18,
+                    [
+                      "interpolate",
+                      ["linear"],
+                      densityCountExpression,
+                      0.6,
+                      12,
+                      2,
+                      23,
+                      6,
+                      36,
+                      12,
+                      54,
+                    ],
+                  ],
+                  "circle-opacity": 0.84,
+                  "circle-blur": 0.58,
+                } as any
+              }
+            />
+          </GeoJSONSource>
+        ) : null}
 
         {respondingParamedics.map((paramedic, index) => {
           const incident = paramedic.respondingIncidentId ? markerById.get(paramedic.respondingIncidentId) : undefined;
@@ -773,22 +2106,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
           return (
             <React.Fragment key={`response-${paramedic.id}`}>
-              <Polyline
-                coordinates={[
+              <GeoJSONSource
+                id={`response-line-source-${paramedic.id}`}
+                data={lineFeatureFromCoordinates([
                   { latitude: paramedic.lat, longitude: paramedic.lng },
                   { latitude: incident.lat, longitude: incident.lng },
-                ]}
-                strokeColor="rgba(91, 221, 117, 0.9)"
-                strokeWidth={4}
-                lineDashPattern={[5, 8]}
-                zIndex={5}
-              />
-              <Marker
-                coordinate={{ latitude: arrowLat, longitude: arrowLng }}
-                anchor={{ x: 0.5, y: 0.5 }}
-                zIndex={7}
-                tracksViewChanges={false}
+                ])}
               >
+                <Layer
+                  id={`response-line-layer-${paramedic.id}`}
+                  type="line"
+                  paint={{
+                    "line-color": "rgba(91, 221, 117, 0.9)",
+                    "line-width": 4,
+                    "line-dasharray": [2, 2.8],
+                  }}
+                />
+              </GeoJSONSource>
+              <Marker lngLat={[arrowLng, arrowLat]}>
                 <View style={[styles.responseArrow, { transform: [{ rotate: `${angleDeg}deg` }] }]}>
                   <Text style={styles.responseArrowText}>{">"}</Text>
                 </View>
@@ -797,12 +2132,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           );
         })}
 
-        {visibleMarkers.map((marker) => (
+        {orderedVisibleMarkers.map((marker) => (
           <Marker
             key={marker.id}
-            coordinate={{ latitude: marker.lat, longitude: marker.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            zIndex={marker.type === "incident" ? 10 : marker.type === "paramedic" ? 9 : 6}
+            lngLat={[marker.lng, marker.lat]}
             onPress={() => {
               setSelectedMarkerId(marker.id);
               if (marker.type === "incident") {
@@ -810,63 +2143,87 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               }
             }}
           >
-            {marker.type === "incident" ? (
-              <View style={styles.incidentMarkerWrap}>
-                <Animated.View
-                  style={[
-                    styles.incidentPulse,
-                    {
-                      opacity: incidentPulse.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.55, 0],
-                      }),
-                      transform: [
-                        {
-                          scale: incidentPulse.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [0.85, 1.85],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                />
-                <View style={styles.incidentMarkerBadge}>
-                  <View style={styles.incidentIconWrapSmall}>
-                    <Text style={styles.incidentIconSmallText}>!</Text>
-                  </View>
-                  <Text style={styles.incidentMarkerText}>INCIDENT</Text>
+            <View>
+              {marker.type === "incident" ? (
+                <View style={styles.incidentDot}>
+                  <Text style={styles.incidentDotText}>!</Text>
                 </View>
-              </View>
-            ) : null}
+              ) : null}
 
-            {marker.type === "paramedic" ? (
-              <View style={styles.paramedicMarkerBadge}>
-                <View style={styles.paramedicIconWrap}>
-                  <Text style={styles.paramedicIconText}>+</Text>
+              {marker.type === "paramedic" ? (
+                <View style={styles.paramedicDot}>
+                  <Text style={styles.paramedicDotText}>{markerInitials(marker.label)}</Text>
                 </View>
-                <Text style={styles.paramedicMarkerText}>{markerInitials(marker.label)}</Text>
-              </View>
-            ) : null}
+              ) : null}
 
-            {marker.type === "runner" ? <View style={styles.runnerDot} /> : null}
+              {marker.type === "runner" ? <View style={styles.runnerDot} /> : null}
+            </View>
           </Marker>
         ))}
-      </MapView>
 
-      {menuOpen ? <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)} /> : null}
+        {trackModeActive && focusedTrackSample ? (
+          <Marker key="track-focus-cursor" lngLat={[focusedTrackSample.lng, focusedTrackSample.lat]}>
+            <View style={styles.trackCursorOuter}>
+              <View style={styles.trackCursorInner} />
+            </View>
+          </Marker>
+        ) : null}
+      </MapLibreMap>
 
-      <View style={styles.missionStrip}>
+      {/* Heatmap temporary tuner (disabled with heatmap).
+      <View style={styles.heatTunerPanel}>
+        <Text style={styles.heatTunerTitle}>Heat weight {heatWeightScale.toFixed(2)}</Text>
+        <View style={styles.heatTunerRow}>
+          <Pressable
+            style={styles.heatTunerButton}
+            onPress={() =>
+              setHeatWeightScale((value) => Math.max(HEATMAP_WEIGHT_MIN, Number((value - HEATMAP_WEIGHT_STEP).toFixed(2))))
+            }
+          >
+            <Text style={styles.heatTunerButtonText}>-</Text>
+          </Pressable>
+          <View style={styles.heatSliderTrack} {...heatWeightPanResponder.panHandlers}>
+            <View style={[styles.heatSliderFill, { width: heatSliderPosition }]} />
+            <View style={[styles.heatSliderKnob, { left: heatSliderKnobLeft }]} />
+          </View>
+          <Pressable
+            style={styles.heatTunerButton}
+            onPress={() =>
+              setHeatWeightScale((value) => Math.min(HEATMAP_WEIGHT_MAX, Number((value + HEATMAP_WEIGHT_STEP).toFixed(2))))
+            }
+          >
+            <Text style={styles.heatTunerButtonText}>+</Text>
+          </Pressable>
+        </View>
+      </View> */}
+
+      {overlayOpen ? (
+        <Pressable
+          style={styles.menuBackdrop}
+          onPress={() => {
+            setMenuOpen(false);
+            setLayersOpen(false);
+          }}
+        />
+      ) : null}
+
+      {/* <View style={styles.missionStrip}>
         <Text style={styles.missionStripText}>MISSION: ACTIVE</Text>
         <Text style={styles.missionStripText}>ACADEMY FIRST AID</Text>
-      </View>
+      </View> */}
 
       <View style={styles.topHeader}>
-        <Pressable style={styles.menuButton} onPress={() => setMenuOpen((open) => !open)}>
-          <Text style={styles.menuButtonText}>MENU</Text>
+        <Pressable
+          style={styles.menuButton}
+          onPress={() => {
+            setMenuOpen((open) => !open);
+            setLayersOpen(false);
+          }}
+        >
+          <Text style={styles.menuButtonText}>Menu</Text>
         </Pressable>
 
-        <View style={styles.eventChip}>
+        <Pressable style={styles.eventChip}>
           <View style={styles.eventHeaderRow}>
             <Text style={styles.eventTitle}>IRON PEAK MARATHON</Text>
             <Text style={styles.eventCaret}>v</Text>
@@ -876,31 +2233,60 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             <Text style={styles.eventMetaText}>02:45:18</Text>
             <Text style={styles.eventMetaText}>{viewMode.toUpperCase()}</Text>
           </View>
-        </View>
-
-        <Pressable style={styles.iconButton} onPress={centerOnCurrentPosition}>
-          <Text style={styles.iconButtonText}>GPS</Text>
         </Pressable>
+
+        <View style={styles.headerActions}>
+          <Pressable
+            style={styles.headerActionButton}
+            onPress={() => {
+              setLayersOpen((open) => !open);
+              setMenuOpen(false);
+            }}
+          >
+            <View style={styles.layersIcon}>
+              <View style={styles.layersIconLine} />
+              <View style={[styles.layersIconLine, styles.layersIconLineMiddle]} />
+              <View style={styles.layersIconLine} />
+            </View>
+          </Pressable>
+
+          <Pressable style={styles.headerActionButton} onPress={centerOnCurrentPosition}>
+            <View style={styles.locationIcon}>
+              <View style={styles.locationIconRing} />
+              <View style={styles.locationIconCenterDot} />
+            </View>
+          </Pressable>
+
+          <Pressable style={styles.headerActionButton} onPress={resetMapNorth}>
+            <Text style={styles.headerActionText}>N</Text>
+          </Pressable>
+        </View>
       </View>
 
       {menuOpen ? (
         <View style={styles.menuPopup}>
-          <Text style={styles.menuPopupTitle}>Layers</Text>
+          <Text style={styles.menuPopupTitle}>Menu</Text>
+          {FUTURE_MENU_PAGES.map((page) => (
+            <Pressable key={page.id} style={styles.menuPageRow}>
+              <View style={styles.menuPageTextWrap}>
+                <Text style={styles.menuPageTitle}>{page.title}</Text>
+                <Text style={styles.menuPageSubtitle}>{page.subtitle}</Text>
+              </View>
+              <Text style={styles.menuSoonLabel}>Soon</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
+      {layersOpen ? (
+        <View style={styles.layersPopup}>
+          <Text style={styles.menuPopupTitle}>Layers</Text>
           <Pressable style={styles.layerRow} onPress={() => toggleLayer("participants")}>
             <Text style={styles.layerLabel}>Participants (individual)</Text>
             <View style={[styles.switchTrack, layerVisibility.participants ? styles.switchTrackOn : null]}>
               <View style={[styles.switchKnob, layerVisibility.participants ? styles.switchKnobOn : null]} />
             </View>
           </Pressable>
-
-          <Pressable style={styles.layerRow} onPress={() => toggleLayer("participantsHeatmap")}>
-            <Text style={styles.layerLabel}>Participants heatmap</Text>
-            <View style={[styles.switchTrack, layerVisibility.participantsHeatmap ? styles.switchTrackOn : null]}>
-              <View style={[styles.switchKnob, layerVisibility.participantsHeatmap ? styles.switchKnobOn : null]} />
-            </View>
-          </Pressable>
-
           <Pressable style={styles.layerRow} onPress={() => toggleLayer("paramedics")}>
             <Text style={styles.layerLabel}>Paramedics</Text>
             <View style={[styles.switchTrack, layerVisibility.paramedics ? styles.switchTrackOn : null]}>
@@ -914,71 +2300,251 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               <View style={[styles.switchKnob, layerVisibility.incidents ? styles.switchKnobOn : null]} />
             </View>
           </Pressable>
+
+          <Pressable style={styles.layerRow} onPress={() => toggleLayer("participantsHeatmap")}>
+            <Text style={styles.layerLabel}>Participants heatmap</Text>
+            <View style={[styles.switchTrack, layerVisibility.participantsHeatmap ? styles.switchTrackOn : null]}>
+              <View style={[styles.switchKnob, layerVisibility.participantsHeatmap ? styles.switchKnobOn : null]} />
+            </View>
+          </Pressable>
+          <Pressable style={styles.layerRow} onPress={() => toggleLayer("trackGradient")}>
+            <Text style={styles.layerLabel}>Track gradient</Text>
+            <View style={[styles.switchTrack, layerVisibility.trackGradient ? styles.switchTrackOn : null]}>
+              <View style={[styles.switchKnob, layerVisibility.trackGradient ? styles.switchKnobOn : null]} />
+            </View>
+          </Pressable>
+
+          <View style={styles.tracksHeaderRow}>
+            <Text style={styles.tracksHeaderText}>Tracks</Text>
+            <Pressable style={styles.tracksToggleAllButton} onPress={toggleAllTracks}>
+              <Text style={styles.tracksToggleAllText}>{allTracksVisible ? "Turn off all" : "Turn on all"}</Text>
+            </Pressable>
+          </View>
+
+          {trackVisuals.map((track) => (
+            <Pressable key={track.id} style={styles.trackLayerRow} onPress={() => toggleTrack(track.id)}>
+              <View style={styles.trackLayerLabelWrap}>
+                <View style={[styles.trackColorDot, { backgroundColor: track.color }]} />
+                <Text style={styles.layerLabel}>{track.label}</Text>
+              </View>
+              <View style={[styles.switchTrack, (trackVisibility[track.id] ?? true) ? styles.switchTrackOn : null]}>
+                <View style={[styles.switchKnob, (trackVisibility[track.id] ?? true) ? styles.switchKnobOn : null]} />
+              </View>
+            </Pressable>
+          ))}
         </View>
       ) : null}
 
-      <View style={styles.rightControls}>
-        <Pressable style={styles.fab} onPress={resetMapNorth}>
-          <Text style={styles.fabText}>N</Text>
-        </Pressable>
-        <Pressable style={styles.fab} onPress={centerOnCurrentPosition}>
-          <Text style={styles.fabText}>ME</Text>
-        </Pressable>
-      </View>
+      {trackModeActive ? (
+        <View style={styles.tracksDrawer}>
+          <View style={styles.tracksDrawerHandle} />
+          <View style={styles.tracksDrawerHeaderRow}>
+            <Text style={styles.tracksDrawerKicker}>TRACK STUDIO</Text>
+            <Text style={styles.tracksDrawerMeta}>
+              {focusedTrackProfile ? `${(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km` : "No track"}
+            </Text>
+          </View>
 
-      <View style={styles.leftControls}>
-        <Pressable style={styles.actionPill} onPress={centerOnCurrentPosition}>
-          <Text style={styles.actionPillText}>CENTER ON ME</Text>
-        </Pressable>
-        <Pressable style={styles.actionPill}>
-          <Text style={styles.actionPillText}>NEARBY UNITS</Text>
-        </Pressable>
-      </View>
-
-      {selectedMarker && !selectedIncident ? (
-        <View style={styles.selectionCard}>
-          <Pressable style={styles.selectionClose} onPress={closeSelection}>
-            <Text style={styles.selectionCloseText}>X</Text>
+          <Pressable style={styles.trackSelectButton} onPress={() => setTrackPickerOpen((open) => !open)}>
+            <Text style={styles.trackSelectLabel}>Selected track</Text>
+            <View style={styles.trackSelectValueWrap}>
+              <Text style={styles.trackSelectValue}>{focusedTrack?.label ?? "Choose track"}</Text>
+              <Text style={styles.trackSelectCaret}>{trackPickerOpen ? "^" : "v"}</Text>
+            </View>
           </Pressable>
-          <Text style={styles.selectionKicker}>{selectedMarker.type === "paramedic" ? "RESPONDING UNIT" : "PARTICIPANT"}</Text>
-          <Text style={styles.selectionTitle}>{selectedMarker.name ?? selectedMarker.label}</Text>
-          <Text style={styles.selectionMeta}>
-            {selectedMarker.type === "paramedic"
-              ? `${selectedMarker.vehicle ?? "Mobile Unit"} | ${selectedMarker.bibNumber ?? selectedMarker.id}`
-              : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
-          </Text>
+
+          {trackPickerOpen ? (
+            <ScrollView
+              style={styles.trackPickerScroll}
+              contentContainerStyle={styles.trackPickerContent}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              {tracks.map((track) => {
+                const isActive = focusedTrack?.id === track.id;
+                return (
+                  <Pressable
+                    key={track.id}
+                    style={[styles.trackPickerChip, isActive ? styles.trackPickerChipActive : null]}
+                    onPress={() => {
+                      setFocusedTrackId(track.id);
+                      setTrackProfileProgress(0);
+                      setTrackPickerOpen(false);
+                    }}
+                  >
+                    <Text style={[styles.trackPickerChipText, isActive ? styles.trackPickerChipTextActive : null]}>
+                      {track.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
+
+          {focusedTrackProfile && focusedTrackSample ? (
+            <View style={styles.profileCard}>
+              <View style={styles.profileReadoutRow}>
+                <View>
+                  <Text style={styles.profileMetricLabel}>Distance from start</Text>
+                  <Text style={styles.profileMetricValue}>{(focusedTrackSample.distanceMeters / 1000).toFixed(2)} km</Text>
+                </View>
+                <View style={styles.profileMetricSpacer} />
+                <View>
+                  <Text style={styles.profileMetricLabel}>Elevation</Text>
+                  <Text style={styles.profileMetricValue}>{Math.round(focusedTrackSample.elevationMeters)} m</Text>
+                </View>
+              </View>
+              <View ref={trackProfileChartRef} style={styles.profileGradientChart}>
+                <View
+                  style={styles.profileGradientScrubSurface}
+                  onLayout={(event) => {
+                    setTrackProfileWidth(event.nativeEvent.layout.width);
+                    measureTrackProfileChart();
+                  }}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={(event) => {
+                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
+                  }}
+                  onResponderMove={(event) => {
+                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
+                  }}
+                  onTouchStart={(event) => {
+                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
+                  }}
+                  onTouchMove={(event) => {
+                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
+                  }}
+                />
+                <View style={styles.profileGradientChartZeroLine} />
+                {focusedTrackElevationLinePoints.slice(0, -1).map((point, index) => {
+                  const next = focusedTrackElevationLinePoints[index + 1];
+                  if (!next) {
+                    return null;
+                  }
+                  const currentTop = elevationToChartTopPercent(
+                    point.value,
+                    focusedTrackProfile.minElevationMeters,
+                    focusedTrackProfile.maxElevationMeters,
+                  );
+                  const nextTop = elevationToChartTopPercent(
+                    next.value,
+                    focusedTrackProfile.minElevationMeters,
+                    focusedTrackProfile.maxElevationMeters,
+                  );
+                  const stepTop = Math.min(currentTop, nextTop);
+                  const stepHeight = Math.max(1, Math.abs(nextTop - currentTop));
+                  const horizontalWidth = Math.max(0.8, (next.progress - point.progress) * 100);
+                  return (
+                    <React.Fragment key={point.key}>
+                      <View
+                        style={[
+                          styles.profileGradientChartSegmentHorizontal,
+                          {
+                            left: `${point.progress * 100}%`,
+                            width: `${horizontalWidth}%`,
+                            top: `${currentTop}%`,
+                            backgroundColor: focusedTrackElevationLineColor,
+                          },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.profileGradientChartSegmentVertical,
+                          {
+                            left: `${next.progress * 100}%`,
+                            top: `${stepTop}%`,
+                            height: `${stepHeight}%`,
+                            backgroundColor: focusedTrackElevationLineColor,
+                          },
+                        ]}
+                      />
+                    </React.Fragment>
+                  );
+                })}
+                <View style={[styles.profileGradientChartCursorLine, { left: `${trackProfileProgress * 100}%` }]} />
+                <View
+                  style={[
+                    styles.profileGradientChartCursorDot,
+                    {
+                      left: `${trackProfileProgress * 100}%`,
+                      top: `${focusedTrackElevationCursorTopPercent}%`,
+                    },
+                  ]}
+                />
+              </View>
+
+            </View>
+          ) : (
+            <View style={styles.profileEmpty}>
+              <Text style={styles.profileEmptyText}>Pick a track to inspect profile and location cursor.</Text>
+            </View>
+          )}
         </View>
       ) : null}
 
       <Animated.View
-        pointerEvents={selectedIncident ? "auto" : "none"}
+        pointerEvents={selectedMarker ? "auto" : "none"}
         style={[
           styles.incidentSheet,
           {
             transform: [{ translateY: sheetTranslateY }],
             opacity: sheetBaseTranslate.interpolate({
               inputRange: [SHEET_COLLAPSED_Y, SHEET_HIDDEN_Y],
-
-              outputRange: [0, 1],
+              outputRange: [1, 0],
               extrapolate: "clamp",
             }),
           },
         ]}
       >
-        {selectedIncident ? (
+        {selectedMarker ? (
           <>
             <View {...sheetPanResponder.panHandlers} style={styles.sheetDragZone}>
-              <View style={styles.sheetHandle} />
+              <Pressable onPress={toggleSheetSnap} hitSlop={8}>
+                <View style={styles.sheetHandle} />
+              </Pressable>
             </View>
 
             <View style={styles.sheetHeader}>
-              <View style={styles.incidentIconWrap}>
-                <Text style={styles.incidentIconText}>!</Text>
+              <View
+                style={[
+                  styles.incidentIconWrap,
+                  selectedMarker.type === "paramedic"
+                    ? styles.sheetParamedicIconBg
+                    : selectedMarker.type === "runner"
+                      ? styles.sheetParticipantIconBg
+                      : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.incidentIconText,
+                    selectedMarker.type === "incident" ? null : styles.sheetCompactIconText,
+                  ]}
+                >
+                  {selectedMarker.type === "incident"
+                    ? "!"
+                    : selectedMarker.type === "paramedic"
+                      ? markerInitials(selectedMarker.label)
+                      : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
+                </Text>
               </View>
               <View style={styles.sheetHeaderTextWrap}>
-                <Text style={styles.sheetTitle}>{selectedIncident.label}</Text>
-                <Text style={styles.sheetMetaText}>Injury | Reported live</Text>
-                <Text style={styles.sheetMetaText}>{incidentDistance.toFixed(1)} km from your location</Text>
+                <Text style={styles.sheetTitle}>{selectedMarker.name ?? selectedMarker.label}</Text>
+                <Text style={styles.sheetMetaText}>
+                  {selectedMarker.type === "incident"
+                    ? "Injury | Reported live"
+                    : selectedMarker.type === "paramedic"
+                      ? "Medical unit"
+                      : "Participant"}
+                </Text>
+                <Text style={styles.sheetMetaText}>
+                  {selectedMarker.type === "incident"
+                    ? `${incidentDistance.toFixed(1)} km from your location`
+                    : selectedMarker.type === "paramedic"
+                      ? selectedMarker.vehicle ?? "Mobile Unit"
+                      : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
+                </Text>
               </View>
 
               <Pressable style={styles.sheetCloseButton} onPress={closeSelection}>
@@ -986,66 +2552,91 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </Pressable>
             </View>
 
-            <View style={styles.sheetTabs}>
-              <Pressable style={styles.sheetTabButton} onPress={() => setIncidentTab("details")}>
-                <Text style={[styles.sheetTabText, incidentTab === "details" ? styles.sheetTabTextActive : null]}>DETAILS</Text>
-                {incidentTab === "details" ? <View style={styles.sheetTabUnderline} /> : null}
-              </Pressable>
-              <Pressable style={styles.sheetTabButton} onPress={() => setIncidentTab("responders")}>
-                <Text style={[styles.sheetTabText, incidentTab === "responders" ? styles.sheetTabTextActive : null]}>
-                  RESPONDERS ({(selectedIncident.respondingParamedicIds ?? []).length})
-                </Text>
-                {incidentTab === "responders" ? <View style={styles.sheetTabUnderline} /> : null}
-              </Pressable>
-            </View>
+            {selectedIncident ? (
+              <View style={styles.sheetTabs}>
+                <Pressable style={styles.sheetTabButton} onPress={() => setIncidentTab("details")}>
+                  <Text style={[styles.sheetTabText, incidentTab === "details" ? styles.sheetTabTextActive : null]}>DETAILS</Text>
+                  {incidentTab === "details" ? <View style={styles.sheetTabUnderline} /> : null}
+                </Pressable>
+                <Pressable style={styles.sheetTabButton} onPress={() => setIncidentTab("responders")}>
+                  <Text style={[styles.sheetTabText, incidentTab === "responders" ? styles.sheetTabTextActive : null]}>
+                    RESPONDERS ({(selectedIncident.respondingParamedicIds ?? []).length})
+                  </Text>
+                  {incidentTab === "responders" ? <View style={styles.sheetTabUnderline} /> : null}
+                </Pressable>
+              </View>
+            ) : null}
 
             <ScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
-              {incidentTab === "details" ? (
+              {selectedIncident ? (
                 <>
-                  <View style={styles.sheetInfoRow}>
-                    <Text style={styles.sheetInfoLabel}>Trail section</Text>
-                    <Text style={styles.sheetInfoValue}>Red Hill Descent</Text>
-                  </View>
-                  <View style={styles.sheetInfoRow}>
-                    <Text style={styles.sheetInfoLabel}>Incident notes</Text>
-                    <Text style={styles.sheetInfoValue}>{selectedIncident.description ?? "Runner collapsed after hard descent."}</Text>
-                  </View>
+                  {incidentTab === "details" ? (
+                    <>
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Trail section</Text>
+                        <Text style={styles.sheetInfoValue}>Red Hill Descent</Text>
+                      </View>
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Incident notes</Text>
+                        <Text style={styles.sheetInfoValue}>{selectedIncident.description ?? "Runner collapsed after hard descent."}</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      {(selectedIncident.respondingParamedicIds ?? []).length > 0 ? (
+                        (selectedIncident.respondingParamedicIds ?? []).map((paramedicId: string) => {
+                          const responder = markerById.get(paramedicId);
+                          return (
+                            <View key={paramedicId} style={styles.responderRow}>
+                              <View>
+                                <Text style={styles.responderName}>{responder?.name ?? responder?.label ?? paramedicId}</Text>
+                                <Text style={styles.responderMeta}>{responder?.vehicle ?? "Medical Unit"}</Text>
+                              </View>
+                              <Pressable style={styles.messageButton}>
+                                <Text style={styles.messageButtonText}>Message</Text>
+                              </Pressable>
+                            </View>
+                          );
+                        })
+                      ) : (
+                        <Text style={styles.sheetInfoValue}>No responders assigned yet.</Text>
+                      )}
+                    </>
+                  )}
                 </>
               ) : (
                 <>
-                  {(selectedIncident.respondingParamedicIds ?? []).length > 0 ? (
-                    (selectedIncident.respondingParamedicIds ?? []).map((paramedicId) => {
-                      const responder = markerById.get(paramedicId);
-                      return (
-                        <View key={paramedicId} style={styles.responderRow}>
-                          <View>
-                            <Text style={styles.responderName}>{responder?.name ?? responder?.label ?? paramedicId}</Text>
-                            <Text style={styles.responderMeta}>{responder?.vehicle ?? "Medical Unit"}</Text>
-                          </View>
-                          <Pressable style={styles.messageButton}>
-                            <Text style={styles.messageButtonText}>Message</Text>
-                          </Pressable>
-                        </View>
-                      );
-                    })
-                  ) : (
-                    <Text style={styles.sheetInfoValue}>No responders assigned yet.</Text>
-                  )}
+                  <View style={styles.sheetInfoRow}>
+                    <Text style={styles.sheetInfoLabel}>Role</Text>
+                    <Text style={styles.sheetInfoValue}>{selectedMarker.type === "paramedic" ? "Paramedic" : "Participant"}</Text>
+                  </View>
+                  <View style={styles.sheetInfoRow}>
+                    <Text style={styles.sheetInfoLabel}>Identifier</Text>
+                    <Text style={styles.sheetInfoValue}>{selectedMarker.bibNumber ?? selectedMarker.id}</Text>
+                  </View>
+                  <View style={styles.sheetInfoRow}>
+                    <Text style={styles.sheetInfoLabel}>Status</Text>
+                    <Text style={styles.sheetInfoValue}>
+                      {selectedMarker.staleState === "fresh" ? "Live" : selectedMarker.staleState ?? "Unknown"}
+                    </Text>
+                  </View>
                 </>
               )}
             </ScrollView>
 
-            <View style={styles.sheetActions}>
-              <Pressable style={styles.sheetSecondaryAction}>
-                <Text style={styles.sheetSecondaryActionText}>Call for backup</Text>
-              </Pressable>
-              <Pressable style={styles.sheetSecondaryAction}>
-                <Text style={styles.sheetSecondaryActionText}>Need more help</Text>
-              </Pressable>
-              <Pressable style={styles.sheetPrimaryAction}>
-                <Text style={styles.sheetPrimaryActionText}>Update incident</Text>
-              </Pressable>
-            </View>
+            {selectedIncident ? (
+              <View style={styles.sheetActions}>
+                <Pressable style={styles.sheetSecondaryAction}>
+                  <Text style={styles.sheetSecondaryActionText}>Call for backup</Text>
+                </Pressable>
+                <Pressable style={styles.sheetSecondaryAction}>
+                  <Text style={styles.sheetSecondaryActionText}>Need more help</Text>
+                </Pressable>
+                <Pressable style={styles.sheetPrimaryAction}>
+                  <Text style={styles.sheetPrimaryActionText}>Update incident</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </>
         ) : null}
       </Animated.View>
@@ -1053,8 +2644,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       <View style={styles.bottomMenu}>
         {[
           { id: "map", label: "MAP" },
+          { id: "tracks", label: "TRACKS" },
           { id: "reports", label: "REPORTS" },
-          { id: "units", label: "UNITS" },
           { id: "profile", label: "PROFILE" },
         ].map((tab) => (
           <Pressable key={tab.id} style={styles.bottomMenuItem} onPress={() => setActiveTab(tab.id as typeof activeTab)}>
@@ -1094,11 +2685,11 @@ const styles = StyleSheet.create({
   },
   topHeader: {
     position: "absolute",
-    top: 45,
+    top: 15,
     left: 12,
     right: 12,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     zIndex: 21,
     gap: 8,
   },
@@ -1167,8 +2758,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
-  iconButton: {
-    width: 46,
+  headerActions: {
+    gap: 8,
+  },
+  headerActionButton: {
+    width: 42,
     height: 42,
     borderRadius: 12,
     backgroundColor: "rgba(8, 15, 28, 0.93)",
@@ -1177,15 +2771,62 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  iconButtonText: {
+  headerActionText: {
     color: "#ecf4ff",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "900",
+  },
+  layersIcon: {
+    width: 16,
+    height: 13,
+    justifyContent: "space-between",
+  },
+  layersIconLine: {
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: "#ecf4ff",
+  },
+  layersIconLineMiddle: {
+    width: 12,
+    alignSelf: "center",
+  },
+  locationIcon: {
+    width: 16,
+    height: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  locationIconRing: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.6,
+    borderColor: "#ecf4ff",
+  },
+  locationIconCenterDot: {
+    position: "absolute",
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#ecf4ff",
   },
   menuPopup: {
     position: "absolute",
     top: 94,
     left: 12,
+    width: 288,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.28)",
+    backgroundColor: "rgba(8, 15, 28, 0.96)",
+    zIndex: 24,
+    padding: 12,
+    gap: 10,
+  },
+  layersPopup: {
+    position: "absolute",
+    top: 94,
+    right: 12,
     width: 258,
     borderRadius: 14,
     borderWidth: 1,
@@ -1201,6 +2842,38 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginBottom: 2,
   },
+  menuPageRow: {
+    minHeight: 44,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.16)",
+    backgroundColor: "rgba(13, 24, 42, 0.68)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  menuPageTextWrap: {
+    flex: 1,
+  },
+  menuPageTitle: {
+    color: "#ecf4ff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  menuPageSubtitle: {
+    marginTop: 2,
+    color: "#a5bad3",
+    fontSize: 10,
+    fontWeight: "500",
+  },
+  menuSoonLabel: {
+    color: "#90a6c0",
+    fontSize: 10,
+    fontWeight: "700",
+  },
   layerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1211,6 +2884,116 @@ const styles = StyleSheet.create({
     color: "#d8e3f1",
     fontSize: 12,
     fontWeight: "600",
+  },
+  heatTunerPanel: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 70,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.28)",
+    backgroundColor: "rgba(8, 15, 28, 0.9)",
+    zIndex: 26,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  heatTunerTitle: {
+    color: "#e6effb",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  heatTunerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  heatTunerButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.34)",
+    backgroundColor: "rgba(15, 28, 45, 0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heatTunerButtonText: {
+    color: "#ebf3fe",
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 16,
+  },
+  heatSliderTrack: {
+    width: HEATMAP_SLIDER_WIDTH,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: "rgba(148, 163, 184, 0.34)",
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  heatSliderFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(103, 169, 207, 0.9)",
+  },
+  heatSliderKnob: {
+    position: "absolute",
+    top: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: "#f3f8ff",
+    borderWidth: 1,
+    borderColor: "rgba(10, 20, 35, 0.7)",
+  },
+  tracksHeaderRow: {
+    marginTop: 4,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(177, 199, 224, 0.2)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  tracksHeaderText: {
+    color: "#f1f7ff",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  tracksToggleAllButton: {
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.3)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "rgba(18, 31, 49, 0.7)",
+  },
+  tracksToggleAllText: {
+    color: "#c9d8e9",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  trackLayerRow: {
+    marginLeft: 14,
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  trackLayerLabelWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  trackColorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
   },
   switchTrack: {
     width: 42,
@@ -1232,129 +3015,38 @@ const styles = StyleSheet.create({
   switchKnobOn: {
     alignSelf: "flex-end",
   },
-  rightControls: {
-    position: "absolute",
-    right: 12,
-    top: 190,
-    zIndex: 20,
-    gap: 8,
-  },
-  fab: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: "rgba(8, 15, 28, 0.9)",
-    borderWidth: 1,
-    borderColor: "rgba(177, 199, 224, 0.24)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fabText: {
-    color: "#edf4ff",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  leftControls: {
-    position: "absolute",
-    left: 12,
-    bottom: 94,
-    zIndex: 20,
-    gap: 8,
-  },
-  actionPill: {
-    minHeight: 40,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(8, 15, 28, 0.92)",
-    borderWidth: 1,
-    borderColor: "rgba(177, 199, 224, 0.2)",
-  },
-  actionPillText: {
-    color: "#ebf4ff",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.4,
-  },
-  incidentMarkerWrap: {
-    width: 94,
-    height: 52,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  incidentMarkerBadge: {
-    minHeight: 34,
-    minWidth: 86,
-    borderRadius: 11,
-    backgroundColor: "rgba(9, 16, 30, 0.96)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 111, 111, 0.65)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 9,
-    gap: 6,
-  },
-  incidentIconWrapSmall: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  incidentDot: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: "#ef4444",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
-  incidentIconSmallText: {
+  incidentDotText: {
     color: "#ffffff",
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "900",
-    lineHeight: 12,
+    lineHeight: 14,
   },
-  incidentMarkerText: {
-    color: "#ffd2d2",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 0.5,
-  },
-  incidentPulse: {
-    position: "absolute",
-    width: 46,
-    height: 46,
-    borderRadius: 24,
-    backgroundColor: "rgba(255, 58, 92, 0.45)",
-  },
-  paramedicMarkerBadge: {
-    minHeight: 30,
-    minWidth: 64,
-    borderRadius: 999,
-    backgroundColor: "rgba(8, 25, 18, 0.95)",
-    borderWidth: 1,
-    borderColor: "rgba(125, 233, 145, 0.72)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 8,
-    gap: 5,
-  },
-  paramedicIconWrap: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  paramedicDot: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: "#22c55e",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
-  paramedicIconText: {
-    color: "#05330f",
-    fontSize: 12,
+  paramedicDotText: {
+    color: "#ffffff",
+    fontSize: 11,
     fontWeight: "900",
+    letterSpacing: 0.25,
     lineHeight: 12,
-  },
-  paramedicMarkerText: {
-    color: "#d4ffe0",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 0.4,
   },
   runnerDot: {
     width: 9,
@@ -1432,8 +3124,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 60,
-    height: "76%",
+    bottom: SHEET_BOTTOM_OFFSET,
+    height: SHEET_HEIGHT,
     backgroundColor: "rgba(4, 11, 24, 0.985)",
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
@@ -1472,11 +3164,23 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
     elevation: 4,
   },
+  sheetParamedicIconBg: {
+    backgroundColor: "#22c55e",
+    shadowColor: "#22c55e",
+  },
+  sheetParticipantIconBg: {
+    backgroundColor: "#3b82f6",
+    shadowColor: "#3b82f6",
+  },
   incidentIconText: {
     color: "#ffffff",
     fontSize: 24,
     fontWeight: "900",
     lineHeight: 24,
+  },
+  sheetCompactIconText: {
+    fontSize: 14,
+    lineHeight: 16,
   },
   sheetHeaderTextWrap: {
     flex: 1,
@@ -1591,6 +3295,227 @@ const styles = StyleSheet.create({
     color: "#f9b0b0",
     fontSize: 12,
     fontWeight: "700",
+  },
+  trackCursorOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(245, 158, 11, 0.45)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.96)",
+  },
+  trackCursorInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(245, 158, 11, 0.98)",
+  },
+  tracksDrawer: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 60,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(157, 179, 205, 0.28)",
+    backgroundColor: "rgba(6, 14, 29, 0.96)",
+    zIndex: 31,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+    shadowColor: "#020617",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  tracksDrawerHandle: {
+    alignSelf: "center",
+    width: 56,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(165, 186, 214, 0.7)",
+    marginBottom: 2,
+  },
+  tracksDrawerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  tracksDrawerKicker: {
+    color: "#c7d7ea",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  tracksDrawerMeta: {
+    color: "#95a9c3",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  trackSelectButton: {
+    borderWidth: 1,
+    borderColor: "rgba(168, 191, 218, 0.28)",
+    borderRadius: 12,
+    backgroundColor: "rgba(13, 26, 44, 0.9)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  trackSelectLabel: {
+    color: "#9cb2cd",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  trackSelectValueWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  trackSelectValue: {
+    color: "#eef5ff",
+    fontSize: 14,
+    fontWeight: "800",
+    flexShrink: 1,
+  },
+  trackSelectCaret: {
+    color: "#b3c7de",
+    fontSize: 12,
+    fontWeight: "800",
+    marginLeft: 10,
+  },
+  trackPickerScroll: {
+    maxHeight: 44,
+  },
+  trackPickerContent: {
+    gap: 8,
+    paddingRight: 4,
+  },
+  trackPickerChip: {
+    minHeight: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(158, 184, 212, 0.3)",
+    backgroundColor: "rgba(15, 29, 48, 0.78)",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trackPickerChipActive: {
+    borderColor: "rgba(247, 194, 94, 0.85)",
+    backgroundColor: "rgba(59, 43, 16, 0.82)",
+  },
+  trackPickerChipText: {
+    color: "#d5e2f3",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  trackPickerChipTextActive: {
+    color: "#ffefc9",
+  },
+  profileCard: {
+    borderWidth: 1,
+    borderColor: "rgba(173, 196, 221, 0.24)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "rgba(10, 22, 39, 0.9)",
+    gap: 10,
+  },
+  profileReadoutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  profileMetricLabel: {
+    color: "#91a7c2",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  profileMetricValue: {
+    color: "#f2f7ff",
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 2,
+  },
+  profileMetricSpacer: {
+    width: 8,
+  },
+  profileGradientChart: {
+    position: "relative",
+    height: 108,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(167, 190, 216, 0.22)",
+    backgroundColor: "rgba(15, 31, 53, 0.78)",
+    overflow: "hidden",
+  },
+  profileGradientScrubSurface: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+  },
+  profileGradientChartZeroLine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "50%",
+    height: 1,
+    backgroundColor: "rgba(181, 200, 222, 0.45)",
+  },
+  profileGradientChartSegmentHorizontal: {
+    position: "absolute",
+    height: 2,
+    borderRadius: 1,
+    marginTop: -1,
+  },
+  profileGradientChartSegmentVertical: {
+    position: "absolute",
+    width: 2,
+    borderRadius: 1,
+    marginLeft: -1,
+  },
+  profileGradientChartCursorLine: {
+    position: "absolute",
+    top: 4,
+    bottom: 4,
+    width: 2,
+    backgroundColor: "rgba(255, 235, 189, 0.95)",
+    marginLeft: -1,
+  },
+  profileGradientChartCursorDot: {
+    position: "absolute",
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    marginLeft: -4.5,
+    marginTop: -4.5,
+    backgroundColor: "#f8d889",
+    borderWidth: 1,
+    borderColor: "#fff6de",
+    zIndex: 25,
+  },
+  profileEmpty: {
+    borderWidth: 1,
+    borderColor: "rgba(167, 190, 216, 0.2)",
+    borderRadius: 12,
+    backgroundColor: "rgba(12, 25, 43, 0.66)",
+    minHeight: 78,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  profileEmptyText: {
+    color: "#9bb1cc",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
   },
   sheetActions: {
     flexDirection: "row",

@@ -124,11 +124,6 @@ export function JoinScreen() {
         />
       </View>
 
-      <View style={styles.topStrip}>
-        <Text style={styles.brandPill}>PARAMEDIC EVENT APP</Text>
-        <Text style={styles.brandSub}>ACADEMY FIRST AID</Text>
-      </View>
-
       <Animated.View
         style={[
           styles.card,
@@ -145,11 +140,11 @@ export function JoinScreen() {
           },
         ]}
       >
-        <Text style={styles.heroTitle}>Together on the course.</Text>
+        {/* <Text style={styles.heroTitle}>Together on the course.</Text> */}
         <Text style={styles.heroAccent}>Ready when it matters.</Text>
         <Text style={styles.subtitle}>Real-time coordination for medical teams during races and outdoor events.</Text>
 
-        <Text style={styles.sectionTitle}>Welcome back</Text>
+        {/* <Text style={styles.sectionTitle}>Welcome back</Text> */}
 
         <View style={styles.inputShell}>
           <Text style={styles.inputIcon}>#</Text>
@@ -206,7 +201,7 @@ export function JoinScreen() {
         ) : null}
       </Animated.View>
 
-      <Text style={styles.footerVersion}>SYSTEMS NOMINAL | V2.4.0-STABLE</Text>
+      {/* <Text style={styles.footerVersion}>SYSTEMS NOMINAL | V2.4.0-STABLE</Text> */}
     </SafeAreaView>
   );
 }

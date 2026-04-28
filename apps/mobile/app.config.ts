@@ -19,6 +19,7 @@ const config: ExpoConfig = {
       },
     },
   },
+  plugins: ["@maplibre/maplibre-react-native"],
   extra: {
     eas: {
       projectId: "ffe5d9fa-a192-4b34-be11-5a43598959c3",
