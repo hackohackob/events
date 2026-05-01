@@ -12,6 +12,7 @@ import { InfraModule } from "./infra/infra.module";
 import { LocationsModule } from "./locations/locations.module";
 import { RealtimeModule } from "./realtime/realtime.module";
 import { SearchModule } from "./search/search.module";
+import { UnitsModule } from "./units/units.module";
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { SearchModule } from "./search/search.module";
     AssignmentsModule,
     RealtimeModule,
     SearchModule,
+    UnitsModule,
   ],
 })
 export class AppModule {}

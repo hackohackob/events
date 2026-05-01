@@ -43,7 +43,7 @@ interface ExampleRunnerRecord {
   lastUpdate: string;
 }
 
-interface NamedParamedic {
+export interface NamedParamedic {
   name: string;
   userId: string;
   vehicle: string;

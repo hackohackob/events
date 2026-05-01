@@ -1,5 +1,5 @@
 {
-  "name": "paramedic-event-app",
+  "name": "event",
   "private": true,
   "version": "0.1.0",
   "workspaces": [
@@ -21,10 +21,13 @@
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "dev:backend": "npm run start:dev -w @events/backend",
-    "dev:mobile": "npm run start -w @events/mobile",
+    "dev:web": "npm run dev -w @events/web",
+    "build:web": "npm run build -w @events/web",
+    "dev:mobile": "cd apps/mobile && npx expo start --dev-client",
+    "dev:mobile:android": "cd apps/mobile && expo run:android",
     "load:test": "node scripts/load-test.mjs",
     "docker:up": "docker compose up --build",
-    "reverse:proxy": "adb reverse tcp:8081 tcp:8081"
+    "reverse:proxy": "adb reverse tcp:8082 tcp:8082"
   },
   "devDependencies": {
     "@types/react": "~19.1.10"

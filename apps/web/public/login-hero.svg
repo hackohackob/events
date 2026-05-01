@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1">
+      <stop offset="0%" stop-color="#0b3b2f"/>
+      <stop offset="100%" stop-color="#101820"/>
+    </linearGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#g)" />
+  <g transform="translate(120,120) scale(1.0)" fill="#ffffffaa">
+    <circle cx="120" cy="120" r="72" fill="#0f5132"/>
+    <text x="220" y="160" font-family="Inter, Arial" font-size="64" font-weight="800">PARAMEDIC</text>
+    <text x="220" y="220" font-family="Inter, Arial" font-size="36" fill="#7fd39a">EVENT APP</text>
+  </g>
+</svg>

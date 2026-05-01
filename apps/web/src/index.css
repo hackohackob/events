@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* minimal layout helpers used by the scaffolded pages */
+.app-root {
+  @apply min-h-screen bg-gray-50 text-gray-900;
+}
+
+.container {
+  @apply max-w-7xl mx-auto px-4 py-6;
+}

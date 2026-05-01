@@ -21,6 +21,8 @@ import {
   RasterSource,
   UserLocation,
 } from "@maplibre/maplibre-react-native";
+import { IncidentFAB } from "../incidents/IncidentFAB";
+import { ReportIncidentSheet } from "../incidents/ReportIncidentSheet";
 import { getSocket } from "../realtime/socket-client";
 import { apiFetch } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
@@ -1010,7 +1012,7 @@ function smoothSeriesMovingAverage(values: number[], radius: number): number[] {
   });
 }
 
-const TRACK_OFFSET_STEP_PIXELS = 8;
+const TRACK_OFFSET_STEP_PIXELS = 7;
 const HEATMAP_WEIGHT_MIN = 0.01;
 const HEATMAP_WEIGHT_MAX = 1;
 const HEATMAP_WEIGHT_STEP = 0.01;
@@ -1626,6 +1628,22 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     ]);
   }, [focusedTrack, trackProfileProgress]);
   const trackRenderOffsetOverride = trackModeActive ? 0 : null;
+  const trackLineOffsetValue = (lineOffset: number): any => {
+    if (trackRenderOffsetOverride !== null) {
+      return trackRenderOffsetOverride;
+    }
+    return [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      9,
+      lineOffset * 0.3,
+      12,
+      lineOffset * 0.5,
+      15,
+      lineOffset,
+    ];
+  };
   const shouldMuteTrackColors = layerVisibility.participantsHeatmap && !trackModeActive;
   const allTracksVisible = useMemo(
     () => trackVisuals.length > 0 && trackVisuals.every((track) => trackVisibility[track.id] ?? true),
@@ -1868,33 +1886,54 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   "line-color": shouldMuteTrackColors ? "rgba(105, 114, 126, 0.72)" : "rgba(6, 15, 28, 0.82)",
                   "line-width": 10,
                   "line-opacity": shouldMuteTrackColors ? 0.72 : 1,
-                  "line-offset": trackRenderOffsetOverride ?? track.lineOffset,
+                  "line-offset": trackLineOffsetValue(track.lineOffset),
                 }}
               />
             </GeoJSONSource>
             {layerVisibility.trackGradient ? (
-              track.gradientSegments.map((segment, segmentIndex) => (
+              <>
                 <GeoJSONSource
-                  key={`${track.id}-segment-source-${segmentIndex}`}
-                  id={`${track.id}-segment-source-${segmentIndex}`}
-                  data={lineFeatureFromCoordinates(segment.coordinates)}
+                  id={`${track.id}-gradient-base-source`}
+                  data={lineFeatureFromCoordinates(track.coordinates)}
                 >
                   <Layer
-                    id={`${track.id}-segment-layer-${segmentIndex}`}
+                    id={`${track.id}-gradient-base-layer`}
                     type="line"
                     layout={{
                       "line-join": "round",
                       "line-cap": "round",
                     }}
                     paint={{
-                      "line-color": shouldMuteTrackColors ? "rgb(142,142,142)" : segment.color,
+                      "line-color": shouldMuteTrackColors ? "rgb(142,142,142)" : track.color,
                       "line-width": 6.4,
-                      "line-opacity": shouldMuteTrackColors ? 0.6 : 1,
-                      "line-offset": trackRenderOffsetOverride ?? track.lineOffset,
+                      "line-opacity": shouldMuteTrackColors ? 0.6 : 0.95,
+                      "line-offset": trackLineOffsetValue(track.lineOffset),
                     }}
                   />
                 </GeoJSONSource>
-              ))
+                {track.gradientSegments.map((segment, segmentIndex) => (
+                  <GeoJSONSource
+                    key={`${track.id}-segment-source-${segmentIndex}`}
+                    id={`${track.id}-segment-source-${segmentIndex}`}
+                    data={lineFeatureFromCoordinates(segment.coordinates)}
+                  >
+                    <Layer
+                      id={`${track.id}-segment-layer-${segmentIndex}`}
+                      type="line"
+                      layout={{
+                        "line-join": "round",
+                        "line-cap": "round",
+                      }}
+                      paint={{
+                        "line-color": shouldMuteTrackColors ? "rgb(142,142,142)" : segment.color,
+                        "line-width": 6,
+                        "line-opacity": shouldMuteTrackColors ? 0.6 : 1,
+                        "line-offset": trackLineOffsetValue(track.lineOffset),
+                      }}
+                    />
+                  </GeoJSONSource>
+                ))}
+              </>
             ) : (
               <GeoJSONSource id={`${track.id}-base-source`} data={lineFeatureFromCoordinates(track.coordinates)}>
                 <Layer
@@ -1908,7 +1947,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     "line-color": shouldMuteTrackColors ? "rgb(142,142,142)" : track.color,
                     "line-width": 6.4,
                     "line-opacity": shouldMuteTrackColors ? 0.6 : 1,
-                    "line-offset": trackRenderOffsetOverride ?? track.lineOffset,
+                    "line-offset": trackLineOffsetValue(track.lineOffset),
                   }}
                 />
               </GeoJSONSource>
@@ -2640,6 +2679,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </>
         ) : null}
       </Animated.View>
+
+      <IncidentFAB />
+      <ReportIncidentSheet />
 
       <View style={styles.bottomMenu}>
         {[

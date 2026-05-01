@@ -1,5 +1,6 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "../common/guards/auth.guard";
+import { CreateEventDto } from "./dto/create-event.dto";
 import { EventsService } from "./events.service";
 
 @Controller("events")
@@ -10,6 +11,11 @@ export class EventsController {
   @Get()
   list() {
     return this.eventsService.list();
+  }
+
+  @Post()
+  create(@Body() body: CreateEventDto) {
+    return this.eventsService.create(body);
   }
 
   @Get("tracks")
