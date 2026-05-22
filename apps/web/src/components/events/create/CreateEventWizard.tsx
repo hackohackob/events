@@ -11,20 +11,18 @@ import PointsOfInterestStep from './steps/PointsOfInterestStep'
 import TeamAssignmentStep from './steps/TeamAssignmentStep'
 import ReviewPublishStep from './steps/ReviewPublishStep'
 import type { EventFormData } from '@/lib/types'
-import { MOCK_POIS, MOCK_DAYS } from '@/lib/mock-data'
+import { useCreateEvent } from '@/hooks/useEvents'
+
+const today = new Date()
+today.setHours(0, 0, 0, 0)
 
 const INITIAL_DATA: EventFormData = {
-  title: 'Iron Peak Marathon 2025',
-  description: 'An epic mountain adventure in the heart of the Iron Peak.\nMultiple disciplines over 2 days.',
-  imageUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80',
-  dates: [new Date('2025-06-14'), new Date('2025-06-15')],
-  location: { name: 'Bansko, Bulgaria', coordinates: [23.4865, 41.8437] },
-  days: MOCK_DAYS,
-  pois: MOCK_POIS,
-  assignments: [
-    { userId: '1', camp: 'Base Medical Camp', vehicle: 'atv' },
-    { userId: '2', camp: 'Second Medical Camp', vehicle: 'e-motorcycle' },
-  ],
+  title: '',
+  description: '',
+  imageUrl: null,
+  dates: [today],
+  location: null,
+  days: [{ id: 'day-1', date: today, disciplines: [], pois: [], assignments: [] }],
 }
 
 const variants = {
@@ -38,7 +36,7 @@ export default function CreateEventWizard() {
   const [dir, setDir] = useState(1)
   const [data, setData] = useState<EventFormData>(INITIAL_DATA)
   const [published, setPublished] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const createEvent = useCreateEvent()
 
   const update = useCallback((patch: Partial<EventFormData>) => {
     setData(prev => ({ ...prev, ...patch }))
@@ -52,11 +50,13 @@ export default function CreateEventWizard() {
     setDir(-1)
     setStep(s => Math.max(s - 1, 1))
   }
+  const goToStep = (n: number) => {
+    setDir(n > step ? 1 : -1)
+    setStep(n)
+  }
 
   const handlePublish = async () => {
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 1500))
-    setSaving(false)
+    await createEvent.mutateAsync(data)
     setPublished(true)
   }
 
@@ -96,10 +96,6 @@ export default function CreateEventWizard() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs" style={{ color: '#64748b' }}>
-            <CheckCircle className="w-3.5 h-3.5" style={{ color: '#22c55e' }} />
-            Autosaved 2 min ago
-          </div>
           <button
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
             style={{
@@ -115,20 +111,20 @@ export default function CreateEventWizard() {
           </button>
           <button
             onClick={step === 5 ? handlePublish : goNext}
-            disabled={saving}
+            disabled={createEvent.isLoading}
             className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
             style={{
               background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               boxShadow: '0 4px 14px rgba(34,197,94,0.35)',
             }}
           >
-            {saving ? 'Publishing...' : 'Publish Event'}
+            {createEvent.isLoading ? 'Publishing...' : step === 5 ? 'Publish Event' : 'Next Step'}
           </button>
         </div>
       </div>
 
       {/* Step indicator */}
-      <StepIndicator current={step} />
+      <StepIndicator current={step} onStepClick={goToStep} />
 
       {/* Step content */}
       <div className="flex-1 overflow-hidden relative">
@@ -147,7 +143,7 @@ export default function CreateEventWizard() {
             {step === 2 && <DisciplinesTracksStep data={data} update={update} onNext={goNext} onBack={goPrev} />}
             {step === 3 && <PointsOfInterestStep data={data} update={update} onNext={goNext} onBack={goPrev} />}
             {step === 4 && <TeamAssignmentStep data={data} update={update} onNext={goNext} onBack={goPrev} />}
-            {step === 5 && <ReviewPublishStep data={data} onPublish={handlePublish} onBack={goPrev} publishing={saving} />}
+            {step === 5 && <ReviewPublishStep data={data} onPublish={handlePublish} onBack={goPrev} publishing={createEvent.isLoading} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -157,9 +153,9 @@ export default function CreateEventWizard() {
 
 function PublishedScreen({ data }: { data: EventFormData }) {
   const totalTracks = data.days.reduce((sum, d) => sum + d.disciplines.length, 0)
-  const totalKm = data.days.reduce((sum, d) => sum + d.disciplines.reduce((s2, disc) => s2 + disc.distance, 0), 0)
-  const medicalPOIs = data.pois.filter(p => ['base-medical-camp', 'second-medical-camp', 'medical-point'].includes(p.type)).length
-  const otherPOIs = data.pois.filter(p => !['base-medical-camp', 'second-medical-camp', 'medical-point'].includes(p.type)).length
+  const allPOIs = data.days.flatMap(d => d.pois)
+  const allAssignments = data.days.flatMap(d => d.assignments)
+  const medicalPOIs = allPOIs.filter(p => ['base-medical-camp', 'second-medical-camp', 'medical-point'].includes(p.type)).length
 
   return (
     <div className="flex-1 flex items-center justify-center p-8">
@@ -174,7 +170,6 @@ function PublishedScreen({ data }: { data: EventFormData }) {
           boxShadow: '0 0 60px rgba(34,197,94,0.1)',
         }}
       >
-        {/* Success icon */}
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
@@ -191,18 +186,17 @@ function PublishedScreen({ data }: { data: EventFormData }) {
         <h2 className="text-2xl font-bold text-white mb-1">Event Published!</h2>
         <p className="text-slate-400 mb-8">{data.title} is now live.</p>
 
-        {/* Stats */}
         <div
           className="grid grid-cols-2 gap-3 mb-8 text-left"
           style={{ borderTop: '1px solid rgba(148,163,184,0.1)', paddingTop: '24px' }}
         >
           {[
-            { label: 'Event Dates', value: data.dates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })).join(' – ') + ', ' + data.dates[0].getFullYear(), icon: '📅' },
+            { label: 'Event Dates', value: data.dates.length > 0 ? data.dates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })).join(' – ') + ', ' + data.dates[0].getFullYear() : '—', icon: '📅' },
             { label: 'Location', value: data.location?.name || '—', icon: '📍' },
             { label: 'Disciplines', value: `${totalTracks}`, icon: '🏃' },
-            { label: 'Points of Interest', value: `${data.pois.length}`, icon: '📍' },
-            { label: 'Assigned Medics', value: `${data.assignments.length}`, icon: '👥' },
-            { label: 'Vehicles', value: `${data.assignments.filter(a => a.vehicle).length}`, icon: '🚗' },
+            { label: 'Points of Interest', value: `${allPOIs.length}`, icon: '📍' },
+            { label: 'Assigned Medics', value: `${allAssignments.length}`, icon: '👥' },
+            { label: 'Medical Points', value: `${medicalPOIs}`, icon: '🏥' },
           ].map(({ label, value, icon }) => (
             <div key={label} className="rounded-xl px-4 py-3" style={{ background: 'rgba(255,255,255,0.04)' }}>
               <div className="text-xs mb-1" style={{ color: '#64748b' }}>{icon} {label}</div>
@@ -220,7 +214,7 @@ function PublishedScreen({ data }: { data: EventFormData }) {
               boxShadow: '0 4px 14px rgba(34,197,94,0.35)',
             }}
           >
-            Go to Event
+            Go to Events
           </Link>
           <Link
             href="/events"

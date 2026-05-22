@@ -52,7 +52,7 @@ export const MOCK_EVENTS: EventSummary[] = [
 
 export const MOCK_POIS: PointOfInterest[] = [
   { id: 'p1', type: 'base-medical-camp', coordinates: [23.472, 41.852], name: 'Base Medical Camp' },
-  { id: 'p2', type: 'second-medical-camp', coordinates: [23.495, 41.838], name: 'Second Medical Camp' },
+  { id: 'p2', type: 'ambulance', coordinates: [23.495, 41.838], name: 'Ambulance' },
   { id: 'p3', type: 'medical-point', coordinates: [23.488, 41.825], name: 'Medical Point A' },
   { id: 'p4', type: 'medical-point', coordinates: [23.481, 41.861], name: 'Medical Point B' },
   { id: 'p5', type: 'water-point', coordinates: [23.465, 41.843], name: 'Water Point 1' },
@@ -72,6 +72,8 @@ export const MOCK_DAYS: EventDay[] = [
       { id: 'd1', name: 'Trail Run 21 km', type: 'trail-run', distance: 21.2, elevation: 1230, color: '#8b5cf6', gpxFile: 'trail_run_21k.gpx', gpxUploaded: true },
       { id: 'd2', name: 'Trail Run 10 km', type: 'trail-run', distance: 10.5, elevation: 620, color: '#3b82f6', gpxFile: 'trail_run_10k.gpx', gpxUploaded: true },
     ],
+    pois: [],
+    assignments: [],
   },
   {
     id: 'day-2',
@@ -79,8 +81,10 @@ export const MOCK_DAYS: EventDay[] = [
     disciplines: [
       { id: 'd3', name: 'MTB 45 km', type: 'mtb', distance: 45.3, elevation: 1850, color: '#22c55e', gpxFile: 'mtb_45k.gpx', gpxUploaded: true },
       { id: 'd4', name: 'Marathon 42 km', type: 'marathon', distance: 42.2, elevation: 2400, color: '#f97316', gpxFile: 'marathon_42k.gpx', gpxUploaded: true },
-      { id: 'd5', name: 'Fun Run 5 km', type: 'fun-run', distance: 5.0, elevation: 120, color: '#14b8a6', gpxFile: 'fun_run_5k.gpx', gpxUploaded: true },
+      { id: 'd5', name: 'Run 5 km', type: 'run', distance: 5.0, elevation: 120, color: '#14b8a6', gpxFile: 'run_5k.gpx', gpxUploaded: true },
     ],
+    pois: [],
+    assignments: [],
   },
 ]
 

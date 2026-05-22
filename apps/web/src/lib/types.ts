@@ -9,14 +9,15 @@ export type VehicleType =
 
 export type POIType =
   | 'base-medical-camp'
-  | 'second-medical-camp'
+  | 'ambulance'
   | 'medical-point'
   | 'water-point'
   | 'wc'
   | 'wardrobe'
   | 'parking'
+  | 'custom'
 
-export type DisciplineType = 'trail-run' | 'mtb' | 'marathon' | 'fun-run' | 'bike' | 'swim'
+export type DisciplineType = 'trail-run' | 'mtb' | 'marathon' | 'run' | 'bike' | 'swim'
 
 export interface User {
   id: string
@@ -45,19 +46,25 @@ export interface Discipline {
   elevation: number
   color: string
   gpxFile?: string
+  gpxUrl?: string
   gpxUploaded: boolean
+  gpxCoordinates?: [number, number][]
 }
 
 export interface EventDay {
   id: string
   date: Date
   disciplines: Discipline[]
+  pois: PointOfInterest[]
+  assignments: MedicAssignment[]
 }
 
 export interface MedicAssignment {
   userId: string
-  camp?: string
+  /** Location / Position: camp name, 'Mobile', or custom value */
+  position?: string
   vehicle?: VehicleType
+  description?: string
 }
 
 export interface EventFormData {
@@ -67,8 +74,6 @@ export interface EventFormData {
   dates: Date[]
   location: { name: string; coordinates: [number, number] } | null
   days: EventDay[]
-  pois: PointOfInterest[]
-  assignments: MedicAssignment[]
 }
 
 export interface EventSummary {

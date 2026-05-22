@@ -1,17 +1,53 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createEvent, fetchEvents, fetchTracks, type CreateEventPayload } from "../api/events";
+import {
+  createEvent,
+  fetchEvents,
+  fetchEventById,
+  activateEvent,
+  fetchTracks,
+} from "../api/events";
+import type { EventFormData } from "@/lib/types";
 
 export function useEvents() {
-  return useQuery(["events"], fetchEvents, { staleTime: 1000 * 30 });
+  return useQuery({
+    queryKey: ["events"],
+    queryFn: fetchEvents,
+    staleTime: 1000 * 30,
+  });
 }
 
 export function useTracks() {
-  return useQuery(["tracks"], fetchTracks, { staleTime: 1000 * 60 * 5 });
+  return useQuery({
+    queryKey: ["tracks"],
+    queryFn: fetchTracks,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function useEvent(id: string) {
+  return useQuery({
+    queryKey: ["events", id],
+    queryFn: () => fetchEventById(id),
+    staleTime: 1000 * 30,
+    enabled: !!id,
+  });
 }
 
 export function useCreateEvent() {
   const qc = useQueryClient();
-  return useMutation((payload: CreateEventPayload) => createEvent(payload), {
-    onSuccess: () => qc.invalidateQueries(["events"]),
+  return useMutation({
+    mutationFn: (data: EventFormData) => createEvent(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["events"] }),
+  });
+}
+
+export function useActivateEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => activateEvent(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["events"] });
+      qc.invalidateQueries({ queryKey: ["events", id] });
+    },
   });
 }

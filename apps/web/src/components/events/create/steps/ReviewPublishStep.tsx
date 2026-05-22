@@ -1,18 +1,16 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronLeft, ChevronDown, ChevronRight, Calendar, MapPin, Activity, Mountain, Users, Truck } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { ChevronLeft, ChevronDown, ChevronRight, Calendar, MapPin, Activity, Users, Eye, EyeOff } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER, VEHICLE_CONFIGS } from '@/lib/constants'
 import { MOCK_USERS } from '@/lib/mock-data'
-import { formatShortDate } from '@/lib/utils'
+import { formatShortDate, computeTrackBounds } from '@/lib/utils'
 
-const TRACK_MOCK = [
-  { id: 'tr1', color: '#8b5cf6', coordinates: [[23.472,41.852],[23.478,41.862],[23.488,41.858],[23.495,41.848],[23.490,41.835],[23.480,41.828],[23.470,41.836],[23.472,41.852]] as [number,number][] },
-  { id: 'tr2', color: '#3b82f6', coordinates: [[23.472,41.852],[23.478,41.862],[23.488,41.858],[23.480,41.850],[23.472,41.852]] as [number,number][] },
-  { id: 'tr3', color: '#22c55e', coordinates: [[23.472,41.852],[23.465,41.840],[23.468,41.828],[23.478,41.820],[23.492,41.822],[23.505,41.830],[23.510,41.842],[23.502,41.853],[23.488,41.858],[23.472,41.852]] as [number,number][] },
-  { id: 'tr4', color: '#f97316', coordinates: [[23.472,41.852],[23.460,41.845],[23.452,41.832],[23.458,41.818],[23.472,41.810],[23.488,41.812],[23.500,41.820],[23.510,41.835],[23.510,41.842],[23.502,41.853],[23.488,41.858],[23.472,41.852]] as [number,number][] },
+const FALLBACK_COORDS: [number, number][] = [
+  [23.322, 42.698], [23.330, 42.706], [23.342, 42.702],
+  [23.340, 42.691], [23.328, 42.687], [23.318, 42.693], [23.322, 42.698],
 ]
 
 interface Props {
@@ -56,12 +54,73 @@ function Collapsible({ title, icon: Icon, iconColor, defaultOpen = true, childre
 }
 
 export default function ReviewPublishStep({ data, onPublish, onBack, publishing }: Props) {
-  const medicalPOIs = data.pois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'medical')
-  const waterPOIs = data.pois.filter(p => p.type === 'water-point')
-  const otherPOIs = data.pois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'other')
+  const allPois = data.days.flatMap(d => d.pois)
+  const allAssignments = data.days.flatMap(d => d.assignments)
+  const medicalPOIs = allPois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'medical')
+  const waterPOIs = allPois.filter(p => p.type === 'water-point')
 
   const totalDiscs = data.days.reduce((s, d) => s + d.disciplines.length, 0)
-  const vehiclesCount = data.assignments.filter(a => a.vehicle).length
+  const vehiclesCount = allAssignments.filter(a => a.vehicle).length
+
+  // Build track layers from real data
+  const dayGroups = useMemo(() => data.days.map((day, i) => ({
+    dayId: day.id,
+    dayLabel: `Day ${i + 1}`,
+    dayDate: day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    tracks: day.disciplines.map(disc => ({
+      id: disc.id,
+      name: disc.name,
+      color: disc.color,
+      coordinates: disc.gpxCoordinates?.length ? disc.gpxCoordinates : FALLBACK_COORDS,
+    })),
+  })), [data.days])
+
+  const allTracks = useMemo(() => dayGroups.flatMap(g => g.tracks), [dayGroups])
+
+  const [hiddenTrackIds, setHiddenTrackIds] = useState<Set<string>>(new Set())
+
+  const visibleTrackIds = useMemo(() => {
+    if (allTracks.length === 0) return undefined
+    return new Set(allTracks.filter(t => !hiddenTrackIds.has(t.id)).map(t => t.id))
+  }, [allTracks, hiddenTrackIds])
+
+  const trackBounds = useMemo(() => {
+    const visible = allTracks.filter(t => !hiddenTrackIds.has(t.id))
+    return computeTrackBounds(visible.length > 0 ? visible : allTracks)
+  }, [allTracks, hiddenTrackIds])
+
+  const multipledays = data.days.length > 1
+
+  const toggleTrack = (trackId: string) => {
+    setHiddenTrackIds(prev => {
+      const next = new Set(prev)
+      if (next.has(trackId)) next.delete(trackId)
+      else next.add(trackId)
+      return next
+    })
+  }
+
+  const toggleDay = (dayId: string) => {
+    const group = dayGroups.find(g => g.dayId === dayId)
+    if (!group) return
+    const trackIds = group.tracks.map(t => t.id)
+    const allHidden = trackIds.every(id => hiddenTrackIds.has(id))
+    setHiddenTrackIds(prev => {
+      const next = new Set(prev)
+      if (allHidden) {
+        trackIds.forEach(id => next.delete(id))
+      } else {
+        trackIds.forEach(id => next.add(id))
+      }
+      return next
+    })
+  }
+
+  const isDayHidden = (dayId: string) => {
+    const group = dayGroups.find(g => g.dayId === dayId)
+    if (!group || group.tracks.length === 0) return false
+    return group.tracks.every(t => hiddenTrackIds.has(t.id))
+  }
 
   return (
     <div className="flex h-full">
@@ -111,6 +170,9 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
                         <span className="flex-1 text-slate-300">{disc.name}</span>
                         <span style={{ color: '#64748b' }}>{disc.distance} km</span>
                         <span style={{ color: '#64748b' }}>{disc.elevation.toLocaleString()} m+</span>
+                        {disc.gpxUploaded && (
+                          <span className="text-[10px] font-semibold" style={{ color: '#22c55e' }}>GPX</span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -123,13 +185,13 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
           <Collapsible title="POINTS OF INTEREST" icon={MapPin} iconColor="#ef4444">
             <div className="grid grid-cols-3 gap-2 mt-3">
               {[
-                { label: 'Base Camps', count: data.pois.filter(p => p.type === 'base-medical-camp').length, color: '#ef4444' },
-                { label: 'Second Camps', count: data.pois.filter(p => p.type === 'second-medical-camp').length, color: '#ef4444' },
-                { label: 'Medical Points', count: data.pois.filter(p => p.type === 'medical-point').length, color: '#ef4444' },
+                { label: 'Base Camps', count: allPois.filter(p => p.type === 'base-medical-camp').length, color: '#ef4444' },
+                { label: 'Ambulance', count: allPois.filter(p => p.type === 'ambulance').length, color: '#ef4444' },
+                { label: 'Medical Points', count: allPois.filter(p => p.type === 'medical-point').length, color: '#ef4444' },
                 { label: 'Water Points', count: waterPOIs.length, color: '#3b82f6' },
-                { label: 'WC', count: data.pois.filter(p => p.type === 'wc').length, color: '#8b5cf6' },
-                { label: 'Wardrobe', count: data.pois.filter(p => p.type === 'wardrobe').length, color: '#f97316' },
-                { label: 'Parking', count: data.pois.filter(p => p.type === 'parking').length, color: '#f59e0b' },
+                { label: 'WC', count: allPois.filter(p => p.type === 'wc').length, color: '#8b5cf6' },
+                { label: 'Wardrobe', count: allPois.filter(p => p.type === 'wardrobe').length, color: '#f97316' },
+                { label: 'Parking', count: allPois.filter(p => p.type === 'parking').length, color: '#f59e0b' },
               ].map(({ label, count, color }) => (
                 <div
                   key={label}
@@ -147,7 +209,7 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
           <Collapsible title="TEAM ASSIGNMENT" icon={Users} iconColor="#8b5cf6">
             <div className="grid grid-cols-2 gap-2 mt-3">
               <div className="text-center p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{data.assignments.length}</div>
+                <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{allAssignments.length}</div>
                 <div className="text-xs mt-0.5" style={{ color: '#64748b' }}>Assigned Medics</div>
               </div>
               <div className="text-center p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
@@ -155,23 +217,23 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
                 <div className="text-xs mt-0.5" style={{ color: '#64748b' }}>Vehicles Assigned</div>
               </div>
             </div>
-            {data.assignments.length > 0 && (
+            {allAssignments.length > 0 && (
               <div className="mt-3 space-y-1.5 max-h-36 overflow-y-auto">
-                {data.assignments.slice(0, 5).map((a, i) => {
+                {allAssignments.slice(0, 5).map((a, i) => {
                   const user = MOCK_USERS.find(u => u.id === a.userId)
                   const vehicle = VEHICLE_CONFIGS.find(v => v.value === a.vehicle)
                   if (!user) return null
                   return (
-                    <div key={a.userId} className="flex items-center gap-2 text-xs">
+                    <div key={`${a.userId}-${i}`} className="flex items-center gap-2 text-xs">
                       <span className="text-slate-300 flex-1 truncate">{user.name}</span>
-                      {a.camp && <span className="text-slate-500 truncate max-w-[80px]">{a.camp}</span>}
+                      {a.position && <span className="text-slate-500 truncate max-w-[80px]">{a.position}</span>}
                       {vehicle && <span style={{ color: '#64748b' }}>{vehicle.icon}</span>}
                     </div>
                   )
                 })}
-                {data.assignments.length > 5 && (
+                {allAssignments.length > 5 && (
                   <div className="text-xs text-center mt-1" style={{ color: '#64748b' }}>
-                    +{data.assignments.length - 5} more
+                    +{allAssignments.length - 5} more
                   </div>
                 )}
               </div>
@@ -225,16 +287,75 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
       {/* Right: Map */}
       <div className="flex-1 relative h-full">
         <MapWrapper
-          center={MAP_CENTER}
+          center={trackBounds?.center || MAP_CENTER}
           zoom={11}
-          pois={data.pois}
-          tracks={TRACK_MOCK}
+          pois={allPois}
+          tracks={allTracks}
+          visibleTrackIds={visibleTrackIds}
+          fitBounds={trackBounds?.bounds}
         />
+
+        {/* Track visibility overlay — grouped by day */}
+        {allTracks.length > 0 && (
+          <div className="absolute top-4 right-4 flex flex-col gap-1 max-h-[calc(100%-6rem)] overflow-y-auto">
+            {dayGroups.map((group, dayIdx) => {
+              if (group.tracks.length === 0) return null
+              const dayHidden = isDayHidden(group.dayId)
+              return (
+                <div key={group.dayId} className="flex flex-col gap-1">
+                  {multipledays && (
+                    <button
+                      onClick={() => toggleDay(group.dayId)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all text-left w-full"
+                      style={{
+                        background: 'rgba(10,20,36,0.92)',
+                        border: '1px solid rgba(148,163,184,0.15)',
+                        backdropFilter: 'blur(8px)',
+                        color: dayHidden ? '#475569' : '#94a3b8',
+                        opacity: dayHidden ? 0.6 : 1,
+                      }}
+                    >
+                      {dayHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{group.dayLabel}</span>
+                      <span className="ml-auto text-[10px]" style={{ color: '#64748b' }}>{group.dayDate}</span>
+                    </button>
+                  )}
+                  {group.tracks.map(track => {
+                    const hidden = hiddenTrackIds.has(track.id)
+                    return (
+                      <button
+                        key={track.id}
+                        onClick={() => toggleTrack(track.id)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-all text-left"
+                        style={{
+                          background: 'rgba(10,20,36,0.9)',
+                          border: `1px solid ${hidden ? 'rgba(148,163,184,0.1)' : track.color + '40'}`,
+                          backdropFilter: 'blur(8px)',
+                          opacity: hidden ? 0.5 : 1,
+                          marginLeft: multipledays ? '8px' : '0',
+                        }}
+                      >
+                        {hidden
+                          ? <EyeOff className="w-3 h-3 flex-shrink-0 text-slate-500" />
+                          : <div className="w-2.5 h-1 rounded-full flex-shrink-0" style={{ background: track.color }} />
+                        }
+                        <span className={`text-xs ${hidden ? 'text-slate-500' : 'text-slate-200'}`}>{track.name}</span>
+                        {!hidden && (
+                          <span className="ml-auto text-[10px] text-slate-400">
+                            {data.days.flatMap(d => d.disciplines).find(d => d.id === track.id)?.distance ?? 0} km
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         {/* Summary overlay */}
-        <div
-          className="absolute bottom-4 left-4 right-4"
-          style={{ pointerEvents: 'none' }}
-        >
+        <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
           <div
             className="inline-flex items-center gap-4 px-5 py-3 rounded-2xl"
             style={{
@@ -244,7 +365,7 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
             }}
           >
             <div className="text-center">
-              <div className="font-bold text-sm" style={{ color: '#8b5cf6' }}>{data.assignments.length}</div>
+              <div className="font-bold text-sm" style={{ color: '#8b5cf6' }}>{allAssignments.length}</div>
               <div className="text-[10px]" style={{ color: '#64748b' }}>Medics</div>
             </div>
             <div className="w-px h-6" style={{ background: 'rgba(148,163,184,0.1)' }} />

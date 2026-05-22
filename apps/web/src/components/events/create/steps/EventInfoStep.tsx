@@ -1,29 +1,15 @@
 'use client'
 
-import { useState } from 'react'
-import { MapPin, X, Plus, Upload, Activity, Mountain, CrossIcon, Star, Users, ChevronRight } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { MapPin, X, Upload, ChevronRight } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
-import type { EventFormData, PointOfInterest } from '@/lib/types'
+import type { EventFormData, PointOfInterest, EventDay } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER, MAP_ZOOM } from '@/lib/constants'
-import { getDayOfWeek } from '@/lib/utils'
+import { getDayOfWeek, computeTrackBounds } from '@/lib/utils'
 
-const TRACK_MOCK: Array<{ id: string; coordinates: [number, number][]; color: string }> = [
-  {
-    id: 'tr1', color: '#8b5cf6',
-    coordinates: [[23.472, 41.852],[23.478, 41.862],[23.488, 41.858],[23.495, 41.848],[23.490, 41.835],[23.480, 41.828],[23.470, 41.836],[23.472, 41.852]],
-  },
-  {
-    id: 'tr2', color: '#3b82f6',
-    coordinates: [[23.472, 41.852],[23.478, 41.862],[23.488, 41.858],[23.480, 41.850],[23.472, 41.852]],
-  },
-  {
-    id: 'tr3', color: '#22c55e',
-    coordinates: [[23.472, 41.852],[23.465, 41.840],[23.468, 41.828],[23.478, 41.820],[23.492, 41.822],[23.505, 41.830],[23.510, 41.842],[23.502, 41.853],[23.488, 41.858],[23.472, 41.852]],
-  },
-  {
-    id: 'tr4', color: '#f97316',
-    coordinates: [[23.472, 41.852],[23.460, 41.845],[23.452, 41.832],[23.458, 41.818],[23.472, 41.810],[23.488, 41.812],[23.500, 41.820],[23.510, 41.835],[23.510, 41.842],[23.502, 41.853],[23.488, 41.858],[23.472, 41.852]],
-  },
+const FALLBACK_TRACK: [number, number][] = [
+  [23.322, 42.698], [23.330, 42.706], [23.342, 42.702],
+  [23.340, 42.691], [23.328, 42.687], [23.318, 42.693], [23.322, 42.698],
 ]
 
 interface Props { data: EventFormData; update: (p: Partial<EventFormData>) => void; onNext: () => void }
@@ -32,23 +18,41 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
   const [mapLayer, setMapLayer] = useState<'outdoor' | 'satellite' | 'terrain'>('outdoor')
   const [showAllPoints, setShowAllPoints] = useState(true)
 
-  const medicalPOIs = data.pois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'medical')
-  const otherPOIs = data.pois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'other')
+  const allPois = data.days.flatMap(d => d.pois)
+  const allAssignments = data.days.flatMap(d => d.assignments)
+  const medicalPOIs = allPois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'medical')
+  const otherPOIs = allPois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category !== 'medical')
 
   const totalKm = data.days.reduce((sum, d) => sum + d.disciplines.reduce((s, disc) => s + disc.distance, 0), 0)
   const totalElev = data.days.reduce((sum, d) => sum + d.disciplines.reduce((s, disc) => s + disc.elevation, 0), 0)
 
-  const addDate = () => {
-    const last = data.dates[data.dates.length - 1]
-    const next = new Date(last)
-    next.setDate(next.getDate() + 1)
-    update({ dates: [...data.dates, next] })
+  const realTracks = useMemo(() => data.days.flatMap(day =>
+    day.disciplines.map(disc => ({
+      id: disc.id,
+      coordinates: disc.gpxCoordinates?.length ? disc.gpxCoordinates : FALLBACK_TRACK,
+      color: disc.color,
+    }))
+  ), [data.days])
+
+  const hasRealTracks = realTracks.some(t => t.coordinates !== FALLBACK_TRACK)
+  const trackBounds = useMemo(() => computeTrackBounds(realTracks), [realTracks])
+
+  /** Change the first date; keeps days[0] in sync */
+  const handleDateChange = (isoDate: string) => {
+    if (!isoDate) return
+    const picked = new Date(isoDate + 'T00:00:00')
+    const newDates = [picked, ...data.dates.slice(1)]
+    const newDays: EventDay[] = data.days.map((d, i) => i === 0 ? { ...d, date: picked } : d)
+    if (newDays.length === 0) {
+      newDays.push({ id: 'day-1', date: picked, disciplines: [], pois: [], assignments: [] })
+    }
+    update({ dates: newDates, days: newDays })
   }
 
-  const removeDate = (i: number) => {
-    if (data.dates.length <= 1) return
-    update({ dates: data.dates.filter((_, idx) => idx !== i) })
-  }
+  // Format for <input type="date"> value (YYYY-MM-DD)
+  const firstDateValue = data.dates[0]
+    ? data.dates[0].toLocaleDateString('en-CA') // en-CA gives YYYY-MM-DD
+    : ''
 
   return (
     <div className="flex h-full">
@@ -80,6 +84,7 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
           </div>
 
           {/* Image */}
+          {/* TODO: image upload does not work — wiring the file input to storage is pending */}
           <div>
             <label className="block text-xs font-semibold text-slate-400 mb-2">Event Image</label>
             <div className="flex gap-2">
@@ -106,7 +111,18 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
                 <Upload className="w-4 h-4 mb-1" style={{ color: '#64748b' }} />
                 <span className="text-xs" style={{ color: '#64748b' }}>Upload image</span>
                 <span className="text-[10px] mt-0.5" style={{ color: '#475569' }}>JPG, PNG or WebP</span>
-                <input type="file" className="hidden" accept="image/*" />
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = ev => update({ imageUrl: ev.target?.result as string })
+                    reader.readAsDataURL(file)
+                  }}
+                />
               </label>
             </div>
           </div>
@@ -129,40 +145,39 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
             />
           </div>
 
-          {/* Dates */}
+          {/* First Event Date — calendar picker */}
           <div>
             <label className="block text-xs font-semibold text-slate-400 mb-2">
-              Event Date(s) <span style={{ color: '#ef4444' }}>*</span>
+              Event Start Date <span style={{ color: '#ef4444' }}>*</span>
             </label>
-            <div className="flex flex-wrap gap-2">
-              {data.dates.map((d, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm"
-                  style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(148,163,184,0.12)' }}
-                >
-                  <span className="text-slate-200 font-medium">
-                    {d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-                  </span>
-                  <span className="text-xs" style={{ color: '#64748b' }}>
-                    {getDayOfWeek(d)}
-                  </span>
-                  <button onClick={() => removeDate(i)} className="ml-1">
-                    <X className="w-3.5 h-3.5 text-slate-500 hover:text-slate-300 transition-colors" />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={addDate}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(148,163,184,0.2)', color: '#64748b' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add Another Day
-              </button>
-            </div>
+
+            <input
+              type="date"
+              value={firstDateValue}
+              onChange={e => handleDateChange(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm text-slate-100 outline-none transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(148,163,184,0.12)',
+                colorScheme: 'dark',
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = 'rgba(34,197,94,0.5)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'rgba(148,163,184,0.12)')}
+            />
+
+            {data.dates[0] && (
+              <div className="mt-2 flex items-center gap-2 text-xs" style={{ color: '#64748b' }}>
+                <span className="font-medium text-slate-300">
+                  {data.dates[0].toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                </span>
+              </div>
+            )}
+
+            {/* TODO: when removing a date that already has disciplines configured in Step 2,
+                show a warning dialog listing the affected disciplines before proceeding */}
+            <p className="mt-2 text-[10px] leading-relaxed" style={{ color: '#475569' }}>
+              Additional event days and disciplines are configured in the next step.
+            </p>
           </div>
 
           {/* Location */}
@@ -174,16 +189,18 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
             >
               <MapPin className="w-4 h-4 flex-shrink-0" style={{ color: '#64748b' }} />
               <div className="flex-1 min-w-0">
-                <div className="text-sm text-slate-200 font-medium truncate">{data.location?.name || 'Set location...'}</div>
+                <div className="text-sm text-slate-200 font-medium truncate">{data.location?.name || 'Set location on the map...'}</div>
                 {data.location && (
                   <div className="text-xs mt-0.5 truncate" style={{ color: '#64748b' }}>
                     {data.location.name.split(',').slice(1).join(',').trim() || 'Mountain Range'}
                   </div>
                 )}
               </div>
-              <button onClick={() => update({ location: null })}>
-                <X className="w-3.5 h-3.5 text-slate-500 hover:text-slate-300 transition-colors" />
-              </button>
+              {data.location && (
+                <button onClick={() => update({ location: null })}>
+                  <X className="w-3.5 h-3.5 text-slate-500 hover:text-slate-300 transition-colors" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -197,7 +214,7 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
               { icon: '🏃', label: 'Disciplines', value: data.days.reduce((s, d) => s + d.disciplines.length, 0), color: '#22c55e' },
               { icon: '🏥', label: 'Medical Points', value: medicalPOIs.length, color: '#ef4444' },
               { icon: '📍', label: 'Other Points', value: otherPOIs.length, color: '#f97316' },
-              { icon: '👥', label: 'Assigned Medics', value: data.assignments.length, color: '#8b5cf6' },
+              { icon: '👥', label: 'Assigned Medics', value: allAssignments.length, color: '#8b5cf6' },
             ].map(({ icon, label, value, color }) => (
               <div key={label} className="text-center">
                 <div className="text-lg font-bold" style={{ color }}>{value}</div>
@@ -238,51 +255,6 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
       {/* Map */}
       <div className="flex-1 relative flex flex-col">
         <div className="flex-1 relative">
-          {/* Map search bar */}
-          <div
-            className="absolute top-4 right-4 z-10 flex items-center gap-2"
-          >
-            <div
-              className="flex items-center gap-2 px-3 py-2 rounded-xl"
-              style={{
-                background: 'rgba(10,20,36,0.9)',
-                border: '1px solid rgba(148,163,184,0.15)',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                placeholder="Search location"
-                className="bg-transparent text-sm text-slate-300 outline-none w-32 placeholder-slate-600"
-              />
-            </div>
-            <button
-              className="px-3 py-2 rounded-xl text-sm font-medium transition-all"
-              style={{
-                background: 'rgba(10,20,36,0.9)',
-                border: '1px solid rgba(148,163,184,0.15)',
-                color: '#94a3b8',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              3D
-            </button>
-            <button
-              className="p-2 rounded-xl transition-all"
-              style={{
-                background: 'rgba(10,20,36,0.9)',
-                border: '1px solid rgba(148,163,184,0.15)',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707" />
-              </svg>
-            </button>
-          </div>
-
           {/* Show all points toggle */}
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
             <button
@@ -304,10 +276,11 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
           </div>
 
           <MapWrapper
-            center={data.location?.coordinates || MAP_CENTER}
+            center={data.location?.coordinates || trackBounds?.center || MAP_CENTER}
             zoom={MAP_ZOOM}
-            pois={showAllPoints ? data.pois : []}
-            tracks={TRACK_MOCK}
+            pois={showAllPoints ? allPois : []}
+            tracks={realTracks}
+            fitBounds={trackBounds?.bounds}
           />
         </div>
 
@@ -320,11 +293,11 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
           }}
         >
           {[
-            { icon: '↗', label: 'Total Tracks', value: `${totalKm.toFixed(1)} km`, color: '#22c55e' },
+            { icon: '↗', label: 'Total Distance', value: `${totalKm.toFixed(1)} km`, color: '#22c55e' },
             { icon: '⛰', label: 'Elevation Gain', value: `${totalElev.toLocaleString()} m`, color: '#f97316' },
             { icon: '🏥', label: 'Medical Points', value: medicalPOIs.length, color: '#ef4444' },
             { icon: '📍', label: 'Other Points', value: otherPOIs.length, color: '#f97316' },
-            { icon: '👥', label: 'Assigned Medics', value: data.assignments.length, color: '#8b5cf6' },
+            { icon: '👥', label: 'Assigned Medics', value: allAssignments.length, color: '#8b5cf6' },
           ].map(({ icon, label, value, color }) => (
             <div key={label} className="flex items-center gap-2">
               <span className="text-base">{icon}</span>
@@ -339,7 +312,7 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
 
       {/* Right POI panel */}
       <div
-        className="w-[280px] flex-shrink-0 flex flex-col h-full overflow-y-auto"
+        className="w-[260px] flex-shrink-0 flex flex-col h-full overflow-y-auto"
         style={{
           borderLeft: '1px solid rgba(148,163,184,0.08)',
           background: 'rgba(10,18,34,0.6)',
@@ -348,26 +321,18 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
         <div className="p-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-slate-100 text-sm">Points of Interest</h3>
-            <button
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Point
-            </button>
           </div>
 
-          {/* Medical Points */}
-          <POISection
-            title="MEDICAL POINTS"
-            pois={medicalPOIs}
-          />
-
-          {/* Other Points */}
-          <POISection
-            title="OTHER POINTS"
-            pois={otherPOIs}
-          />
+          {allPois.length === 0 ? (
+            <div className="text-xs text-slate-500 text-center py-8">
+              Points of interest are added<br />in Step 3.
+            </div>
+          ) : (
+            <>
+              <POISection title="MEDICAL POINTS" pois={medicalPOIs} />
+              <POISection title="OTHER POINTS" pois={otherPOIs} />
+            </>
+          )}
 
           {/* Map layers */}
           <div className="mt-5 pt-5" style={{ borderTop: '1px solid rgba(148,163,184,0.08)' }}>
@@ -390,17 +355,6 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
                   </span>
                 </label>
               ))}
-              <label className="flex items-center gap-2 cursor-pointer mt-3">
-                <div
-                  className="w-4 h-4 rounded flex items-center justify-center transition-all"
-                  style={{ background: '#22c55e' }}
-                >
-                  <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
-                  </svg>
-                </div>
-                <span className="text-sm" style={{ color: '#94a3b8' }}>Track Labels</span>
-              </label>
             </div>
           </div>
         </div>
@@ -410,63 +364,37 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
 }
 
 function POISection({ title, pois }: { title: string; pois: PointOfInterest[] }) {
-  const [open, setOpen] = useState(true)
   const grouped = pois.reduce<Record<string, PointOfInterest[]>>((acc, p) => {
     const key = POI_CONFIGS.find(c => c.type === p.type)?.label || p.type
     acc[key] = [...(acc[key] || []), p]
     return acc
   }, {})
 
+  if (pois.length === 0) return null
+
   return (
     <div className="mb-4">
-      <button
-        className="flex items-center justify-between w-full mb-2"
-        onClick={() => setOpen(v => !v)}
-      >
-        <span className="text-xs font-semibold" style={{ color: '#64748b' }}>{title}</span>
-        <svg
-          className="w-3.5 h-3.5 transition-transform"
-          style={{ color: '#64748b', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <div className="space-y-1.5">
-          {Object.entries(grouped).map(([label, items]) => {
-            const config = POI_CONFIGS.find(c => c.label === label)!
-            return (
+      <div className="text-xs font-semibold mb-2" style={{ color: '#64748b' }}>{title}</div>
+      <div className="space-y-1.5">
+        {Object.entries(grouped).map(([label, items]) => {
+          const config = POI_CONFIGS.find(c => c.label === label)!
+          return (
+            <div
+              key={label}
+              className="flex items-center gap-2.5 p-2.5 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.03)' }}
+            >
               <div
-                key={label}
-                className="flex items-center gap-2.5 p-2.5 rounded-xl group cursor-pointer transition-all"
-                style={{ background: 'rgba(255,255,255,0.03)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                style={{ background: config?.bg || '#1e293b', color: config?.color || '#fff' }}
               >
-                <div
-                  className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: config?.bg || '#1e293b' }}
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke={config?.color || '#fff'} strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z" />
-                    <circle cx="12" cy="10" r="3" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-200 truncate">{label}</div>
-                  <div className="text-xs mt-0.5" style={{ color: '#64748b' }}>{items.length} Point{items.length !== 1 ? 's' : ''}</div>
-                </div>
-                <button className="opacity-0 group-hover:opacity-100 transition-opacity">
-                  <svg className="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
-                  </svg>
-                </button>
+                {items.length}
               </div>
-            )
-          })}
-        </div>
-      )}
+              <div className="text-sm font-medium text-slate-300 truncate">{label}</div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -1,0 +1,204 @@
+# Live Event Plan — When Events Go Active
+
+## Current Activation Logic (as of now)
+
+1. **Creating an event** — POST /events — stores it in memory as `status: "draft"`
+2. **Activating an event** — PATCH /events/:id/activate — flips status to `"active"` (just added)
+3. **Join code** — the event's `id` is the join code (e.g. `event-abc123`)
+4. **Mobile app joins** — POST /auth/join with `{ joinCode: eventId, name, bibNumber? }`
+   - Returns a base64-encoded JWT-style token with `{ userId, eventId, role: "runner" }`
+   - The token has no expiry, no signature — just encoded for transport
+   - Any eventId is accepted regardless of status — there is no guard today
+
+**What's missing before going to prod:**
+- Status check on join (only allow joining active events)
+- Real JWT signing (not plain base64)
+- Persistent storage (events reset on backend restart — Postgres needed)
+- A join code that's human-friendly (not the internal UUID)
+
+
+---
+
+## Plan: Live Location Tracking When Event is Active
+
+### 1. Mobile App Sends Location
+
+The mobile app should periodically send GPS updates once the participant has joined an active event.
+
+**WebSocket message (mobile → server):**
+```json
+{
+  "type": "location_update",
+  "token": "<participant JWT>",
+  "lat": 42.6977,
+  "lng": 23.3219,
+  "accuracy": 5,
+  "altitude": 812,
+  "speed": 3.2,
+  "heading": 180,
+  "timestamp": "2025-06-14T09:34:22.000Z"
+}
+```
+
+**Backend receives it:**
+- Decode the token → extract `userId`, `eventId`
+- Validate event is active
+- Store latest location in Redis: `location:{eventId}:{userId}` → `{ lat, lng, timestamp, ... }`
+  - TTL: 30 seconds (if participant stops sending, they disappear from map)
+- Publish to Redis pub/sub channel: `event:{eventId}:locations`
+
+**Send frequency:** every 3–5 seconds from mobile.
+
+---
+
+### 2. Backend Broadcasts to Web Dashboard
+
+The `RealtimeGateway` (WebSocket) subscribes to `event:{eventId}:locations`.
+
+When a location update arrives from Redis pub/sub:
+- Broadcast to all web clients watching that event:
+```json
+{
+  "type": "participant_location",
+  "eventId": "event-abc123",
+  "userId": "user_ivan_petrov",
+  "lat": 42.6977,
+  "lng": 23.3219,
+  "speed": 3.2,
+  "heading": 180,
+  "timestamp": "2025-06-14T09:34:22.000Z"
+}
+```
+
+Web clients join a room per event: `event:{eventId}` on connect.
+
+---
+
+### 3. Web Dashboard Receives & Renders
+
+**React state:** `Map<userId, ParticipantLocation>` updated on each WS message.
+
+**MapLibre layer:** a `GeoJSON` source + `circle` layer (or custom SVG markers).
+- Each participant is a colored dot on the map
+- Color by: bib number range (e.g. 1–100 = blue, 101–200 = orange), or by discipline
+- On hover: show name, bib, speed, last seen
+- Participants not seen in 30s are grayed out / removed
+
+**Performance:** with 500 participants at 3s intervals = ~167 updates/sec.
+- Use a Map (not React state re-renders per update)
+- Debounce map re-render to 1–2fps via `requestAnimationFrame`
+- Store raw locations outside React (ref or zustand), only trigger re-render for UI panels
+
+---
+
+### 4. Participant List Panel (Web Dashboard)
+
+Left panel shows all active participants:
+- Name, bib number
+- Current speed
+- Distance from nearest medic / medical POI
+- "Last seen" badge (green if < 10s, yellow 10–30s, red > 30s)
+- Filter by discipline, status, search by name/bib
+
+---
+
+### 5. Historical Track Storage
+
+While the event is active, persist each location update to Postgres:
+```sql
+CREATE TABLE participant_locations (
+  id          BIGSERIAL PRIMARY KEY,
+  event_id    TEXT NOT NULL,
+  user_id     TEXT NOT NULL,
+  lat         DOUBLE PRECISION NOT NULL,
+  lng         DOUBLE PRECISION NOT NULL,
+  altitude    REAL,
+  speed       REAL,
+  heading     REAL,
+  accuracy    REAL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ON participant_locations (event_id, user_id, recorded_at DESC);
+```
+
+This enables:
+- Replay: after the event, play back any participant's full track
+- Analytics: min/max pace, elevation, distance covered
+- Incident correlation: see where someone was at a given time
+
+Write strategy: batch inserts every 5s (not per message) to avoid DB overload.
+
+---
+
+### 6. Incident System Integration
+
+Incidents already exist (`/incidents`). Extend with location context:
+
+- When a participant presses SOS on mobile → incident auto-created with their last known location
+- Incident assigned to nearest available medic
+- Medic gets push notification with GPS coordinates
+- Web dashboard shows incident pin on map with blinking animation
+
+---
+
+### 7. Data Flow Summary
+
+```
+Mobile App
+  │ WS: location_update (every 3s)
+  ▼
+Backend WS Gateway
+  │ decode token, validate
+  ├── Redis SET location:{eventId}:{userId}  (TTL 30s)
+  ├── Redis PUBLISH event:{eventId}:locations
+  └── Postgres INSERT (batched every 5s)
+          │
+          ▼
+   Redis Pub/Sub bridge
+          │
+          ▼
+   WS broadcast → Web Dashboard
+          │
+          ▼
+   MapLibre markers update (rAF throttled)
+   Participant list panel updates
+```
+
+---
+
+### 8. Backend Work Needed
+
+- [ ] `LocationsModule` WS handler: decode token, validate, store in Redis, publish
+- [ ] Redis bridge in `RealtimeGateway`: subscribe to `event:{eventId}:locations`, broadcast to room
+- [ ] Postgres schema: `participant_locations` table + migration
+- [ ] Batch write service: collect updates in memory, flush every 5s to Postgres
+- [ ] `GET /events/:id/participants` — list active participants with last known location
+- [ ] `GET /events/:id/track/:userId` — full historical track for a participant
+
+### 9. Frontend Work Needed
+
+- [ ] WS connection in event detail page (subscribe on mount, unsubscribe on unmount)
+- [ ] Participant location state: `Map<userId, location>` in a ref (not state, for perf)
+- [ ] MapLibre GeoJSON source for participant dots, updated via rAF loop
+- [ ] Participant list panel component with live indicators
+- [ ] "Last seen" staleness logic (gray out after 30s)
+- [ ] Speed / distance display
+- [ ] SOS / incident pin on map
+
+### 10. Mobile Work Needed
+
+- [ ] `useLocationWatcher` hook: `expo-location` watchPositionAsync every 3s
+- [ ] Send via existing WS connection (already has gateway)
+- [ ] SOS button → send incident event via WS
+- [ ] Show other medics / base camps on participant's own map (received from server)
+
+---
+
+## Priorities
+
+1. **Redis location store + WS broadcast** (backend) — unblocks everything else
+2. **MapLibre participant layer** (web) — the core live view
+3. **Postgres batch write** (backend) — for history, can be async
+4. **Participant panel** (web) — list with indicators
+5. **SOS / incidents** — safety-critical, do early
+6. **Historical replay** — post-event feature, lower priority

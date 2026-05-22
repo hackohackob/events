@@ -11,7 +11,7 @@ const STEPS = [
   { n: 5, title: 'Review & Publish', sub: 'Summary & publish' },
 ]
 
-export default function StepIndicator({ current }: { current: number }) {
+export default function StepIndicator({ current, onStepClick }: { current: number; onStepClick?: (n: number) => void }) {
   return (
     <div
       className="flex items-center px-8 py-0"
@@ -23,14 +23,16 @@ export default function StepIndicator({ current }: { current: number }) {
       {STEPS.map((step, i) => {
         const done = current > step.n
         const active = current === step.n
+        const clickable = !!onStepClick && (done || active)
         return (
           <div key={step.n} className="flex items-center">
             <div
-              className="flex items-center gap-3 py-4 px-2 relative cursor-default select-none"
-              style={active ? {
-                borderBottom: '2px solid #22c55e',
-                marginBottom: '-1px',
-              } : {}}
+              className="flex items-center gap-3 py-4 px-2 relative select-none"
+              style={{
+                cursor: clickable ? 'pointer' : 'default',
+                ...(active ? { borderBottom: '2px solid #22c55e', marginBottom: '-1px' } : {}),
+              }}
+              onClick={() => clickable && onStepClick?.(step.n)}
             >
               {/* Circle */}
               <div
