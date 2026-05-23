@@ -33,7 +33,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          dockerfile: apps/backend/Dockerfile
+          file: apps/backend/Dockerfile
           push: true
           tags: ${{ env.API_IMAGE }}:latest
           cache-from: type=registry,ref=${{ env.API_IMAGE }}:buildcache
@@ -43,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          dockerfile: apps/web/Dockerfile
+          file: apps/web/Dockerfile
           push: true
           tags: ${{ env.WEB_IMAGE }}:latest
           build-args: |
