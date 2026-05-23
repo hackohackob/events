@@ -32,8 +32,13 @@ COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/infra/migrations ./infra/migrations
 COPY example-data ./example-data
 
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S app && adduser -S app -G app && \
+    mkdir -p /app/apps/backend/uploads/incidents \
+             /app/apps/backend/data && \
+    chown -R app:app /app/apps/backend/uploads \
+                     /app/apps/backend/data
+
 USER app
 
-EXPOSE 3000
+EXPOSE 8500
 CMD ["sh", "-c", "npm run migrate:sql -w @events/backend && npm run start -w @events/backend"]

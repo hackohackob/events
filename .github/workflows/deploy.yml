@@ -1,0 +1,85 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  DOCKER_IMAGE: hackohackob1/events-api
+  DOCKER_TAG: latest
+  DEPLOY_HOST: hackohackob.com
+  DEPLOY_USER: hacko
+  DEPLOY_DIR: /opt/events
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: hackohackob1
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: apps/backend/Dockerfile
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+
+      - name: Copy docker-compose.prod.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          source: "docker-compose.prod.yml"
+          target: ${{ env.DEPLOY_DIR }}
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            set -e
+            cd ${{ env.DEPLOY_DIR }}
+            cp docker-compose.prod.yml docker-compose.yml
+            mkdir -p data uploads
+
+            # Pull latest image
+            docker compose pull api
+
+            # Stop old eventsdemo containers if still running (one-time migration)
+            docker stop eventsdemo_api_1 2>/dev/null && docker rm eventsdemo_api_1 2>/dev/null || true
+
+            # Bring up with the new image
+            docker compose up -d --force-recreate --remove-orphans
+
+            # Wait and verify
+            sleep 10
+            echo "=== Container Status ==="
+            docker compose ps
+
+            if ! docker compose ps api | grep -q "healthy\|Up"; then
+              echo "ERROR: api container failed to start"
+              docker compose logs --tail=50 api
+              exit 1
+            fi
+
+            docker system prune -f
+            echo "Deployment completed successfully"
