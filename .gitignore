@@ -8,3 +8,4 @@ coverage
 *.log
 android/
 apps/backend/uploads/gpx/
+.claude/worktrees/
