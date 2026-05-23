@@ -5,7 +5,8 @@ import { Search, ChevronLeft, ChevronRight, Trash2, Users, Copy } from 'lucide-r
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, MedicAssignment, VehicleType } from '@/lib/types'
 import type { MedicMarker } from '@/components/map/MapWrapper'
-import { MOCK_USERS } from '@/lib/mock-data'
+import { useQuery } from '@tanstack/react-query'
+import { fetchUsers } from '@/api/users'
 import { VEHICLE_CONFIGS, MAP_CENTER, POI_CONFIGS } from '@/lib/constants'
 import { getInitials, computeTrackBounds } from '@/lib/utils'
 
@@ -34,6 +35,8 @@ interface Props {
 }
 
 export default function TeamAssignmentStep({ data, update, onNext, onBack }: Props) {
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+
   const [selectedDayId, setSelectedDayId] = useState(data.days[0]?.id || '')
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
@@ -106,14 +109,14 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
     updateDayAssignments(selectedDay.id, currentAssignments.map(a => a.userId === userId ? { ...a, ...patch } : a))
   }
 
-  const filteredUsers = MOCK_USERS.filter(u => {
+  const filteredUsers = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(search.toLowerCase())
     const matchRole = roleFilter === 'all' || u.role === roleFilter
     return matchSearch && matchRole
   })
 
   const assignedUsers = currentAssignments.map(a => {
-    const user = MOCK_USERS.find(u => u.id === a.userId)
+    const user = users.find(u => u.id === a.userId)
     return { ...a, user }
   }).filter(a => a.user)
 
