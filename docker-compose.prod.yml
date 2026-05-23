@@ -24,6 +24,22 @@ services:
       - events_data:/app/apps/backend/data
       - events_uploads:/app/apps/backend/uploads
 
+  web:
+    image: hackohackob1/events-web:latest
+    restart: unless-stopped
+    ports:
+      - "8892:8503"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8503"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   postgres:
     image: postgis/postgis:16-3.4
     restart: unless-stopped

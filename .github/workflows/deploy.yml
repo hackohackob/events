@@ -6,8 +6,8 @@ on:
       - master
 
 env:
-  DOCKER_IMAGE: hackohackob1/events-api
-  DOCKER_TAG: latest
+  API_IMAGE: hackohackob1/events-api
+  WEB_IMAGE: hackohackob1/events-web
   DEPLOY_HOST: hackohackob.com
   DEPLOY_USER: hacko
   DEPLOY_DIR: /opt/events
@@ -35,9 +35,24 @@ jobs:
           context: .
           dockerfile: apps/backend/Dockerfile
           push: true
-          tags: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
-          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+          tags: ${{ env.API_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.API_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.API_IMAGE }}:buildcache,mode=max
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.WEB_IMAGE }}:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://events-api.hackohackob.com/api
+            NEXT_PUBLIC_WS_URL=https://events-api.hackohackob.com/realtime
+            NEXT_PUBLIC_MAPY_API_KEY=${{ secrets.MAPY_API_KEY }}
+            NEXT_PUBLIC_USE_MAPY_TILES=true
+          cache-from: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache,mode=max
 
       - name: Copy docker-compose.prod.yml to server
         uses: appleboy/scp-action@v0.1.7
@@ -61,25 +76,14 @@ jobs:
             cp docker-compose.prod.yml docker-compose.yml
             mkdir -p data uploads
 
-            # Pull latest image
-            docker compose pull api
+            docker pull hackohackob1/events-api:latest
+            docker pull hackohackob1/events-web:latest
 
-            # Stop old eventsdemo containers if still running (one-time migration)
-            docker stop eventsdemo_api_1 2>/dev/null && docker rm eventsdemo_api_1 2>/dev/null || true
+            docker-compose up -d --force-recreate --remove-orphans
 
-            # Bring up with the new image
-            docker compose up -d --force-recreate --remove-orphans
-
-            # Wait and verify
-            sleep 10
+            sleep 15
             echo "=== Container Status ==="
-            docker compose ps
-
-            if ! docker compose ps api | grep -q "healthy\|Up"; then
-              echo "ERROR: api container failed to start"
-              docker compose logs --tail=50 api
-              exit 1
-            fi
+            docker-compose ps
 
             docker system prune -f
             echo "Deployment completed successfully"

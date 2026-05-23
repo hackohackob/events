@@ -24,6 +24,12 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@events/contracts": [
+        "../../packages/contracts/dist/index.d.ts"
+      ],
+      "@events/contracts/*": [
+        "../../packages/contracts/dist/*"
       ]
     },
     "target": "ES2017"

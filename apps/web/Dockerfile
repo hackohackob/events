@@ -4,8 +4,12 @@ WORKDIR /app
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/tsconfig.json ./apps/web/
+COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
 
 RUN npm ci -w @events/web
+
+COPY packages/contracts/src ./packages/contracts/src
+RUN npm run build -w @events/contracts
 
 COPY apps/web/src ./apps/web/src
 COPY apps/web/public ./apps/web/public
