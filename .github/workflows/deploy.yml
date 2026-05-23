@@ -76,14 +76,20 @@ jobs:
             cp docker-compose.prod.yml docker-compose.yml
             mkdir -p data uploads
 
+            # Free disk space before pulling new images
+            docker system prune -f
+            journalctl --vacuum-size=200M || true
+
             docker pull hackohackob1/events-api:latest
             docker pull hackohackob1/events-web:latest
 
-            docker-compose up -d --force-recreate --remove-orphans
+            docker-compose down
+            docker-compose up -d
 
             sleep 15
             echo "=== Container Status ==="
             docker-compose ps
 
-            docker system prune -f
+            # Clean up old images after successful deploy
+            docker image prune -f
             echo "Deployment completed successfully"
