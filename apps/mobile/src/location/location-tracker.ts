@@ -13,7 +13,7 @@ const locationQueue = new OfflineQueue<Record<string, unknown>>();
 // Must be defined at module level (before registerRootComponent) so the native
 // side can wake the JS runtime and find the task handler.
 
-TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }: any) => {
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
   if (error) {
     console.warn("[LocationTask] error:", error.message);
     return;
@@ -42,12 +42,14 @@ TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }: any) => {
     } else {
       const eventId = session.eventId ?? "";
       const medicId = session.userId ?? "";
-      apiFetch(`/events/${eventId}/medics/${medicId}/location`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }).catch(() => {
+      try {
+        await apiFetch(`/events/${eventId}/medics/${medicId}/location`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch {
         locationQueue.enqueue("medic_location", { ...payload, eventId, medicId });
-      });
+      }
     }
   } else {
     // Participant / runner
@@ -58,12 +60,14 @@ TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }: any) => {
       accuracy: location.coords.accuracy ?? undefined,
       timestamp: new Date(location.timestamp).toISOString(),
     };
-    apiFetch(`/events/${eventId}/location`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }).catch(() => {
+    try {
+      await apiFetch(`/events/${eventId}/location`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    } catch {
       locationQueue.enqueue("location.update", payload);
-    });
+    }
   }
 });
 

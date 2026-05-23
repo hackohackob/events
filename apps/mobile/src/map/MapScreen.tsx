@@ -2391,12 +2391,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         <Pressable style={styles.eventChip}>
           <View style={styles.eventHeaderRow}>
             <Text style={styles.eventTitle} numberOfLines={1}>{eventTitle ?? "EVENT"}</Text>
-            <Text style={styles.eventCaret}>v</Text>
+            {/* <Text style={styles.eventCaret}>v</Text> */}
           </View>
           <View style={styles.eventMetaRow}>
-            <Text style={styles.livePill}>LIVE</Text>
-            <Text style={styles.eventMetaText}>02:45:18</Text>
-            <Text style={styles.eventMetaText}>{viewMode.toUpperCase()}</Text>
+            {/* <Text style={styles.livePill}>LIVE</Text> */}
+            {/* <Text style={styles.eventMetaText}>02:45:18</Text> */}
+            {/* <Text style={styles.eventMetaText}>{viewMode.toUpperCase()}</Text> */}
           </View>
         </Pressable>
 

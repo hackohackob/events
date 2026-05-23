@@ -116,6 +116,7 @@ export function JoinScreen() {
       setSession({
         token: response.token,
         eventId: response.session.eventId,
+        userId: response.session.userId,
         role: response.session.role,
       });
       // Fetch event title in background (non-blocking)
