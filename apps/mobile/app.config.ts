@@ -14,7 +14,13 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.a.atanasov.paramediceventapp",
-    permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+    permissions: [
+      "ACCESS_FINE_LOCATION",
+      "ACCESS_COARSE_LOCATION",
+      "ACCESS_BACKGROUND_LOCATION",
+      "FOREGROUND_SERVICE",
+      "FOREGROUND_SERVICE_LOCATION",
+    ],
     adaptiveIcon: {
       foregroundImage: "./assets/icon-android.png",
       backgroundColor: "#030d1f",
