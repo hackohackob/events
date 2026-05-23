@@ -6,6 +6,6 @@ dist
 .expo
 coverage
 *.log
-android/
+/android/
 apps/backend/uploads/gpx/
 .claude/worktrees/
