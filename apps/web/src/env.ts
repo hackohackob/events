@@ -1,24 +1,11 @@
-// Works in both Next.js (process.env.NEXT_PUBLIC_*) and Vite (import.meta.env.VITE_*)
-function getEnv(key: string, fallback = ''): string {
-  if (typeof process !== 'undefined' && process.env) {
-    const nextKey = key.replace(/^VITE_/, 'NEXT_PUBLIC_').replace(/^EXPO_PUBLIC_/, 'NEXT_PUBLIC_')
-    if (process.env[nextKey]) return process.env[nextKey]!
-    if (process.env[key]) return process.env[key]!
-  }
-  // Vite runtime (non-Next.js builds)
-  try {
-    const meta = (import.meta as any)?.env
-    if (meta && meta[key]) return meta[key]
-  } catch {
-    // not available
-  }
-  return fallback
-}
-
-export const apiUrl = getEnv('VITE_API_URL', 'http://localhost:8500/api')
-export const wsUrl = getEnv('VITE_WS_URL', 'http://localhost:8500/realtime')
-export const mapyApiKey = getEnv('VITE_MAPY_API_KEY', '')
-export const useMapyTiles = getEnv('VITE_USE_MAPY_TILES') === 'true'
+// Next.js statically inlines NEXT_PUBLIC_* only when accessed as literals at build time.
+// Dynamic process.env[key] lookups resolve to undefined in the client bundle.
+export const apiUrl =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8500/api'
+export const wsUrl =
+  process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:8500/realtime'
+export const mapyApiKey = process.env.NEXT_PUBLIC_MAPY_API_KEY || ''
+export const useMapyTiles = process.env.NEXT_PUBLIC_USE_MAPY_TILES === 'true'
 
 export function getMapyTilesTemplateUrl(): string | null {
   if (!useMapyTiles || !mapyApiKey) return null
