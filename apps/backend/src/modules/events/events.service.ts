@@ -348,21 +348,15 @@ export class EventsService implements OnModuleInit {
       const unit = user?.unit ?? fallback?.unit ?? null;
       const vehicle = assignment?.vehicle ?? assignment?.position ?? null;
 
-      if (UUID_RE.test(userId)) {
-        await this.db.query(
-          `INSERT INTO event_medics (id, event_id, name, unit, vehicle)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle`,
-          [userId, event.id, name, unit, vehicle],
-        );
-      } else {
-        await this.db.query(
-          `INSERT INTO event_medics (event_id, name, unit, vehicle)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle`,
-          [event.id, name, unit, vehicle],
-        );
-      }
+      // Always let Postgres generate event_medics.id — never use the user UUID as the PK.
+      // If the user UUID were reused as id, a user assigned to two different events would
+      // hit a PK conflict on the second insert (ON CONFLICT covers event_id+name, not id).
+      await this.db.query(
+        `INSERT INTO event_medics (event_id, name, unit, vehicle)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle`,
+        [event.id, name, unit, vehicle],
+      );
     }
   }
 }
