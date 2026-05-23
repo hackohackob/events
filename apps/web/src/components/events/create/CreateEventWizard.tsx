@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, use } from 'react'
 import Link from 'next/link'
 import { ChevronRight, CheckCircle, Eye } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -10,19 +10,29 @@ import DisciplinesTracksStep from './steps/DisciplinesTracksStep'
 import PointsOfInterestStep from './steps/PointsOfInterestStep'
 import TeamAssignmentStep from './steps/TeamAssignmentStep'
 import ReviewPublishStep from './steps/ReviewPublishStep'
-import type { EventFormData } from '@/lib/types'
+import type { EventFormData, Discipline, DisciplineType, POIType, VehicleType } from '@/lib/types'
 import { useCreateEvent } from '@/hooks/useEvents'
+import { fetchEventById, updateEvent } from '@/api/events'
+import { fetchGpxCoordinates } from '@/lib/gpx'
+import { generateMapSnapshot } from '@/lib/mapSnapshot'
 
-const today = new Date()
-today.setHours(0, 0, 0, 0)
+function makeToday() {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
 
-const INITIAL_DATA: EventFormData = {
-  title: '',
-  description: '',
-  imageUrl: null,
-  dates: [today],
-  location: null,
-  days: [{ id: 'day-1', date: today, disciplines: [], pois: [], assignments: [] }],
+function makeInitialData(): EventFormData {
+  const today = makeToday()
+  return {
+    eventKey: `event-${Date.now().toString(36)}`,
+    title: '',
+    description: '',
+    imageUrl: null,
+    dates: [today],
+    location: null,
+    days: [{ id: 'day-1', date: today, disciplines: [], pois: [], assignments: [] }],
+  }
 }
 
 const variants = {
@@ -31,12 +41,75 @@ const variants = {
   exit: (dir: number) => ({ x: dir > 0 ? -40 : 40, opacity: 0 }),
 }
 
-export default function CreateEventWizard() {
+export default function CreateEventWizard({
+  searchParams,
+}: {
+  searchParams?: Promise<{ edit?: string }>
+}) {
+  const params = searchParams ? use(searchParams) : {}
+  const editId = (params as { edit?: string }).edit ?? null
+
   const [step, setStep] = useState(1)
   const [dir, setDir] = useState(1)
-  const [data, setData] = useState<EventFormData>(INITIAL_DATA)
+  const [data, setData] = useState<EventFormData>(() => makeInitialData())
+  const [loading, setLoading] = useState(!!editId)
   const [published, setPublished] = useState(false)
+  const [generatingSnapshot, setGeneratingSnapshot] = useState(false)
   const createEvent = useCreateEvent()
+
+  // Pre-populate when editing an existing event
+  useEffect(() => {
+    if (!editId) return
+    setLoading(true)
+    fetchEventById(editId)
+      .then(async event => {
+        const today = makeToday()
+        const formData: EventFormData = {
+          eventKey: event.id,
+          title: event.title,
+          description: '',
+          imageUrl: event.imageUrl ?? null,
+          dates: event.dates.length > 0
+            ? event.dates.map(d => { const dt = new Date(d); dt.setHours(0, 0, 0, 0); return dt })
+            : [today],
+          location: null,
+          days: await Promise.all((event.days ?? []).map(async (day, dayIdx) => ({
+            id: `day-${dayIdx + 1}`,
+            date: (() => { const d = new Date(day.date); d.setHours(0, 0, 0, 0); return d })(),
+            disciplines: await Promise.all((day.disciplines ?? []).map(async (disc, discIdx): Promise<Discipline> => {
+              const gpxCoords = disc.gpxUrl ? await fetchGpxCoordinates(disc.gpxUrl) : []
+              return {
+                id: `disc-${dayIdx}-${discIdx}`,
+                name: disc.name,
+                type: (disc.type as DisciplineType) || 'trail-run',
+                distance: disc.distanceKm,
+                elevation: disc.ascentMeters,
+                color: disc.color,
+                gpxFile: undefined,
+                gpxUrl: disc.gpxUrl,
+                gpxUploaded: !!disc.gpxUrl,
+                gpxCoordinates: gpxCoords.length > 0 ? gpxCoords : undefined,
+              }
+            })),
+            pois: (day.pois ?? []).map((poi, poiIdx) => ({
+              id: `poi-${dayIdx}-${poiIdx}`,
+              type: poi.type as POIType,
+              coordinates: [poi.lng, poi.lat] as [number, number],
+              name: poi.name,
+            })),
+            assignments: (day.assignments ?? []).map(a => ({
+              userId: a.userId,
+              position: a.position,
+              vehicle: a.vehicle as VehicleType | undefined,
+              description: a.description,
+            })),
+          }))),
+        }
+        setData(formData)
+      })
+      .catch(() => {/* keep blank form on error */})
+      .finally(() => setLoading(false))
+  }, [editId])
 
   const update = useCallback((patch: Partial<EventFormData>) => {
     setData(prev => ({ ...prev, ...patch }))
@@ -56,12 +129,56 @@ export default function CreateEventWizard() {
   }
 
   const handlePublish = async () => {
-    await createEvent.mutateAsync(data)
+    let publishData = data
+
+    // Auto-generate a map snapshot when no event image has been uploaded
+    if (!publishData.imageUrl) {
+      const tracks = publishData.days
+        .flatMap(day =>
+          day.disciplines.map(disc => ({
+            coordinates: (disc.gpxCoordinates ?? []) as [number, number][],
+            color: disc.color,
+          }))
+        )
+        .filter(t => t.coordinates.length >= 2)
+
+      const allPois = publishData.days.flatMap(d => d.pois)
+
+      if (tracks.length > 0 || allPois.length > 0) {
+        setGeneratingSnapshot(true)
+        try {
+          const snapshot = await generateMapSnapshot(tracks, allPois)
+          if (snapshot) {
+            publishData = { ...publishData, imageUrl: snapshot }
+          }
+        } finally {
+          setGeneratingSnapshot(false)
+        }
+      }
+    }
+
+    if (editId) {
+      await updateEvent(editId, publishData)
+    } else {
+      await createEvent.mutateAsync(publishData)
+    }
     setPublished(true)
   }
 
   if (published) {
     return <PublishedScreen data={data} />
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
+            style={{ borderColor: 'rgba(34,197,94,0.3)', borderTopColor: '#22c55e' }} />
+          <span className="text-sm" style={{ color: '#64748b' }}>Loading event data…</span>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -79,14 +196,16 @@ export default function CreateEventWizard() {
         }}
       >
         <div className="flex items-center gap-3">
-          <Link href="/events" className="text-sm transition-colors" style={{ color: '#64748b' }}
+          <Link href={editId ? `/events/${editId}` : '/events'} className="text-sm transition-colors" style={{ color: '#64748b' }}
             onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
             onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
           >
             Events
           </Link>
           <ChevronRight className="w-4 h-4 text-slate-600" />
-          <span className="text-sm font-semibold text-slate-200">Create New Event</span>
+          <span className="text-sm font-semibold text-slate-200">
+            {editId ? 'Edit Event' : 'Create New Event'}
+          </span>
           <span
             className="text-xs font-semibold px-2.5 py-1 rounded-full ml-1"
             style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
@@ -111,14 +230,14 @@ export default function CreateEventWizard() {
           </button>
           <button
             onClick={step === 5 ? handlePublish : goNext}
-            disabled={createEvent.isLoading}
+            disabled={generatingSnapshot || createEvent.isPending}
             className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
             style={{
               background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
               boxShadow: '0 4px 14px rgba(34,197,94,0.35)',
             }}
           >
-            {createEvent.isLoading ? 'Publishing...' : step === 5 ? 'Publish Event' : 'Next Step'}
+            {generatingSnapshot ? 'Generating map…' : createEvent.isPending ? 'Publishing…' : step === 5 ? 'Publish Event' : 'Next Step'}
           </button>
         </div>
       </div>
@@ -143,7 +262,7 @@ export default function CreateEventWizard() {
             {step === 2 && <DisciplinesTracksStep data={data} update={update} onNext={goNext} onBack={goPrev} />}
             {step === 3 && <PointsOfInterestStep data={data} update={update} onNext={goNext} onBack={goPrev} />}
             {step === 4 && <TeamAssignmentStep data={data} update={update} onNext={goNext} onBack={goPrev} />}
-            {step === 5 && <ReviewPublishStep data={data} onPublish={handlePublish} onBack={goPrev} publishing={createEvent.isLoading} />}
+            {step === 5 && <ReviewPublishStep data={data} onPublish={handlePublish} onBack={goPrev} publishing={generatingSnapshot || createEvent.isPending} generatingSnapshot={generatingSnapshot} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -184,13 +303,17 @@ function PublishedScreen({ data }: { data: EventFormData }) {
         </motion.div>
 
         <h2 className="text-2xl font-bold text-white mb-1">Event Published!</h2>
-        <p className="text-slate-400 mb-8">{data.title} is now live.</p>
+        <p className="text-slate-400 mb-2">{data.title} is now live.</p>
+        <p className="text-sm text-slate-500 mb-8">
+          Event code: <span className="font-mono text-slate-300">{data.eventKey}</span>
+        </p>
 
         <div
           className="grid grid-cols-2 gap-3 mb-8 text-left"
           style={{ borderTop: '1px solid rgba(148,163,184,0.1)', paddingTop: '24px' }}
         >
           {[
+            { label: 'Event Code', value: data.eventKey || '—', icon: '#' },
             { label: 'Event Dates', value: data.dates.length > 0 ? data.dates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })).join(' – ') + ', ' + data.dates[0].getFullYear() : '—', icon: '📅' },
             { label: 'Location', value: data.location?.name || '—', icon: '📍' },
             { label: 'Disciplines', value: `${totalTracks}`, icon: '🏃' },

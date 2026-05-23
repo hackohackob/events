@@ -33,3 +33,20 @@ export function getInitials(name: string): string {
     .toUpperCase()
     .slice(0, 2)
 }
+
+export function computeTrackBounds(
+  tracks: Array<{ coordinates: [number, number][] }>
+): { center: [number, number]; bounds: [[number, number], [number, number]] } | null {
+  const allCoords = tracks.flatMap(t => t.coordinates)
+  if (allCoords.length === 0) return null
+  const lngs = allCoords.map(c => c[0])
+  const lats = allCoords.map(c => c[1])
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  return {
+    center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
+    bounds: [[minLng, minLat], [maxLng, maxLat]],
+  }
+}

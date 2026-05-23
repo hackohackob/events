@@ -8,6 +8,7 @@ import { incidentQueue } from "./incidents/persistent-incident-queue";
 import { useIncidentStore } from "./incidents/incident-store";
 import { startLocationLoop } from "./location/location-tracker";
 import { MapScreen } from "./map/MapScreen";
+import { registerPushToken } from "./notifications/push-registration";
 import { useSessionStore } from "./security/session-store";
 
 async function flushIncidentQueue() {
@@ -70,11 +71,18 @@ function GlobalToast() {
 
 export default function App() {
   const token = useSessionStore((state) => state.token);
+  const hydrated = useSessionStore((state) => state.hydrated);
+  const hydrate = useSessionStore((state) => state.hydrate);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
     if (!token) return;
 
     void startLocationLoop();
+    // void registerPushToken(); // TODO: re-enable when ExpoPushTokenManager is available
     void incidentQueue.hydrate().then(() => {
       if (!incidentQueue.isEmpty) void flushIncidentQueue();
     });
@@ -87,6 +95,16 @@ export default function App() {
 
     return () => unsubscribe();
   }, [token]);
+
+  if (!hydrated) {
+    return (
+      <SafeAreaProvider>
+        <View style={[styles.container, { alignItems: "center", justifyContent: "center" }]}>
+          <Text style={{ color: "#64748b", fontSize: 14 }}>Loading…</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>

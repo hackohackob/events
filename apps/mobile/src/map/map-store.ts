@@ -14,11 +14,14 @@ interface Marker {
   description?: string;
   respondingIncidentId?: string;
   respondingParamedicIds?: string[];
+  lastSeenAt?: string;
+  poiType?: string;
 }
 
 export interface RaceTrack {
   id: string;
   label: string;
+  color?: string;
   points: Array<{ lat: number; lng: number }>;
   elevationProfile?: {
     totalAscentMeters: number;

@@ -54,7 +54,7 @@ export function IncidentFAB() {
       try {
         const result = await createIncident(payload);
         store.setIncidentId(result.id);
-        store.setNearbyParamedics(result.nearbyParamedics);
+        store.setNearbyParamedics(result.nearbyParamedics ?? []);
         store.setPhase("success");
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {

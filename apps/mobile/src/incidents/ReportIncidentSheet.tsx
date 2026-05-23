@@ -18,9 +18,9 @@ import { updateIncident, uploadIncidentPhoto } from "./incident-api";
 import { type IncidentType, type NearbyParamedic, useIncidentStore } from "./incident-store";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
-const BOTTOM_MENU_HEIGHT = 60;
+const BOTTOM_BAR_HEIGHT = 60;
 const SHEET_PEEK_HEIGHT = 400;
-const SHEET_HEIGHT = Math.max(400, SCREEN_HEIGHT - 88 - BOTTOM_MENU_HEIGHT);
+const SHEET_HEIGHT = Math.max(400, SCREEN_HEIGHT - 88 - BOTTOM_BAR_HEIGHT);
 const SHEET_EXPANDED_Y = 0;
 const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
 const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
@@ -400,7 +400,7 @@ export function ReportIncidentSheet() {
             </Text>
           </View>
 
-          {nearbyParamedics.length > 0 && (
+          {(nearbyParamedics ?? []).length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>NEAREST RESPONDERS</Text>
               {nearbyParamedics.map((p) => (
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: BOTTOM_MENU_HEIGHT,
+    bottom: BOTTOM_BAR_HEIGHT,
     height: SHEET_HEIGHT,
     backgroundColor: "#090f1d",
     borderTopLeftRadius: 22,

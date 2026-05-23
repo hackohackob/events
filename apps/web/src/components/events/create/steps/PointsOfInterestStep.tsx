@@ -72,8 +72,20 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
 
   const trackBounds = useMemo(() => {
     const tracks = visibleTracks.filter(t => !hiddenTrackIds.has(t.id))
-    return computeTrackBounds(tracks.length > 0 ? tracks : (allTracks.length > 0 ? allTracks : []))
-  }, [visibleTracks, hiddenTrackIds, allTracks])
+    const trackList = tracks.length > 0 ? tracks : (allTracks.length > 0 ? allTracks : [])
+    const trackCoords = trackList.flatMap(t => t.coordinates)
+    const poiCoords = displayedPois.map(p => p.coordinates)
+    const allCoords: [number, number][] = [...trackCoords, ...poiCoords]
+    if (allCoords.length === 0) return null
+    const lngs = allCoords.map(c => c[0])
+    const lats = allCoords.map(c => c[1])
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+    return {
+      center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2] as [number, number],
+      bounds: [[minLng, minLat], [maxLng, maxLat]] as [[number, number], [number, number]],
+    }
+  }, [visibleTracks, hiddenTrackIds, allTracks, displayedPois])
 
   const handleMapClick = useCallback((coords: [number, number]) => {
     if (!selectedType || !selectedDay) return

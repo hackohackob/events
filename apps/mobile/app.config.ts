@@ -5,14 +5,20 @@ const config: ExpoConfig = {
   slug: "paramedic-event-app",
   version: "0.1.0",
   orientation: "portrait",
+  icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
   assetBundlePatterns: ["**/*"],
   ios: {
     supportsTablet: false,
+    icon: "./assets/icon.png",
   },
   android: {
     package: "com.a.atanasov.paramediceventapp",
     permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+    adaptiveIcon: {
+      foregroundImage: "./assets/icon-android.png",
+      backgroundColor: "#030d1f",
+    },
     config: {
       googleMaps: {
         apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? "",

@@ -10,9 +10,12 @@ import { HealthModule } from "./health/health.module";
 import { IncidentsModule } from "./incidents/incidents.module";
 import { InfraModule } from "./infra/infra.module";
 import { LocationsModule } from "./locations/locations.module";
+import { MedicsModule } from "./medics/medics.module";
+import { NotificationsModule } from "./notifications/notifications.module";
 import { RealtimeModule } from "./realtime/realtime.module";
 import { SearchModule } from "./search/search.module";
 import { UnitsModule } from "./units/units.module";
+import { UsersModule } from "./users/users.module";
 
 @Module({
   imports: [
@@ -25,11 +28,14 @@ import { UnitsModule } from "./units/units.module";
     EventsModule,
     EventUsersModule,
     LocationsModule,
+    MedicsModule,
+    NotificationsModule,
     IncidentsModule,
     AssignmentsModule,
     RealtimeModule,
     SearchModule,
     UnitsModule,
+    UsersModule,
   ],
 })
 export class AppModule {}

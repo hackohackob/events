@@ -1,5 +1,5 @@
 import { JoinEventRequest } from "@events/contracts";
-import { IsNotEmpty, IsOptional, IsString } from "class-validator";
+import { IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class JoinEventDto implements JoinEventRequest {
   @IsString()
@@ -7,10 +7,22 @@ export class JoinEventDto implements JoinEventRequest {
   joinCode!: string;
 
   @IsString()
-  @IsNotEmpty()
-  name!: string;
+  @IsOptional()
+  name?: string;
 
   @IsString()
   @IsOptional()
   bibNumber?: string;
+
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @IsIn(["runner", "medic"])
+  @IsOptional()
+  role?: "runner" | "medic";
+
+  @IsString()
+  @IsOptional()
+  medicId?: string;
 }

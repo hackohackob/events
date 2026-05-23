@@ -25,8 +25,8 @@ export default function EventsPage() {
           {data.map((event) => (
             <article className="event-row" key={event.id}>
               <div>
-                <strong>{event.name}</strong>
-                <span>{new Date(event.startTime).toLocaleString()} - {new Date(event.endTime).toLocaleString()}</span>
+                <strong>{event.title}</strong>
+                <span>{event.dates?.[0] ? new Date(event.dates[0]).toLocaleString() : '—'}</span>
               </div>
               <span className={`status-pill ${event.status}`}>{event.status}</span>
             </article>

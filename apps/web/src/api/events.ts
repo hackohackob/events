@@ -38,6 +38,7 @@ export async function fetchEvents() {
 
 export async function createEvent(data: EventFormData) {
   const payload = {
+    id: data.eventKey.trim() || undefined,
     title: data.title,
     description: data.description || undefined,
     imageUrl: data.imageUrl || undefined,
@@ -85,6 +86,55 @@ export async function fetchTracks() {
 
 export async function fetchEventById(id: string): Promise<ApiEventSummary> {
   const res = await client.get(`/events/${id}`);
+  return res.data as ApiEventSummary;
+}
+
+export async function updateEvent(id: string, data: EventFormData) {
+  const payload = {
+    id,
+    title: data.title,
+    description: data.description || undefined,
+    imageUrl: data.imageUrl || undefined,
+    dates: data.dates.map((d) => d.toISOString().split("T")[0]),
+    location: data.location
+      ? { name: data.location.name, lng: data.location.coordinates[0], lat: data.location.coordinates[1] }
+      : undefined,
+    days: data.days.map((day) => ({
+      date: day.date.toISOString().split("T")[0],
+      disciplines: day.disciplines.map((disc) => ({
+        name: disc.name,
+        type: disc.type,
+        distanceKm: disc.distance,
+        ascentMeters: disc.elevation,
+        color: disc.color,
+        gpxFile: disc.gpxFile,
+        gpxUrl: disc.gpxUrl,
+      })),
+      pois: day.pois.map((poi) => ({ type: poi.type, lng: poi.coordinates[0], lat: poi.coordinates[1], name: poi.name })),
+      assignments: day.assignments.map((a) => ({ userId: a.userId, position: a.position, vehicle: a.vehicle, description: a.description })),
+    })),
+  };
+  const res = await client.put(`/events/${id}`, payload);
+  return res.data as ApiEventSummary;
+}
+
+export async function deleteEvent(id: string): Promise<void> {
+  await client.delete(`/events/${id}`);
+}
+
+export async function duplicateEvent(id: string): Promise<ApiEventSummary> {
+  const source = await fetchEventById(id);
+  const payload = {
+    title: `Copy of ${source.title}`,
+    dates: source.dates,
+    days: (source.days ?? []).map((day) => ({
+      date: day.date,
+      disciplines: day.disciplines.map((disc) => ({ ...disc, gpxFile: undefined })),
+      pois: day.pois,
+      assignments: day.assignments,
+    })),
+  };
+  const res = await client.post("/events", payload);
   return res.data as ApiEventSummary;
 }
 

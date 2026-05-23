@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-const baseUrl = process.env.LOAD_TEST_BASE_URL ?? "http://localhost:3000/api";
+const baseUrl = process.env.LOAD_TEST_BASE_URL ?? "http://localhost:8500/api";
 const eventId = process.env.LOAD_TEST_EVENT_ID ?? "event-demo";
 const role = process.env.LOAD_TEST_ROLE ?? "runner";
 const durationSeconds = Number(process.env.LOAD_TEST_DURATION_SECONDS ?? 30);

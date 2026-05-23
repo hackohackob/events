@@ -1,7 +1,13 @@
 import React, { FormEvent, useMemo, useState } from "react";
 import { CalendarDays, CloudUpload, Plus, X } from "lucide-react";
 import DisciplineItem from "./DisciplineItem";
-import type { CreateEventPayload, EventTrack } from "../api/events";
+import type { EventTrack } from "../api/events";
+
+interface CreateEventPayload {
+  title: string;
+  dates: string[];
+  disciplines: Array<{ date: string; title: string; distanceKm: number; ascentMeters: number; color: string; gpxFile: string; trackId?: string }>;
+}
 
 const colors = ["#8A2BE2", "#1E90FF", "#28A745", "#FF8C00"];
 

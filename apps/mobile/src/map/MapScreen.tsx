@@ -23,10 +23,13 @@ import {
 } from "@maplibre/maplibre-react-native";
 import { IncidentFAB } from "../incidents/IncidentFAB";
 import { ReportIncidentSheet } from "../incidents/ReportIncidentSheet";
+import { incidentQueue } from "../incidents/persistent-incident-queue";
+import { useIncidentStore } from "../incidents/incident-store";
 import { getSocket } from "../realtime/socket-client";
 import { apiFetch } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
 import { useMapStore } from "./map-store";
+import { useSessionStore } from "../security/session-store";
 
 const CURRENT_USER_ID = "mobile-user";
 const FALLBACK_LAT = 42.6977;
@@ -34,11 +37,10 @@ const FALLBACK_LNG = 23.3219;
 const FALLBACK_ZOOM = 12.4;
 const USER_FOCUS_ZOOM = 15.8;
 const SCREEN_HEIGHT = Dimensions.get("window").height;
-const BOTTOM_MENU_HEIGHT = 60;
-const SHEET_BOTTOM_OFFSET = BOTTOM_MENU_HEIGHT;
 const SHEET_TOP_MARGIN_EXPANDED = 88;
+const BOTTOM_BAR_HEIGHT = 60;
 const SHEET_PEEK_HEIGHT = 320;
-const SHEET_HEIGHT = Math.max(320, SCREEN_HEIGHT - SHEET_TOP_MARGIN_EXPANDED - SHEET_BOTTOM_OFFSET);
+const SHEET_HEIGHT = Math.max(320, SCREEN_HEIGHT - SHEET_TOP_MARGIN_EXPANDED - BOTTOM_BAR_HEIGHT);
 const SHEET_EXPANDED_Y = 0;
 const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
 const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
@@ -56,6 +58,7 @@ type IncidentTab = "details" | "responders";
 interface EventTrackResponse {
   id: string;
   label: string;
+  color?: string;
   points: Array<{ lat: number; lng: number }>;
   elevationProfile?: {
     totalAscentMeters: number;
@@ -428,9 +431,12 @@ function normalizeTrack(track: unknown, index: number): EventTrackResponse | nul
     return null;
   }
 
+  const color = typeof raw.color === "string" && raw.color.length > 0 ? raw.color : undefined;
+
   return {
     id,
     label,
+    color,
     points: normalizedPoints.map((point) => ({ lat: point.lat, lng: point.lng })),
     elevationProfile: normalizeElevationProfile(raw.elevationProfile, normalizedPoints),
   };
@@ -1051,6 +1057,21 @@ const FUTURE_MENU_PAGES = [
   },
 ];
 
+const POI_CONFIG: Record<string, { color: string; icon: string; size: number }> = {
+  "base-medical-camp": { color: "#ef4444", icon: "🏠", size: 34 },
+  "ambulance":         { color: "#ef4444", icon: "🚑", size: 30 },
+  "medical-point":     { color: "#ef4444", icon: "+",  size: 28 },
+  "water-point":       { color: "#3b82f6", icon: "💧", size: 28 },
+  "wc":                { color: "#8b5cf6", icon: "WC", size: 28 },
+  "wardrobe":          { color: "#f97316", icon: "👕", size: 28 },
+  "parking":           { color: "#f59e0b", icon: "P",  size: 28 },
+  "custom":            { color: "#94a3b8", icon: "★",  size: 28 },
+};
+
+function poiConfig(type?: string): { color: string; icon: string; size: number } {
+  return POI_CONFIG[type ?? ""] ?? { color: "#64748b", icon: "•", size: 26 };
+}
+
 function buildTrackVisuals(tracks: EventTrackResponse[]): TrackVisual[] {
   if (tracks.length === 0) {
     return [];
@@ -1061,7 +1082,7 @@ function buildTrackVisuals(tracks: EventTrackResponse[]): TrackVisual[] {
     const offsetFactor = index - centerIndex;
     const lineOffset = offsetFactor * TRACK_OFFSET_STEP_PIXELS;
     const coordinates = track.points.map((point) => ({ latitude: point.lat, longitude: point.lng }));
-    const baseColor = trackColor(track.id);
+    const baseColor = track.color ?? trackColor(track.id);
 
     return {
       id: track.id,
@@ -1154,6 +1175,8 @@ function padCollapsedBounds(
 }
 
 export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
+  const eventTitle = useSessionStore((state) => state.eventTitle);
+  const clearSession = useSessionStore((state) => state.clear);
   const markers = useMapStore((state) => state.markers);
   const tracks = useMapStore((state) => state.tracks);
   const centerOnUserRequestId = useMapStore((state) => state.centerOnUserRequestId);
@@ -1167,6 +1190,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const sheetBaseTranslate = useRef(new Animated.Value(SHEET_HIDDEN_Y)).current;
   const sheetDragTranslate = useRef(new Animated.Value(0)).current;
   const sheetBaseValueRef = useRef(SHEET_HIDDEN_Y);
+
+  const isOnline = useIncidentStore((s) => s.isOnline);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [justFlushed, setJustFlushed] = useState(false);
+  const offlineBadgeOpacity = useRef(new Animated.Value(1)).current;
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [incidentTab, setIncidentTab] = useState<IncidentTab>("details");
@@ -1286,32 +1314,40 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
     const loadInitialData = async () => {
       try {
-        const [initialLocations, eventTracksPayload] = await Promise.all([
+        const [initialLocations, eventTracksPayload, eventPois] = await Promise.all([
           apiFetch<EventLocationResponse[]>("/locations/event"),
           apiFetch<unknown>("/events/tracks"),
+          apiFetch<Array<{ type: string; name?: string; lat: number; lng: number }>>("/events/pois").catch(() => []),
         ]);
 
         if (!mounted) {
           return;
         }
 
-        setMarkers(
-          initialLocations.map((item) => ({
-            id: item.userId,
-            type: item.type ?? "runner",
-            label: item.label ?? item.userId,
-            lat: item.lat,
-            lng: item.lng,
-            staleState: item.freshness,
-            name: item.name,
-            bibNumber: item.bibNumber,
-            vehicle: item.vehicle,
-            avatarUrl: item.avatarUrl,
-            description: item.description,
-            respondingIncidentId: item.respondingIncidentId,
-            respondingParamedicIds: item.respondingParamedicIds,
-          })),
-        );
+        const locationMarkers = initialLocations.map((item) => ({
+          id: item.userId,
+          type: item.type ?? ("runner" as const),
+          label: item.label ?? item.userId,
+          lat: item.lat,
+          lng: item.lng,
+          staleState: item.freshness,
+          name: item.name,
+          bibNumber: item.bibNumber,
+          vehicle: item.vehicle,
+          avatarUrl: item.avatarUrl,
+          description: item.description,
+          respondingIncidentId: item.respondingIncidentId,
+          respondingParamedicIds: item.respondingParamedicIds,
+        }));
+        const poiMarkers = eventPois.map((poi, i) => ({
+          id: `poi-${i}-${poi.lat}-${poi.lng}`,
+          type: "infrastructure" as const,
+          label: poi.name ?? poi.type,
+          lat: poi.lat,
+          lng: poi.lng,
+          poiType: poi.type,
+        }));
+        setMarkers([...locationMarkers, ...poiMarkers]);
         const normalizedTracks = Array.isArray(eventTracksPayload)
           ? eventTracksPayload
               .map((track, index) => normalizeTrack(track, index))
@@ -1367,6 +1403,28 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       );
     });
 
+    socket.on("medic_location", (payload: { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number }) => {
+      const existing = useMapStore.getState().markers;
+      const filtered = existing.filter((marker) => marker.id !== payload.medicId);
+      const existing_marker = existing.find((marker) => marker.id === payload.medicId);
+      setMarkers(
+        [
+          ...filtered,
+          {
+            id: payload.medicId,
+            type: "paramedic" as const,
+            label: existing_marker?.label ?? payload.name ?? payload.medicId,
+            name: existing_marker?.name ?? payload.name,
+            vehicle: existing_marker?.vehicle,
+            lat: payload.lat,
+            lng: payload.lng,
+            staleState: "fresh" as const,
+            lastSeenAt: new Date().toISOString(),
+          },
+        ].slice(-2200),
+      );
+    });
+
     socket.on("incident.created", (payload) => {
       const existing = useMapStore.getState().markers;
       setMarkers(
@@ -1385,6 +1443,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
     return () => {
       socket.off("location.updated");
+      socket.off("medic_location");
       socket.off("incident.created");
     };
   }, [setMarkers]);
@@ -1523,7 +1582,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         if (marker.type === "incident") {
           return layerVisibility.incidents;
         }
-        return false;
+        // infrastructure (POIs) — always visible
+        return true;
       }),
     [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, nonCurrentMarkers],
   );
@@ -1565,7 +1625,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     [focusedTrack],
   );
   const focusedTrackElevationLineColor = useMemo(
-    () => (focusedTrack ? mixHexColor(trackColor(focusedTrack.id), "#ffffff", 0.12) : "#b9c6d8"),
+    () => (focusedTrack ? mixHexColor(focusedTrack.color ?? trackColor(focusedTrack.id), "#ffffff", 0.12) : "#b9c6d8"),
     [focusedTrack],
   );
   const focusedTrackElevationLinePoints = useMemo(() => {
@@ -1661,6 +1721,43 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ),
     [layerVisibility.incidents, layerVisibility.paramedics, nonCurrentMarkers],
   );
+
+  useEffect(() => {
+    const timer = setInterval(() => setTick((value) => value + 1), 10_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const check = () => {
+      const count = incidentQueue.listReady().length;
+      setOfflineQueueCount(count);
+    };
+    check();
+    const timer = setInterval(check, 3_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (offlineQueueCount === 0) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(offlineBadgeOpacity, { toValue: 0.25, duration: 600, useNativeDriver: true }),
+        Animated.timing(offlineBadgeOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [offlineQueueCount, offlineBadgeOpacity]);
+
+  useEffect(() => {
+    if (isOnline && offlineQueueCount === 0 && !justFlushed) return;
+    if (isOnline && offlineQueueCount === 0) {
+      setJustFlushed(true);
+      offlineBadgeOpacity.setValue(1);
+      const timer = setTimeout(() => setJustFlushed(false), 3_000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOnline, offlineQueueCount, justFlushed, offlineBadgeOpacity]);
 
   useEffect(() => {
     if (respondingParamedics.length === 0) {
@@ -2189,13 +2286,30 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 </View>
               ) : null}
 
-              {marker.type === "paramedic" ? (
-                <View style={styles.paramedicDot}>
-                  <Text style={styles.paramedicDotText}>{markerInitials(marker.label)}</Text>
-                </View>
-              ) : null}
+              {marker.type === "paramedic" ? (() => {
+                const ageMs = marker.lastSeenAt
+                  ? Date.now() - new Date(marker.lastSeenAt).getTime()
+                  : undefined;
+                const isStale = ageMs !== undefined ? ageMs > 90_000 : marker.staleState === "stale" || marker.staleState === "offline";
+                return (
+                  <View style={[styles.paramedicDot, isStale && styles.paramedicDotStale]}>
+                    <Text style={[styles.paramedicDotText, isStale && styles.paramedicDotTextStale]}>
+                      {markerInitials(marker.label)}
+                    </Text>
+                  </View>
+                );
+              })() : null}
 
               {marker.type === "runner" ? <View style={styles.runnerDot} /> : null}
+
+              {marker.type === "infrastructure" ? (() => {
+                const cfg = poiConfig(marker.poiType);
+                return (
+                  <View style={[styles.poiDot, { backgroundColor: cfg.color, width: cfg.size, height: cfg.size, borderRadius: cfg.size / 2 }]}>
+                    <Text style={styles.poiDotText}>{cfg.icon}</Text>
+                  </View>
+                );
+              })() : null}
             </View>
           </Marker>
         ))}
@@ -2246,6 +2360,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         />
       ) : null}
 
+      {/* Offline incident badge */}
+      {(offlineQueueCount > 0 || justFlushed) ? (
+        <Animated.View
+          style={[styles.offlineBadge, { opacity: offlineBadgeOpacity, backgroundColor: justFlushed ? "#22c55e" : "#f97316" }]}
+          pointerEvents="none"
+        >
+          <Text style={styles.offlineBadgeText}>
+            {justFlushed ? "✓ Sent" : `${offlineQueueCount} unsent`}
+          </Text>
+        </Animated.View>
+      ) : null}
+
       {/* <View style={styles.missionStrip}>
         <Text style={styles.missionStripText}>MISSION: ACTIVE</Text>
         <Text style={styles.missionStripText}>ACADEMY FIRST AID</Text>
@@ -2264,7 +2390,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
         <Pressable style={styles.eventChip}>
           <View style={styles.eventHeaderRow}>
-            <Text style={styles.eventTitle}>IRON PEAK MARATHON</Text>
+            <Text style={styles.eventTitle} numberOfLines={1}>{eventTitle ?? "EVENT"}</Text>
             <Text style={styles.eventCaret}>v</Text>
           </View>
           <View style={styles.eventMetaRow}>
@@ -2314,6 +2440,19 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               <Text style={styles.menuSoonLabel}>Soon</Text>
             </Pressable>
           ))}
+          <Pressable
+            style={[styles.menuPageRow, styles.menuLeaveRow]}
+            onPress={() => {
+              setMenuOpen(false);
+              clearSession();
+            }}
+          >
+            <View style={styles.menuPageTextWrap}>
+              <Text style={[styles.menuPageTitle, styles.menuLeaveText]}>Leave Event</Text>
+              <Text style={styles.menuPageSubtitle}>Return to the join screen</Text>
+            </View>
+            <Text style={styles.menuLeaveArrow}>→</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -2683,18 +2822,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       <IncidentFAB />
       <ReportIncidentSheet />
 
+      {/* Bottom navigation bar */}
       <View style={styles.bottomMenu}>
-        {[
-          { id: "map", label: "MAP" },
-          { id: "tracks", label: "TRACKS" },
-          { id: "reports", label: "REPORTS" },
-          { id: "profile", label: "PROFILE" },
-        ].map((tab) => (
-          <Pressable key={tab.id} style={styles.bottomMenuItem} onPress={() => setActiveTab(tab.id as typeof activeTab)}>
-            <Text style={[styles.bottomMenuText, activeTab === tab.id ? styles.bottomMenuTextActive : null]}>{tab.label}</Text>
+        {(["map", "tracks", "reports", "profile"] as const).map((tab) => (
+          <Pressable
+            key={tab}
+            style={styles.bottomMenuItem}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[styles.bottomMenuText, activeTab === tab && styles.bottomMenuTextActive]}>
+              {tab.toUpperCase()}
+            </Text>
           </Pressable>
         ))}
       </View>
+
     </View>
   );
 }
@@ -2916,6 +3058,40 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
+  menuLeaveRow: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(177, 199, 224, 0.12)",
+    marginTop: 4,
+    paddingTop: 4,
+  },
+  menuLeaveText: {
+    color: "#f87171",
+  },
+  menuLeaveArrow: {
+    color: "#f87171",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  offlineBadge: {
+    position: "absolute",
+    top: 90,
+    left: 12,
+    zIndex: 50,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 8,
+  },
+  offlineBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
   layerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -3090,6 +3266,30 @@ const styles = StyleSheet.create({
     letterSpacing: 0.25,
     lineHeight: 12,
   },
+  paramedicDotStale: {
+    backgroundColor: "#475569",
+    borderColor: "rgba(255,255,255,0.4)",
+    opacity: 0.65,
+  },
+  paramedicDotTextStale: {
+    color: "rgba(255,255,255,0.7)",
+  },
+  poiDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#ef4444",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  poiDotText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 16,
+  },
   runnerDot: {
     width: 9,
     height: 9,
@@ -3166,7 +3366,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: SHEET_BOTTOM_OFFSET,
+    bottom: 60,
     height: SHEET_HEIGHT,
     backgroundColor: "rgba(4, 11, 24, 0.985)",
     borderTopLeftRadius: 26,

@@ -4,6 +4,8 @@ import dynamic from 'next/dynamic'
 import type { ComponentProps } from 'react'
 import type MapClient from './MapClient'
 
+export type { MedicMarker } from './MapClient'
+
 const MapClientDynamic = dynamic(() => import('./MapClient'), {
   ssr: false,
   loading: () => (

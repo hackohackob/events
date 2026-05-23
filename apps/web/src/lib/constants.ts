@@ -8,6 +8,7 @@ export const POI_CONFIGS: POIConfig[] = [
   { type: 'wc', label: 'WC', color: '#8b5cf6', bg: '#3b1f7a', category: 'other' },
   { type: 'wardrobe', label: 'Wardrobe', color: '#f97316', bg: '#7c2d12', category: 'other' },
   { type: 'parking', label: 'Parking', color: '#f59e0b', bg: '#78350f', category: 'other' },
+  { type: 'mrs', label: 'Mountain Rescue', color: '#0ea5e9', bg: '#0c4a6e', category: 'medical' },
   { type: 'custom', label: 'Custom Point', color: '#94a3b8', bg: '#1e293b', category: 'other' },
 ]
 

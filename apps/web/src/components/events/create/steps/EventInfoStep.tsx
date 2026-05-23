@@ -25,6 +25,7 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
 
   const totalKm = data.days.reduce((sum, d) => sum + d.disciplines.reduce((s, disc) => s + disc.distance, 0), 0)
   const totalElev = data.days.reduce((sum, d) => sum + d.disciplines.reduce((s, disc) => s + disc.elevation, 0), 0)
+  const eventKeyInvalid = data.eventKey.trim().length > 0 && !/^[a-z0-9][a-z0-9_-]{2,63}$/i.test(data.eventKey.trim())
 
   const realTracks = useMemo(() => data.days.flatMap(day =>
     day.disciplines.map(disc => ({
@@ -63,6 +64,30 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
       >
         <div className="p-6 space-y-5">
           <h2 className="text-base font-bold text-slate-100">Event Information</h2>
+
+          {/* Event code */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-2">
+              Event Code <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <input
+              value={data.eventKey}
+              onChange={e => update({ eventKey: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '') })}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm text-slate-100 outline-none transition-all font-mono"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: eventKeyInvalid ? '1px solid rgba(239,68,68,0.7)' : '1px solid rgba(148,163,184,0.12)',
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = eventKeyInvalid ? 'rgba(239,68,68,0.7)' : 'rgba(34,197,94,0.5)')}
+              onBlur={e => (e.currentTarget.style.borderColor = eventKeyInvalid ? 'rgba(239,68,68,0.7)' : 'rgba(148,163,184,0.12)')}
+              placeholder="event-mphhxbdq"
+              spellCheck={false}
+              autoCapitalize="none"
+            />
+            <p className="mt-2 text-[10px] leading-relaxed" style={{ color: eventKeyInvalid ? '#f87171' : '#475569' }}>
+              Use 3-64 characters: letters, numbers, underscores, or hyphens.
+            </p>
+          </div>
 
           {/* Title */}
           <div>

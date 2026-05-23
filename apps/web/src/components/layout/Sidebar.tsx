@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Calendar, Users, Truck, AlertTriangle,
-  CrossIcon, BarChart2, MessageSquare, Settings, LogOut, Shield,
+  LayoutDashboard, Calendar, Users, Settings, LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -12,11 +12,6 @@ const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/events', icon: Calendar, label: 'Events' },
   { href: '/users', icon: Users, label: 'Users' },
-  { href: '/units', icon: Truck, label: 'Units' },
-  { href: '/incidents', icon: AlertTriangle, label: 'Incidents' },
-  { href: '/medical-points', icon: CrossIcon, label: 'Medical Points' },
-  { href: '/reports', icon: BarChart2, label: 'Reports' },
-  { href: '/messages', icon: MessageSquare, label: 'Messages' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ]
 
@@ -33,15 +28,7 @@ export default function Sidebar() {
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5 mb-2">
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{
-            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
-            boxShadow: '0 4px 12px rgba(34,197,94,0.4)',
-          }}
-        >
-          <Shield className="w-5 h-5 text-white" strokeWidth={2.5} />
-        </div>
+        <Image src="/logo.png" alt="Logo" width={36} height={36} className="flex-shrink-0" />
         <div className="leading-tight">
           <div className="text-white font-bold text-sm tracking-wide">PARAMEDIC</div>
           <div className="text-xs font-medium" style={{ color: '#64748b' }}>EVENT APP</div>
@@ -51,7 +38,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
         {navItems.map(({ href, icon: Icon, label }) => {
-          const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
+          const active = pathname === href || (href !== '/dashboard' && (pathname?.startsWith(href) ?? false))
           return (
             <Link
               key={href}

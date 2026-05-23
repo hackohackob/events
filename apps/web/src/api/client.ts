@@ -3,8 +3,8 @@ import { apiUrl } from "./../env";
 
 const STORAGE_KEY = "session_token";
 
-// Use Vite proxy in development by pointing to relative `/api`.
-const baseURL = import.meta.env.DEV ? "/api" : apiUrl;
+// In Next.js dev, proxy isn't configured, so always use the full apiUrl
+const baseURL = apiUrl;
 
 export const client = axios.create({
   baseURL,

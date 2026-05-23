@@ -1,9 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { Plus, Calendar, MapPin, Users, Activity, ChevronRight } from 'lucide-react'
+import { Plus, Calendar, MapPin, Users, Activity, ChevronRight, Copy, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useEvents } from '@/hooks/useEvents'
-import type { ApiEventSummary } from '@/api/events'
+import { duplicateEvent, deleteEvent, type ApiEventSummary } from '@/api/events'
 
 const STATUS_CONFIG = {
   draft: { label: 'Draft', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', dot: '#f59e0b' },
@@ -23,7 +25,7 @@ function formatEventDates(dates: string[]): string {
   return fmt(dates[0]) + ' – ' + fmt(dates[dates.length - 1]) + ', ' + new Date(dates[0]).getFullYear()
 }
 
-function EventCard({ event }: { event: ApiEventSummary }) {
+function EventCard({ event, onDuplicate, onDelete }: { event: ApiEventSummary; onDuplicate: (id: string) => void; onDelete: (id: string) => void }) {
   const status = STATUS_CONFIG[event.status]
   return (
     <Link
@@ -99,6 +101,44 @@ function EventCard({ event }: { event: ApiEventSummary }) {
             <Users className="w-3 h-3" style={{ color: '#8b5cf6' }} />
             <span><span className="text-slate-300 font-medium">{event.medicCount}</span> medics</span>
           </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); onDuplicate(event.id) }}
+              title="Duplicate event"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.1)' }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.color = '#e2e8f0'
+                ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)'
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.color = '#64748b'
+                ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'
+              }}
+            >
+              <Copy className="w-3 h-3" />
+              Duplicate
+            </button>
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(event.id) }}
+              title="Delete event"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.1)' }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.color = '#f87171'
+                ;(e.currentTarget as HTMLElement).style.background = 'rgba(239,68,68,0.08)'
+                ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(239,68,68,0.25)'
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.color = '#64748b'
+                ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'
+                ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(148,163,184,0.1)'
+              }}
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </button>
+          </div>
         </div>
       </div>
     </Link>
@@ -107,6 +147,38 @@ function EventCard({ event }: { event: ApiEventSummary }) {
 
 export default function EventsPage() {
   const { data: events, isLoading, isError } = useEvents()
+  const queryClient = useQueryClient()
+  const [duplicating, setDuplicating] = useState<string | null>(null)
+
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+  const handleDuplicate = async (id: string) => {
+    if (duplicating) return
+    setDuplicating(id)
+    try {
+      await duplicateEvent(id)
+      await queryClient.invalidateQueries({ queryKey: ['events'] })
+    } finally {
+      setDuplicating(null)
+    }
+  }
+
+  const handleDelete = (id: string) => {
+    setConfirmDelete(id)
+  }
+
+  const confirmAndDelete = async () => {
+    if (!confirmDelete) return
+    setDeleting(confirmDelete)
+    setConfirmDelete(null)
+    try {
+      await deleteEvent(confirmDelete)
+      await queryClient.invalidateQueries({ queryKey: ['events'] })
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   return (
     <div className="flex flex-col flex-1">
@@ -162,7 +234,31 @@ export default function EventsPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
             {(events ?? []).map(event => (
-              <EventCard key={event.id} event={event} />
+              <div key={event.id} className="relative">
+                <EventCard event={event} onDuplicate={handleDuplicate} onDelete={handleDelete} />
+                {duplicating === event.id && (
+                  <div className="absolute inset-0 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(7,14,27,0.7)', backdropFilter: 'blur(4px)' }}>
+                    <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#22c55e' }}>
+                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                      Duplicating…
+                    </div>
+                  </div>
+                )}
+                {deleting === event.id && (
+                  <div className="absolute inset-0 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(7,14,27,0.7)', backdropFilter: 'blur(4px)' }}>
+                    <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#f87171' }}>
+                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                      Deleting…
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
 
             {/* Create new card */}
@@ -196,6 +292,51 @@ export default function EventsPage() {
           </div>
         )}
       </div>
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div
+            className="rounded-2xl p-6 w-full max-w-sm mx-4"
+            style={{ background: '#0d1e36', border: '1px solid rgba(148,163,184,0.12)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(239,68,68,0.12)' }}>
+                <Trash2 className="w-5 h-5" style={{ color: '#f87171' }} />
+              </div>
+              <div>
+                <div className="font-bold text-slate-100">Delete event?</div>
+                <div className="text-sm" style={{ color: '#64748b' }}>
+                  {events?.find(e => e.id === confirmDelete)?.title}
+                </div>
+              </div>
+            </div>
+            <p className="text-sm mb-5" style={{ color: '#94a3b8' }}>
+              This will permanently remove the event. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.1)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAndDelete}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

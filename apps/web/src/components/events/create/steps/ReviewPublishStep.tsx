@@ -18,6 +18,7 @@ interface Props {
   onPublish: () => void
   onBack: () => void
   publishing: boolean
+  generatingSnapshot?: boolean
 }
 
 function Collapsible({ title, icon: Icon, iconColor, defaultOpen = true, children }: {
@@ -53,7 +54,7 @@ function Collapsible({ title, icon: Icon, iconColor, defaultOpen = true, childre
   )
 }
 
-export default function ReviewPublishStep({ data, onPublish, onBack, publishing }: Props) {
+export default function ReviewPublishStep({ data, onPublish, onBack, publishing, generatingSnapshot }: Props) {
   const allPois = data.days.flatMap(d => d.pois)
   const allAssignments = data.days.flatMap(d => d.assignments)
   const medicalPOIs = allPois.filter(p => POI_CONFIGS.find(c => c.type === p.type)?.category === 'medical')
@@ -142,6 +143,7 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
                 <img src={data.imageUrl} alt="" className="w-24 h-16 rounded-xl object-cover flex-shrink-0" />
               )}
               <div className="flex-1 space-y-1.5">
+                <div className="font-mono text-xs text-slate-400">{data.eventKey}</div>
                 <div className="font-semibold text-slate-200 text-sm">{data.title}</div>
                 <div className="flex items-center gap-1.5 text-xs" style={{ color: '#94a3b8' }}>
                   <Calendar className="w-3 h-3" style={{ color: '#64748b' }} />
@@ -271,10 +273,15 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing 
                 boxShadow: '0 4px 14px rgba(34,197,94,0.35)',
               }}
             >
-              {publishing ? (
+              {generatingSnapshot ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Publishing...
+                  Generating map…
+                </>
+              ) : publishing ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Publishing…
                 </>
               ) : (
                 <>Publish Event <ChevronRight className="w-4 h-4" /></>

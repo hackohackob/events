@@ -37,8 +37,8 @@ export default function DashboardPage() {
             {(events.data ?? []).map((event) => (
               <div className="event-row" key={event.id}>
                 <div>
-                  <strong>{event.name}</strong>
-                  <span>{new Date(event.startTime).toLocaleDateString()} - {new Date(event.endTime).toLocaleDateString()}</span>
+                  <strong>{event.title}</strong>
+                  <span>{event.dates?.[0] ? new Date(event.dates[0]).toLocaleDateString() : '—'}</span>
                 </div>
                 <span className={`status-pill ${event.status}`}>{event.status}</span>
               </div>

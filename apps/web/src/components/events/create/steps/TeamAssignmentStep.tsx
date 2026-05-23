@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
-import { Search, ChevronLeft, ChevronRight, Trash2, Users } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, Trash2, Users, Copy } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, MedicAssignment, VehicleType } from '@/lib/types'
 import type { MedicMarker } from '@/components/map/MapWrapper'
@@ -49,6 +49,13 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
   const updateDayAssignments = useCallback((dayId: string, newAssignments: MedicAssignment[]) => {
     update({ days: data.days.map(d => d.id === dayId ? { ...d, assignments: newAssignments } : d) })
   }, [data.days, update])
+
+  const copyFromDay = useCallback((sourceDayId: string) => {
+    if (!selectedDay) return
+    const sourceDay = data.days.find(d => d.id === sourceDayId)
+    if (!sourceDay) return
+    updateDayAssignments(selectedDay.id, [...sourceDay.assignments])
+  }, [data.days, selectedDay, updateDayAssignments])
 
   const positionOptions = useMemo(() => {
     const campTypes = ['base-medical-camp', 'second-medical-camp']
@@ -313,12 +320,49 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
             <span className="text-sm font-semibold text-slate-200">
               {multiDay ? `Day ${dayIndex + 1} Team` : 'Assigned Team'}
             </span>
-            <span
-              className="text-xs font-bold px-2 py-0.5 rounded-full"
-              style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}
-            >
-              {currentAssignments.length}
-            </span>
+            <div className="flex items-center gap-2">
+              {multiDay && dayIndex > 0 && (
+                <div className="relative group">
+                  <button
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition-all"
+                    style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)', color: '#a78bfa' }}
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copy from
+                  </button>
+                  <div
+                    className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden hidden group-hover:flex flex-col"
+                    style={{
+                      background: 'rgba(10,18,34,0.98)', border: '1px solid rgba(148,163,184,0.15)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 20, minWidth: 120,
+                    }}
+                  >
+                    {data.days.filter((_, i) => i !== dayIndex).map((day, _, arr) => {
+                      const srcIdx = data.days.findIndex(d => d.id === day.id)
+                      return (
+                        <button
+                          key={day.id}
+                          onClick={() => copyFromDay(day.id)}
+                          className="flex items-center gap-2 px-3 py-2 text-xs transition-colors text-left"
+                          style={{ color: '#94a3b8', borderBottom: arr.indexOf(day) < arr.length - 1 ? '1px solid rgba(148,163,184,0.06)' : undefined }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(139,92,246,0.12)'; e.currentTarget.style.color = '#a78bfa' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#94a3b8' }}
+                        >
+                          Day {srcIdx + 1}
+                          <span style={{ color: '#64748b' }}>({day.assignments.length})</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              <span
+                className="text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}
+              >
+                {currentAssignments.length}
+              </span>
+            </div>
           </div>
           {multiDay && (
             <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
@@ -378,7 +422,7 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
                       }}
                     >
                       <option value="">Select position...</option>
-                      {positionOptions.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+                      {positionOptions.map((pos, i) => <option key={`${pos}-${i}`} value={pos}>{pos}</option>)}
                     </select>
                   </div>
 

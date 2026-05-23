@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   ValidateNested,
 } from "class-validator";
 
@@ -109,6 +110,13 @@ export class CreateEventAssignmentDto {
 }
 
 export class CreateEventDto {
+  @IsString()
+  @IsOptional()
+  @Matches(/^[a-z0-9][a-z0-9_-]{2,63}$/i, {
+    message: "id must be 3-64 characters and contain only letters, numbers, underscores, or hyphens",
+  })
+  id?: string;
+
   @IsString()
   @IsNotEmpty()
   title!: string;

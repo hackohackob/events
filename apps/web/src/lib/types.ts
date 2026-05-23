@@ -15,6 +15,7 @@ export type POIType =
   | 'wc'
   | 'wardrobe'
   | 'parking'
+  | 'mrs'
   | 'custom'
 
 export type DisciplineType = 'trail-run' | 'mtb' | 'marathon' | 'run' | 'bike' | 'swim'
@@ -68,6 +69,7 @@ export interface MedicAssignment {
 }
 
 export interface EventFormData {
+  eventKey: string
   title: string
   description: string
   imageUrl: string | null

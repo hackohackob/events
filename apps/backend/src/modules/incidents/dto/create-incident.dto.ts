@@ -1,18 +1,20 @@
-import { CreateIncidentRequest, IncidentSeverity } from "@events/contracts";
+import { IncidentSeverity } from "@events/contracts";
 import { IsNumber, IsOptional, IsString } from "class-validator";
 
-export class CreateIncidentDto implements Omit<CreateIncidentRequest, "eventId"> {
+export class CreateIncidentDto {
   @IsNumber()
   lat!: number;
 
   @IsNumber()
   lng!: number;
 
+  @IsOptional()
   @IsString()
-  type!: string;
+  type?: string;
 
+  @IsOptional()
   @IsString()
-  description!: string;
+  description?: string;
 
   @IsOptional()
   @IsString()

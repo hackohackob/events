@@ -4,7 +4,10 @@ import Layout from "../components/Layout";
 import EventForm from "../components/EventForm";
 import MapPlaceholder from "../components/MapPlaceholder";
 import { useCreateEvent, useTracks } from "../hooks/useEvents";
-import type { CreateEventPayload, EventTrack } from "../api/events";
+import type { EventTrack } from "../api/events";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CreateEventPayload = any;
 
 const fallbackTracks: EventTrack[] = [
   { id: "fallback-21k", label: "Trail Run 21 km", color: "#8A2BE2", points: [] },

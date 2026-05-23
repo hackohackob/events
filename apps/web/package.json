@@ -3,33 +3,45 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev --webpack --port 8503",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --port 8503",
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "^15.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@swc/helpers": "^0.5.15",
+    "@tanstack/react-query": "^5.100.7",
+    "axios": "^1.15.2",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "dom-helpers": "^5.2.1",
+    "eventemitter3": "^4.0.7",
+    "fast-equals": "^5.4.0",
     "framer-motion": "^12.0.0",
     "lucide-react": "^0.469.0",
     "maplibre-gl": "^5.0.0",
+    "motion-dom": "^12.38.0",
+    "motion-utils": "^12.36.0",
+    "next": "^16.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "react-map-gl": "^8.0.0",
     "recharts": "^2.15.0",
-    "clsx": "^2.1.1",
+    "recharts-scale": "^0.4.5",
+    "socket.io-client": "^4.8.3",
     "tailwind-merge": "^2.6.0",
-    "date-fns": "^4.1.0"
+    "tiny-invariant": "^1.3.3",
+    "victory-vendor": "^36.9.2"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5",
-    "tailwindcss": "^3.4.17",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8",
     "eslint": "^9",
-    "eslint-config-next": "^15.1.0"
+    "eslint-config-next": "^15.1.0",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5"
   }
 }

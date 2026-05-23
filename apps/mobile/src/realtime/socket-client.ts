@@ -7,9 +7,13 @@ let socket: Socket | null = null;
 export function getSocket(): Socket {
   if (socket) return socket;
   const session = useSessionStore.getState();
-  socket = io(resolveLocalhostUrl(process.env.EXPO_PUBLIC_WS_URL ?? "https://events-api.hackohackob.com/realtime"), {
+  const wsBase = resolveLocalhostUrl(process.env.EXPO_PUBLIC_WS_URL ?? "https://events-api.hackohackob.com/realtime");
+
+  socket = io(wsBase, {
     transports: ["websocket"],
     auth: {
+      // Pass the raw token so the server can decode userId + name for medics
+      token: session.token,
       eventId: session.eventId ?? "event-demo",
       role: session.role,
     },
