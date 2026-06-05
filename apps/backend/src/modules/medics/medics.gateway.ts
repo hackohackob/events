@@ -44,6 +44,7 @@ export class MedicsGateway {
       heading: data.heading,
       speed: data.speed,
       accuracy: data.accuracy,
+      battery: data.battery,
     });
 
     const state = await this.medicsService.getMedicState(eventId, medicId);

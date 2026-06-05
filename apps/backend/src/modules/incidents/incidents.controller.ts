@@ -21,8 +21,10 @@ import { Roles } from "../common/decorators/roles.decorator";
 import { AuthGuard } from "../common/guards/auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { RequestUser } from "../common/types/request-user.type";
+import { CloseIncidentDto } from "./dto/close-incident.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { IncidentActionDto } from "./dto/incident-action.dto";
+import { SendIncidentMessageDto } from "./dto/incident-message.dto";
 import { UpdateIncidentDetailsDto } from "./dto/update-incident-details.dto";
 import { IncidentsService } from "./incidents.service";
 
@@ -47,7 +49,7 @@ export class IncidentsController {
   }
 
   @Patch(":incidentId/action")
-  @Roles("paramedic", "coordinator")
+  @Roles("paramedic", "coordinator", "medic")
   action(
     @CurrentUser() user: RequestUser,
     @Param("incidentId") incidentId: string,
@@ -57,13 +59,38 @@ export class IncidentsController {
   }
 
   @Patch(":incidentId/assign/:paramedicId")
-  @Roles("coordinator")
+  @Roles("coordinator", "medic")
   assign(
     @CurrentUser() user: RequestUser,
     @Param("incidentId") incidentId: string,
     @Param("paramedicId") paramedicId: string,
   ) {
     return this.incidentsService.assign(user.eventId, incidentId, paramedicId);
+  }
+
+  @Patch(":incidentId/close")
+  @Roles("paramedic", "coordinator", "medic")
+  close(
+    @CurrentUser() user: RequestUser,
+    @Param("incidentId") incidentId: string,
+    @Body() body: CloseIncidentDto,
+  ) {
+    return this.incidentsService.close(user.eventId, incidentId, user.userId, body);
+  }
+
+  @Get(":incidentId/messages")
+  listMessages(@CurrentUser() user: RequestUser, @Param("incidentId") incidentId: string) {
+    return this.incidentsService.listMessages(user.eventId, incidentId);
+  }
+
+  @Post(":incidentId/messages")
+  @Roles("paramedic", "coordinator", "medic")
+  sendMessage(
+    @CurrentUser() user: RequestUser,
+    @Param("incidentId") incidentId: string,
+    @Body() body: SendIncidentMessageDto,
+  ) {
+    return this.incidentsService.addMessage(user.eventId, incidentId, user.userId, body);
   }
 
   @Patch(":incidentId")

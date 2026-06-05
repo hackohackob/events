@@ -1,29 +1,31 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Animated,
-  Dimensions,
   Image,
   Keyboard,
-  PanResponder,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import BottomSheet, {
+  BottomSheetBackdrop,
+  BottomSheetFooter,
+  type BottomSheetFooterProps,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from "@gorhom/bottom-sheet";
+import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { updateIncident, uploadIncidentPhoto } from "./incident-api";
-import { type IncidentType, type NearbyParamedic, useIncidentStore } from "./incident-store";
-
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
-const BOTTOM_BAR_HEIGHT = 60;
-const SHEET_PEEK_HEIGHT = 400;
-const SHEET_HEIGHT = Math.max(400, SCREEN_HEIGHT - 88 - BOTTOM_BAR_HEIGHT);
-const SHEET_EXPANDED_Y = 0;
-const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
-const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
+import {
+  type IncidentSeverity,
+  type IncidentType,
+  useIncidentStore,
+} from "./incident-store";
 
 const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: string; color: string }> = [
   { id: "medical", label: "Medical", icon: "🏥", color: "#FF6B6B" },
@@ -34,156 +36,146 @@ const INCIDENT_TYPES: Array<{ id: IncidentType; label: string; icon: string; col
   { id: "other", label: "Other", icon: "⚠️", color: "#6B7F9A" },
 ];
 
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)}m`;
-  return `${(meters / 1000).toFixed(1)}km`;
-}
+const SEVERITIES: Array<{ id: IncidentSeverity; label: string; color: string }> = [
+  { id: "low", label: "Low", color: "#22c55e" },
+  { id: "medium", label: "Medium", color: "#eab308" },
+  { id: "high", label: "High", color: "#f97316" },
+  { id: "critical", label: "Critical", color: "#ef4444" },
+];
 
-function Checkmark({ visible }: { visible: boolean }) {
-  const scale = useRef(new Animated.Value(0)).current;
+const SHEET_SNAP_POINTS = ["80%", "96%"];
 
+// ─── Live creation-status banner ──────────────────────────────────────────────
+
+function StatusBanner() {
+  const status = useIncidentStore((s) => s.creationStatus);
+  const name = useIncidentStore((s) => s.incidentName);
+  const nearby = useIncidentStore((s) => s.nearbyParamedics);
+
+  const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.spring(scale, {
-      toValue: visible ? 1 : 0,
-      damping: 18,
-      mass: 0.8,
-      stiffness: 340,
-      useNativeDriver: true,
-    }).start();
-  }, [visible, scale]);
-
-  return (
-    <Animated.View style={[styles.checkmarkWrap, { transform: [{ scale }] }]}>
-      <View style={styles.checkmarkCircle}>
-        <View style={styles.checkmarkShort} />
-        <View style={styles.checkmarkLong} />
-      </View>
-    </Animated.View>
-  );
-}
-
-function OfflineBanner({ visible }: { visible: boolean }) {
-  const translateY = useRef(new Animated.Value(-60)).current;
-
-  useEffect(() => {
-    Animated.spring(translateY, {
-      toValue: visible ? 0 : -60,
-      damping: 28,
-      mass: 1,
-      stiffness: 280,
-      useNativeDriver: true,
-    }).start();
-  }, [visible, translateY]);
-
-  return (
-    <Animated.View style={[styles.offlineBanner, { transform: [{ translateY }] }]} pointerEvents="none">
-      <Text style={styles.offlineBannerIcon}>📡</Text>
-      <View>
-        <Text style={styles.offlineBannerTitle}>Saved offline</Text>
-        <Text style={styles.offlineBannerSub}>Move to an area with internet to send</Text>
-      </View>
-    </Animated.View>
-  );
-}
-
-function LoadingDots() {
-  const dots = [
-    useRef(new Animated.Value(0.3)).current,
-    useRef(new Animated.Value(0.3)).current,
-    useRef(new Animated.Value(0.3)).current,
-  ];
-
-  useEffect(() => {
-    const animations = dots.map((dot, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 150),
-          Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
-          Animated.timing(dot, { toValue: 0.3, duration: 300, useNativeDriver: true }),
-          Animated.delay(600 - i * 150),
-        ]),
-      ),
+    if (status !== "creating") return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: true }),
+      ]),
     );
-    animations.forEach((a) => a.start());
-    return () => animations.forEach((a) => a.stop());
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    loop.start();
+    return () => loop.stop();
+  }, [status, pulse]);
 
+  if (status === "creating") {
+    return (
+      <View style={[styles.banner, styles.bannerCreating]}>
+        <ActivityIndicator size="small" color="#60a5fa" />
+        <View style={styles.bannerTextWrap}>
+          <Text style={styles.bannerTitle}>Reporting…</Text>
+          <Text style={styles.bannerSub}>Pinpointing your location & alerting the team</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <View style={[styles.banner, styles.bannerOffline]}>
+        <Feather name="wifi-off" size={18} color="#fbbf24" />
+        <View style={styles.bannerTextWrap}>
+          <Text style={[styles.bannerTitle, { color: "#fde68a" }]}>Saved offline</Text>
+          <Text style={[styles.bannerSub, { color: "#fcd34d" }]}>It’ll send automatically when you’re back online</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // created
+  const count = (nearby ?? []).length;
   return (
-    <View style={styles.dotsRow}>
-      {dots.map((dot, i) => (
-        <Animated.View key={i} style={[styles.dot, { opacity: dot }]} />
-      ))}
+    <View style={[styles.banner, styles.bannerLive]}>
+      <View style={styles.liveDot} />
+      <View style={styles.bannerTextWrap}>
+        <Text style={[styles.bannerTitle, { color: "#86efac" }]}>
+          {name ?? "Incident"} is live
+        </Text>
+        <Text style={[styles.bannerSub, { color: "#6ee7b7" }]}>
+          {count > 0 ? `${count} responder${count > 1 ? "s" : ""} nearby · alerted` : "Responders alerted"}
+        </Text>
+      </View>
+      <Feather name="check-circle" size={20} color="#34d399" />
     </View>
   );
 }
 
-function ParamedicRow({ paramedic }: { paramedic: NearbyParamedic }) {
-  const initials = paramedic.name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+// ─── Severity selector ────────────────────────────────────────────────────────
 
+function SeveritySelector() {
+  const severity = useIncidentStore((s) => s.severity);
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
   return (
-    <View style={styles.paramedicRow}>
-      <View style={styles.paramedicAvatar}>
-        <Text style={styles.paramedicAvatarText}>{initials}</Text>
-      </View>
-      <View style={styles.paramedicInfo}>
-        <Text style={styles.paramedicName}>{paramedic.name}</Text>
-        {paramedic.vehicle ? <Text style={styles.paramedicVehicle}>{paramedic.vehicle}</Text> : null}
-      </View>
-      <View style={styles.paramedicDistanceBadge}>
-        <Text style={styles.paramedicDistanceText}>{formatDistance(paramedic.distanceMeters)}</Text>
-      </View>
+    <View style={styles.severityRow}>
+      {SEVERITIES.map((s) => {
+        const active = severity === s.id;
+        return (
+          <Pressable
+            key={s.id}
+            onPress={() => {
+              setSeverity(s.id);
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
+            style={[
+              styles.sevPill,
+              { borderColor: active ? s.color : "rgba(148,163,184,0.18)" },
+              active && { backgroundColor: s.color },
+            ]}
+          >
+            <View style={[styles.sevDot, { backgroundColor: active ? "#04121f" : s.color }]} />
+            <Text style={[styles.sevText, active && { color: "#04121f" }]}>{s.label}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
 
-function TypeChipGrid() {
+// ─── Type grid ────────────────────────────────────────────────────────────────
+
+function TypeGrid() {
   const incidentType = useIncidentStore((s) => s.incidentType);
   const setIncidentType = useIncidentStore((s) => s.setIncidentType);
 
-  const chipScales = useRef(
-    new Map(INCIDENT_TYPES.map((t) => [t.id, new Animated.Value(incidentType === t.id ? 1 : 0.96)])),
+  const scales = useRef(
+    new Map(INCIDENT_TYPES.map((t) => [t.id, new Animated.Value(1)])),
   ).current;
 
-  const handleSelect = (id: IncidentType) => {
-    const prev = incidentType;
+  const select = (id: IncidentType) => {
     setIncidentType(id);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    if (prev && prev !== id) {
-      Animated.spring(chipScales.get(prev)!, {
-        toValue: 0.96,
-        damping: 20,
-        mass: 0.7,
-        stiffness: 340,
-        useNativeDriver: true,
-      }).start();
-    }
-    Animated.spring(chipScales.get(id)!, {
-      toValue: 1,
-      damping: 20,
-      mass: 0.7,
-      stiffness: 340,
-      useNativeDriver: true,
-    }).start();
+    const v = scales.get(id)!;
+    v.setValue(0.9);
+    Animated.spring(v, { toValue: 1, damping: 12, stiffness: 320, useNativeDriver: true }).start();
   };
 
   return (
-    <View style={styles.chipGrid}>
+    <View style={styles.typeGrid}>
       {INCIDENT_TYPES.map((type) => {
         const selected = incidentType === type.id;
         return (
-          <Animated.View key={type.id} style={{ transform: [{ scale: chipScales.get(type.id)! }], flex: 1, minWidth: "30%" }}>
+          <Animated.View key={type.id} style={{ transform: [{ scale: scales.get(type.id)! }], width: "31%" }}>
             <Pressable
-              onPress={() => handleSelect(type.id)}
-              style={[styles.chip, selected && { borderColor: type.color, backgroundColor: `${type.color}1a` }]}
+              onPress={() => select(type.id)}
+              style={[
+                styles.typeCard,
+                selected && { borderColor: type.color, backgroundColor: `${type.color}1f` },
+              ]}
             >
-              <Text style={styles.chipIcon}>{type.icon}</Text>
-              <Text style={[styles.chipLabel, selected && { color: type.color }]}>{type.label}</Text>
+              <Text style={styles.typeIcon}>{type.icon}</Text>
+              <Text style={[styles.typeLabel, selected && { color: type.color }]}>{type.label}</Text>
+              {selected ? (
+                <View style={[styles.typeCheck, { backgroundColor: type.color }]}>
+                  <Feather name="check" size={9} color="#04121f" />
+                </View>
+              ) : null}
             </Pressable>
           </Animated.View>
         );
@@ -192,555 +184,305 @@ function TypeChipGrid() {
   );
 }
 
-function PeopleCounter() {
-  const count = useIncidentStore((s) => s.peopleAffected);
-  const setCount = useIncidentStore((s) => s.setPeopleAffected);
-  const bounce = useRef(new Animated.Value(1)).current;
-
-  const animateBounce = () => {
-    bounce.setValue(1.28);
-    Animated.spring(bounce, {
-      toValue: 1,
-      damping: 14,
-      mass: 0.6,
-      stiffness: 320,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const increment = () => {
-    setCount(count + 1);
-    animateBounce();
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const decrement = () => {
-    if (count <= 1) return;
-    setCount(count - 1);
-    animateBounce();
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  return (
-    <View style={styles.counter}>
-      <Pressable onPress={decrement} style={[styles.counterBtn, count <= 1 && styles.counterBtnDisabled]}>
-        <Text style={styles.counterBtnText}>−</Text>
-      </Pressable>
-      <Animated.View style={{ transform: [{ scale: bounce }] }}>
-        <Text style={styles.counterNumber}>{count}</Text>
-        <Text style={styles.counterLabel}>{count === 1 ? "person" : "people"}</Text>
-      </Animated.View>
-      <Pressable onPress={increment} style={styles.counterBtn}>
-        <Text style={styles.counterBtnText}>+</Text>
-      </Pressable>
-    </View>
-  );
-}
+// ─── Sheet ────────────────────────────────────────────────────────────────────
 
 export function ReportIncidentSheet() {
   const phase = useIncidentStore((s) => s.phase);
-  const nearbyParamedics = useIncidentStore((s) => s.nearbyParamedics);
+  const creationStatus = useIncidentStore((s) => s.creationStatus);
   const incidentId = useIncidentStore((s) => s.incidentId);
   const description = useIncidentStore((s) => s.description);
   const photoUri = useIncidentStore((s) => s.photoUri);
   const incidentType = useIncidentStore((s) => s.incidentType);
+  const severity = useIncidentStore((s) => s.severity);
   const peopleAffected = useIncidentStore((s) => s.peopleAffected);
   const setDescription = useIncidentStore((s) => s.setDescription);
   const setPhotoUri = useIncidentStore((s) => s.setPhotoUri);
-  const setPhase = useIncidentStore((s) => s.setPhase);
   const reset = useIncidentStore((s) => s.reset);
 
-  const sheetBase = useRef(new Animated.Value(SHEET_HIDDEN_Y)).current;
-  const sheetDrag = useRef(new Animated.Value(0)).current;
-  const isSubmittingDetails = useRef(false);
-
-  const animateSheet = (toValue: number, cb?: () => void) => {
-    Animated.spring(sheetBase, {
-      toValue,
-      damping: 28,
-      mass: 1,
-      stiffness: 280,
-      useNativeDriver: true,
-    }).start(cb);
-  };
+  const sheetRef = useRef<BottomSheet>(null);
+  const saving = useRef(false);
+  const skipResetOnDismiss = useRef(false);
 
   useEffect(() => {
-    if (phase === "idle") {
-      animateSheet(SHEET_HIDDEN_Y);
-    } else if (phase === "submitting" || phase === "success" || phase === "offline") {
-      animateSheet(SHEET_COLLAPSED_Y);
-    } else if (phase === "details") {
-      animateSheet(SHEET_EXPANDED_Y);
+    if (phase === "details") {
+      sheetRef.current?.snapToIndex(0);
+    } else {
+      sheetRef.current?.close();
     }
-  }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase]);
 
-  const sheetPanResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 6,
-      onPanResponderGrant: () => {
-        sheetDrag.setValue(0);
-      },
-      onPanResponderMove: (_, g) => {
-        if (g.dy > 0) sheetDrag.setValue(g.dy);
-      },
-      onPanResponderRelease: (_, g) => {
-        const currentBase = (sheetBase as unknown as { _value: number })._value;
-        const projected = currentBase + g.dy + g.vy * 60;
+  const handleDismissed = useCallback(() => {
+    if (skipResetOnDismiss.current) {
+      skipResetOnDismiss.current = false;
+      return;
+    }
+    reset();
+  }, [reset]);
 
-        if (projected > SHEET_HEIGHT * 0.55) {
-          Animated.timing(sheetDrag, { toValue: 0, duration: 80, useNativeDriver: true }).start();
-          animateSheet(SHEET_HIDDEN_Y, () => {
-            setTimeout(() => reset(), 50);
-          });
-        } else if (projected > SHEET_HEIGHT * 0.25) {
-          Animated.timing(sheetDrag, { toValue: 0, duration: 80, useNativeDriver: true }).start();
-          animateSheet(SHEET_COLLAPSED_Y);
-        } else {
-          Animated.timing(sheetDrag, { toValue: 0, duration: 80, useNativeDriver: true }).start();
-          animateSheet(SHEET_EXPANDED_Y);
-        }
-      },
-    }),
-  ).current;
+  const closeAndReset = useCallback(() => {
+    skipResetOnDismiss.current = true;
+    sheetRef.current?.close();
+    reset();
+  }, [reset]);
 
-  const sheetTranslateY = Animated.add(sheetBase, sheetDrag).interpolate({
-    inputRange: [SHEET_EXPANDED_Y, SHEET_HIDDEN_Y],
-    outputRange: [SHEET_EXPANDED_Y, SHEET_HIDDEN_Y],
-    extrapolate: "clamp",
-  });
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.5} pressBehavior="none" />
+    ),
+    [],
+  );
 
   const pickPhoto = async (useCamera: boolean) => {
-    const result = useCamera
-      ? await ImagePicker.launchCameraAsync({ quality: 0.8, allowsEditing: true })
-      : await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: ["images"] });
+    try {
+      // Request the relevant permission first — without this the native picker
+      // silently fails to open on Android.
+      const perm = useCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          useCamera ? "Camera access needed" : "Photo access needed",
+          useCamera
+            ? "Enable camera access in Settings to attach a photo."
+            : "Enable photo access in Settings to attach a photo.",
+        );
+        return;
+      }
 
-    if (!result.canceled && result.assets[0]) {
-      setPhotoUri(result.assets[0].uri);
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({ quality: 0.8, allowsEditing: true })
+        : await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: ["images"] });
+      if (!result.canceled && result.assets[0]) {
+        setPhotoUri(result.assets[0].uri);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch (err) {
+      Alert.alert("Couldn’t open", "Something went wrong opening the picker. Please try again.");
+      console.warn("[ReportIncidentSheet] pickPhoto failed", err);
     }
   };
 
-  const handleSubmitDetails = async () => {
-    if (!incidentId || isSubmittingDetails.current) return;
-    isSubmittingDetails.current = true;
+  const handleSave = useCallback(async () => {
+    if (!incidentId || saving.current) return;
+    saving.current = true;
     Keyboard.dismiss();
-
     try {
       let photoUrl: string | undefined;
       if (photoUri) {
         try {
           photoUrl = await uploadIncidentPhoto(incidentId, photoUri);
         } catch {
-          // non-fatal: submit without photo
+          // non-fatal — save the rest
         }
       }
-
       await updateIncident(incidentId, {
         type: incidentType ?? "other",
         peopleAffected,
         description,
         photoUrl,
+        severity: severity ?? undefined,
       });
-
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      animateSheet(SHEET_HIDDEN_Y, () => {
-        setTimeout(() => reset(), 50);
-      });
+      closeAndReset();
     } catch {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
-      isSubmittingDetails.current = false;
+      saving.current = false;
     }
-  };
+  }, [incidentId, photoUri, incidentType, peopleAffected, description, severity, closeAndReset]);
 
-  const handleAddDetails = () => {
-    setPhase("details");
-  };
+  const canSave = creationStatus === "created" && !!incidentId;
 
-  const handleDismiss = () => {
-    animateSheet(SHEET_HIDDEN_Y, () => {
-      setTimeout(() => reset(), 50);
-    });
-  };
-
-  if (phase === "idle") return null;
+  const renderFooter = useCallback(
+    (props: BottomSheetFooterProps) => (
+      <BottomSheetFooter {...props} bottomInset={0}>
+        <View style={styles.footer}>
+          <Pressable
+            style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={!canSave}
+          >
+            {creationStatus === "creating" ? (
+              <>
+                <ActivityIndicator size="small" color="#04121f" />
+                <Text style={styles.saveBtnText}>Reporting…</Text>
+              </>
+            ) : creationStatus === "failed" ? (
+              <Text style={styles.saveBtnText}>Saved offline</Text>
+            ) : (
+              <>
+                <Feather name="check" size={18} color="#04121f" />
+                <Text style={styles.saveBtnText}>Save details</Text>
+              </>
+            )}
+          </Pressable>
+          <Pressable style={styles.dismissBtn} onPress={closeAndReset}>
+            <Text style={styles.dismissText}>{canSave ? "Skip" : "Done"}</Text>
+          </Pressable>
+        </View>
+      </BottomSheetFooter>
+    ),
+    [canSave, creationStatus, handleSave, closeAndReset],
+  );
 
   return (
-    <Animated.View
-      style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}
+    <BottomSheet
+      ref={sheetRef}
+      index={-1}
+      snapPoints={SHEET_SNAP_POINTS}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      onClose={handleDismissed}
+      backgroundStyle={styles.sheetBackground}
+      handleIndicatorStyle={styles.sheetHandleIndicator}
+      backdropComponent={renderBackdrop}
+      footerComponent={renderFooter}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
     >
-      <OfflineBanner visible={phase === "offline"} />
+      <BottomSheetScrollView
+        style={styles.scrollBody}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <StatusBanner />
 
-      <View {...sheetPanResponder.panHandlers} style={styles.dragZone}>
-        <View style={styles.handle} />
-      </View>
+        <Text style={styles.title}>Add details</Text>
+        <Text style={styles.subtitle}>A quick tap is plenty — every detail helps responders prepare.</Text>
 
-      {phase === "submitting" && (
-        <View style={styles.submittingContainer}>
-          <LoadingDots />
-          <Text style={styles.submittingTitle}>Reporting incident…</Text>
-          <Text style={styles.submittingSubtitle}>Getting your location and alerting responders</Text>
-        </View>
-      )}
+        <Text style={styles.fieldLabel}>SEVERITY</Text>
+        <SeveritySelector />
 
-      {(phase === "success" || phase === "offline") && (
-        <ScrollView
-          style={styles.scrollBody}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.successHeader}>
-            <Checkmark visible />
-            <Text style={styles.successTitle}>
-              {phase === "offline" ? "Incident Saved" : "Incident Reported"}
-            </Text>
-            <Text style={styles.successSubtitle}>
-              {phase === "offline"
-                ? "Report saved locally. Connect to internet to send."
-                : "Responders have been alerted to your location"}
-            </Text>
+        <Text style={styles.fieldLabel}>TYPE OF INCIDENT</Text>
+        <TypeGrid />
+
+        <Text style={styles.fieldLabel}>DESCRIPTION</Text>
+        <BottomSheetTextInput
+          style={styles.descriptionInput}
+          multiline
+          placeholder="What happened? Anything responders should know…"
+          placeholderTextColor="#4A5F7A"
+          value={description}
+          onChangeText={setDescription}
+          textAlignVertical="top"
+        />
+
+        <Text style={styles.fieldLabel}>PHOTO</Text>
+        {photoUri ? (
+          <View style={styles.photoPreviewRow}>
+            <Image source={{ uri: photoUri }} style={styles.photoThumb} />
+            <View style={styles.photoInfo}>
+              <Text style={styles.photoFilename}>Photo attached</Text>
+              <Pressable onPress={() => setPhotoUri(null)} hitSlop={8}>
+                <Text style={styles.photoRemove}>Remove</Text>
+              </Pressable>
+            </View>
+            <Feather name="image" size={20} color="#34d399" />
           </View>
-
-          {(nearbyParamedics ?? []).length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>NEAREST RESPONDERS</Text>
-              {nearbyParamedics.map((p) => (
-                <ParamedicRow key={p.id} paramedic={p} />
-              ))}
-            </View>
-          )}
-
-          {phase === "success" && (
-            <Pressable style={styles.addDetailsBtn} onPress={handleAddDetails}>
-              <Text style={styles.addDetailsBtnText}>Add Details →</Text>
+        ) : (
+          <View style={styles.photoRow}>
+            <Pressable style={styles.photoBtn} onPress={() => pickPhoto(true)}>
+              <Feather name="camera" size={20} color="#93C5FD" />
+              <Text style={styles.photoBtnLabel}>Camera</Text>
             </Pressable>
-          )}
-
-          <Pressable style={styles.dismissLink} onPress={handleDismiss}>
-            <Text style={styles.dismissLinkText}>Dismiss</Text>
-          </Pressable>
-        </ScrollView>
-      )}
-
-      {phase === "details" && (
-        <ScrollView
-          style={styles.scrollBody}
-          contentContainerStyle={[styles.scrollContent, styles.detailsContent]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Text style={styles.detailsTitle}>Incident Details</Text>
-          <Text style={styles.detailsSubtitle}>Help responders prepare — every detail matters</Text>
-
-          <Text style={styles.fieldLabel}>TYPE OF INCIDENT</Text>
-          <TypeChipGrid />
-
-          <Text style={styles.fieldLabel}>PEOPLE AFFECTED</Text>
-          <PeopleCounter />
-
-          <Text style={styles.fieldLabel}>DESCRIPTION</Text>
-          <TextInput
-            style={styles.descriptionInput}
-            multiline
-            numberOfLines={4}
-            placeholder="What happened? Any relevant details…"
-            placeholderTextColor="#4A5F7A"
-            value={description}
-            onChangeText={setDescription}
-            textAlignVertical="top"
-          />
-
-          <Text style={styles.fieldLabel}>PHOTO</Text>
-          {photoUri ? (
-            <View style={styles.photoPreviewRow}>
-              <Image source={{ uri: photoUri }} style={styles.photoThumb} />
-              <View style={styles.photoInfo}>
-                <Text style={styles.photoFilename}>Photo attached</Text>
-                <Pressable onPress={() => setPhotoUri(null)}>
-                  <Text style={styles.photoRemove}>Remove</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.photoRow}>
-              <Pressable style={styles.photoBtn} onPress={() => pickPhoto(true)}>
-                <Text style={styles.photoBtnIcon}>📷</Text>
-                <Text style={styles.photoBtnLabel}>Camera</Text>
-              </Pressable>
-              <Pressable style={styles.photoBtn} onPress={() => pickPhoto(false)}>
-                <Text style={styles.photoBtnIcon}>🖼️</Text>
-                <Text style={styles.photoBtnLabel}>Gallery</Text>
-              </Pressable>
-            </View>
-          )}
-
-          <Pressable style={styles.submitBtn} onPress={handleSubmitDetails}>
-            <Text style={styles.submitBtnText}>Send Report</Text>
-          </Pressable>
-
-          <Pressable style={styles.dismissLink} onPress={handleDismiss}>
-            <Text style={styles.dismissLinkText}>Skip & Dismiss</Text>
-          </Pressable>
-        </ScrollView>
-      )}
-    </Animated.View>
+            <Pressable style={styles.photoBtn} onPress={() => pickPhoto(false)}>
+              <Feather name="image" size={20} color="#93C5FD" />
+              <Text style={styles.photoBtnLabel}>Gallery</Text>
+            </Pressable>
+          </View>
+        )}
+      </BottomSheetScrollView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: BOTTOM_BAR_HEIGHT,
-    height: SHEET_HEIGHT,
+  sheetBackground: {
     backgroundColor: "#090f1d",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    zIndex: 29,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.6,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: -8 },
-    elevation: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
   },
-
-  offlineBanner: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    backgroundColor: "#92400E",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-    gap: 12,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-  },
-  offlineBannerIcon: { fontSize: 20 },
-  offlineBannerTitle: { color: "#FDE68A", fontSize: 13, fontWeight: "800", letterSpacing: 0.2 },
-  offlineBannerSub: { color: "#FCD34D", fontSize: 11, fontWeight: "500", marginTop: 1 },
-
-  dragZone: {
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
-  },
-  handle: {
-    width: 38,
-    height: 4,
-    borderRadius: 2,
+  sheetHandleIndicator: {
     backgroundColor: "rgba(177, 199, 224, 0.28)",
-  },
-
-  submittingContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingBottom: 80,
-  },
-  dotsRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 24,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#FF3B3B",
-  },
-  submittingTitle: {
-    color: "#EFF6FF",
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-    marginBottom: 8,
-  },
-  submittingSubtitle: {
-    color: "#6B7F9A",
-    fontSize: 13,
-    fontWeight: "500",
-    textAlign: "center",
-    paddingHorizontal: 32,
-  },
-
-  scrollBody: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 32 },
-  detailsContent: { paddingTop: 4 },
-
-  successHeader: {
-    alignItems: "center",
-    paddingTop: 12,
-    paddingBottom: 24,
-  },
-  checkmarkWrap: {
-    marginBottom: 16,
-  },
-  checkmarkCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: "rgba(0, 195, 122, 0.15)",
-    borderWidth: 2.5,
-    borderColor: "#00C37A",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkmarkShort: {
-    position: "absolute",
-    width: 11,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#00C37A",
-    transform: [{ rotate: "45deg" }, { translateX: -5 }, { translateY: 4 }],
-  },
-  checkmarkLong: {
-    position: "absolute",
-    width: 22,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#00C37A",
-    transform: [{ rotate: "-45deg" }, { translateX: 4 }, { translateY: -1 }],
-  },
-  successTitle: {
-    color: "#EFF6FF",
-    fontSize: 22,
-    fontWeight: "900",
-    letterSpacing: 0.2,
-    marginBottom: 6,
-  },
-  successSubtitle: {
-    color: "#6B7F9A",
-    fontSize: 13,
-    fontWeight: "500",
-    textAlign: "center",
-    paddingHorizontal: 24,
-  },
-
-  section: { marginBottom: 20 },
-  sectionLabel: {
-    color: "#4A5F7A",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    marginBottom: 10,
-  },
-
-  paramedicRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#101d32",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: "rgba(177, 199, 224, 0.1)",
-  },
-  paramedicAvatar: {
     width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#1e3a5f",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(177, 199, 224, 0.2)",
+    height: 4,
   },
-  paramedicAvatarText: { color: "#93C5FD", fontSize: 13, fontWeight: "800" },
-  paramedicInfo: { flex: 1 },
-  paramedicName: { color: "#EFF6FF", fontSize: 14, fontWeight: "700" },
-  paramedicVehicle: { color: "#6B7F9A", fontSize: 12, fontWeight: "500", marginTop: 2 },
-  paramedicDistanceBadge: {
-    backgroundColor: "rgba(255, 59, 59, 0.15)",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  scrollBody: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 130 },
+
+  // Banner
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    marginBottom: 18,
     borderWidth: 1,
-    borderColor: "rgba(255, 59, 59, 0.3)",
   },
-  paramedicDistanceText: { color: "#FF6B6B", fontSize: 12, fontWeight: "800" },
+  bannerCreating: { backgroundColor: "rgba(59,130,246,0.1)", borderColor: "rgba(59,130,246,0.28)" },
+  bannerLive: { backgroundColor: "rgba(16,185,129,0.1)", borderColor: "rgba(16,185,129,0.3)" },
+  bannerOffline: { backgroundColor: "rgba(245,158,11,0.1)", borderColor: "rgba(245,158,11,0.3)" },
+  bannerTextWrap: { flex: 1 },
+  bannerTitle: { color: "#93c5fd", fontSize: 14, fontWeight: "900", letterSpacing: 0.2 },
+  bannerSub: { color: "#7dd3fc", fontSize: 12, fontWeight: "600", marginTop: 1 },
+  liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#34d399" },
 
-  addDetailsBtn: {
-    backgroundColor: "#FF3B3B",
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: "center",
-    marginTop: 8,
-    shadowColor: "#FF3B3B",
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  addDetailsBtnText: { color: "#fff", fontSize: 15, fontWeight: "900", letterSpacing: 0.3 },
-
-  dismissLink: { alignItems: "center", paddingVertical: 14 },
-  dismissLinkText: { color: "#4A5F7A", fontSize: 13, fontWeight: "600" },
-
-  detailsTitle: { color: "#EFF6FF", fontSize: 20, fontWeight: "900", marginBottom: 4 },
-  detailsSubtitle: { color: "#6B7F9A", fontSize: 13, fontWeight: "500", marginBottom: 22 },
+  title: { color: "#EFF6FF", fontSize: 22, fontWeight: "900", letterSpacing: 0.2 },
+  subtitle: { color: "#6B7F9A", fontSize: 13, fontWeight: "500", marginTop: 4, marginBottom: 6 },
 
   fieldLabel: {
     color: "#4A5F7A",
     fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.2,
+    fontWeight: "900",
+    letterSpacing: 1.3,
+    marginTop: 22,
     marginBottom: 10,
-    marginTop: 18,
   },
 
-  chipGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  chip: {
+  // Severity
+  severityRow: { flexDirection: "row", gap: 8 },
+  sevPill: {
     flex: 1,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#101d32",
-    borderRadius: 12,
+    gap: 6,
     paddingVertical: 12,
-    paddingHorizontal: 8,
+    borderRadius: 13,
     borderWidth: 1.5,
-    borderColor: "rgba(177, 199, 224, 0.12)",
-    gap: 4,
-    minHeight: 72,
+    backgroundColor: "#101d32",
   },
-  chipIcon: { fontSize: 22 },
-  chipLabel: { color: "#6B7F9A", fontSize: 11, fontWeight: "700", letterSpacing: 0.2, textAlign: "center" },
+  sevDot: { width: 7, height: 7, borderRadius: 4 },
+  sevText: { color: "#cbd5e1", fontSize: 12.5, fontWeight: "800" },
 
-  counter: {
-    flexDirection: "row",
+  // Type grid
+  typeGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 10 },
+  typeCard: {
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#101d32",
     borderRadius: 16,
     paddingVertical: 16,
-    gap: 32,
-    borderWidth: 1,
-    borderColor: "rgba(177, 199, 224, 0.1)",
+    borderWidth: 1.5,
+    borderColor: "rgba(177, 199, 224, 0.12)",
+    gap: 6,
+    minHeight: 84,
   },
-  counterBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#182840",
+  typeIcon: { fontSize: 26 },
+  typeLabel: { color: "#94A3B8", fontSize: 12, fontWeight: "800", letterSpacing: 0.2 },
+  typeCheck: {
+    position: "absolute",
+    top: 7,
+    right: 7,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(177, 199, 224, 0.15)",
   },
-  counterBtnDisabled: { opacity: 0.35 },
-  counterBtnText: { color: "#EFF6FF", fontSize: 24, fontWeight: "300", lineHeight: 28 },
-  counterNumber: { color: "#EFF6FF", fontSize: 42, fontWeight: "900", textAlign: "center", lineHeight: 46 },
-  counterLabel: { color: "#6B7F9A", fontSize: 12, fontWeight: "600", textAlign: "center", marginTop: 2 },
 
   descriptionInput: {
     backgroundColor: "#101d32",
@@ -752,26 +494,23 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     paddingHorizontal: 14,
     paddingVertical: 12,
-    minHeight: 100,
+    minHeight: 96,
   },
 
-  photoRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
+  photoRow: { flexDirection: "row", gap: 10 },
   photoBtn: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#101d32",
     borderRadius: 14,
     paddingVertical: 16,
-    alignItems: "center",
-    gap: 6,
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.12)",
   },
-  photoBtnIcon: { fontSize: 24 },
-  photoBtnLabel: { color: "#6B7F9A", fontSize: 12, fontWeight: "700" },
-
+  photoBtnLabel: { color: "#93C5FD", fontSize: 13, fontWeight: "800" },
   photoPreviewRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -782,22 +521,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.12)",
   },
-  photoThumb: { width: 60, height: 60, borderRadius: 10 },
+  photoThumb: { width: 56, height: 56, borderRadius: 10 },
   photoInfo: { flex: 1 },
   photoFilename: { color: "#EFF6FF", fontSize: 13, fontWeight: "700" },
-  photoRemove: { color: "#FF6B6B", fontSize: 12, fontWeight: "600", marginTop: 4 },
+  photoRemove: { color: "#FF6B6B", fontSize: 12, fontWeight: "700", marginTop: 4 },
 
-  submitBtn: {
-    backgroundColor: "#FF3B3B",
-    borderRadius: 14,
-    paddingVertical: 16,
+  // Footer
+  footer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 26, backgroundColor: "rgba(9,15,29,0.98)" },
+  saveBtn: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: 24,
-    shadowColor: "#FF3B3B",
+    justifyContent: "center",
+    gap: 9,
+    backgroundColor: "#34d399",
+    borderRadius: 16,
+    paddingVertical: 16,
+    shadowColor: "#34d399",
     shadowOpacity: 0.4,
-    shadowRadius: 12,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 5 },
     elevation: 8,
   },
-  submitBtnText: { color: "#fff", fontSize: 16, fontWeight: "900", letterSpacing: 0.4 },
+  saveBtnDisabled: { backgroundColor: "#1f4f43" },
+  saveBtnText: { color: "#04121f", fontSize: 16, fontWeight: "900", letterSpacing: 0.3 },
+  dismissBtn: { alignItems: "center", paddingVertical: 12 },
+  dismissText: { color: "#64748b", fontSize: 13, fontWeight: "700" },
 });

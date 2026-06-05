@@ -105,6 +105,32 @@ function isOnline(lastSeenAt: string): boolean {
   return Date.now() - new Date(lastSeenAt).getTime() < 90_000
 }
 
+// Freshness coloring, matching the mobile app:
+//   0–20 min : green, fresher = more saturated
+//   20–40 min: yellow
+//   > 40 min : grey
+const FRESH_TWENTY_MIN = 20 * 60_000
+const FRESH_FORTY_MIN = 40 * 60_000
+
+function freshnessBucket(ageMs: number): 'fresh' | 'warning' | 'stale' {
+  if (ageMs >= FRESH_FORTY_MIN) return 'stale'
+  if (ageMs >= FRESH_TWENTY_MIN) return 'warning'
+  return 'fresh'
+}
+
+function freshnessColor(ageMs: number): string {
+  if (!Number.isFinite(ageMs) || ageMs >= FRESH_FORTY_MIN) return '#7c8a9c'
+  if (ageMs >= FRESH_TWENTY_MIN) return '#f5c518'
+  // Interpolate a readable saturated green (age 0) → muted sage (20 min edge).
+  // Kept dark enough that white initials stay legible on the dot.
+  const t = Math.max(0, Math.min(1, ageMs / FRESH_TWENTY_MIN))
+  const lerp = (a: number, b: number) => Math.round(a + (b - a) * t)
+  const r = lerp(0x16, 0x4d)
+  const g = lerp(0xb8, 0x8a)
+  const b = lerp(0x5c, 0x68)
+  return `rgb(${r}, ${g}, ${b})`
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string, coords: [number, number]) => void }) {
@@ -340,14 +366,15 @@ interface LiveMedicDotProps {
 function LiveMedicDot({ medic, onAssign, availablePois, openIncidents }: LiveMedicDotProps) {
   const [showPopup, setShowPopup] = useState(false)
   const [showGoTo, setShowGoTo] = useState(false)
-  const online = isOnline(medic.lastSeenAt)
+  const ageMs = Date.now() - new Date(medic.lastSeenAt).getTime()
+  const bucket = freshnessBucket(ageMs)
+  // "online" for the dot visuals = anything not yet stale (>40 min).
+  const online = bucket !== 'stale'
   const isGoingTo = medic.status === 'going_to'
 
-  const dotColor = online
-    ? isGoingTo ? '#f59e0b' : '#22c55e'
-    : '#64748b'
+  const dotColor = isGoingTo ? '#f59e0b' : freshnessColor(ageMs)
 
-  const ringColor = online
+  const ringColor = bucket === 'fresh'
     ? isGoingTo ? 'rgba(245,158,11,0.25)' : 'rgba(34,197,94,0.22)'
     : 'transparent'
 
@@ -358,7 +385,7 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents }: LiveMed
           className="relative flex items-center justify-center"
           style={{ cursor: 'pointer' }}
           onClick={() => setShowPopup(v => !v)}
-          onContextMenu={e => { e.preventDefault(); setShowPopup(true); setShowGoTo(true) }}
+          onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setShowPopup(true) }}
         >
           {/* Pulse ring — only when online */}
           {online && (
@@ -540,8 +567,9 @@ function IncidentMarker({ incident, onAssignIncident, availableMedics = [] }: In
   const [showPopup, setShowPopup] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
 
-  const dotColor = incident.status === 'resolved'
-    ? '#22c55e'
+  // Closed / resolved incidents are greyed out (no longer an active alarm).
+  const dotColor = incident.status === 'closed' || incident.status === 'resolved'
+    ? '#64748b'
     : incident.status === 'in_progress' || incident.status === 'assigned'
     ? '#f59e0b'
     : '#ef4444'

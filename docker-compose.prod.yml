@@ -40,6 +40,20 @@ services:
       retries: 5
       start_period: 20s
 
+  simulator:
+    image: hackohackob1/events-simulator:latest
+    restart: unless-stopped
+    ports:
+      - "8893:8504"
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8504"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   postgres:
     image: postgis/postgis:16-3.4
     restart: unless-stopped

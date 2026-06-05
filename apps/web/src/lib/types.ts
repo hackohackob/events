@@ -37,6 +37,8 @@ export interface PointOfInterest {
   type: POIType
   coordinates: [number, number]
   name?: string
+  /** Optional short free-text note about the point. */
+  description?: string
 }
 
 export interface Discipline {
@@ -50,6 +52,8 @@ export interface Discipline {
   gpxUrl?: string
   gpxUploaded: boolean
   gpxCoordinates?: [number, number][]
+  /** Real elevation profile parsed from the GPX (distance km → elevation m). */
+  elevationProfile?: { distance: number; elevation: number }[]
 }
 
 export interface EventDay {

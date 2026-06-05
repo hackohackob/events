@@ -1,0 +1,126 @@
+import { apiFetch } from "./api-client";
+import { useSessionStore } from "../security/session-store";
+
+function eventId(): string {
+  return useSessionStore.getState().eventId ?? "";
+}
+function myId(): string {
+  return useSessionStore.getState().userId ?? "";
+}
+
+export interface Destination {
+  lat: number;
+  lng: number;
+  label: string;
+}
+
+/** Set my own status (Available / Rest). "Going to X" is set via assignDestination. */
+export async function setMyStatus(status: "available" | "rest") {
+  return apiFetch(`/events/${eventId()}/medics/${myId()}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** Assign a medic (default: me) to a destination, or pass null to clear. */
+export async function assignDestination(destination: Destination | null, medicId: string = myId()) {
+  return apiFetch(`/events/${eventId()}/medics/${medicId}/assign`, {
+    method: "PATCH",
+    body: JSON.stringify({ destination }),
+  });
+}
+
+export interface IncidentMessageDto {
+  id: string;
+  incidentId: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}
+
+export async function listIncidentMessages(incidentId: string): Promise<IncidentMessageDto[]> {
+  return apiFetch<IncidentMessageDto[]>(`/incidents/${incidentId}/messages`);
+}
+
+export async function sendIncidentMessage(incidentId: string, text: string): Promise<IncidentMessageDto> {
+  return apiFetch<IncidentMessageDto>(`/incidents/${incidentId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function closeIncident(
+  incidentId: string,
+  payload: { vitals?: string; treatment?: string; transport?: string },
+) {
+  return apiFetch(`/incidents/${incidentId}/close`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Partial update of an incident (category, severity, status, …). */
+export async function patchIncident(
+  incidentId: string,
+  patch: { type?: string; severity?: string; status?: string; description?: string },
+) {
+  return apiFetch(`/incidents/${incidentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Archive an incident — removes it from the active board. */
+export async function archiveIncident(incidentId: string) {
+  return patchIncident(incidentId, { status: "archived" });
+}
+
+/** Register myself as a responder heading to an incident. */
+export async function respondToIncident(incidentId: string) {
+  return apiFetch(`/incidents/${incidentId}/action`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "going" }),
+  });
+}
+
+/** Step myself back from an incident (removes me from its responders). */
+export async function standDownIncident(incidentId: string) {
+  return apiFetch(`/incidents/${incidentId}/action`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "stand_down" }),
+  });
+}
+
+/** Coordinator: assign another medic as a responder to an incident. */
+export async function assignIncidentResponder(incidentId: string, paramedicId: string) {
+  return apiFetch(`/incidents/${incidentId}/assign/${paramedicId}`, { method: "PATCH" });
+}
+
+export interface PoiDto {
+  id: string;
+  type: string;
+  lat: number;
+  lng: number;
+  name?: string;
+  description?: string;
+}
+
+/** Drop a new point of interest at the given coordinates. */
+export async function createPoi(input: {
+  lat: number;
+  lng: number;
+  type?: string;
+  name?: string;
+  description?: string;
+}): Promise<PoiDto> {
+  return apiFetch<PoiDto>(`/events/pois`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Archive a POI — hides it from the map for everyone. */
+export async function archivePoi(poiId: string): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/events/pois/${poiId}`, { method: "DELETE" });
+}

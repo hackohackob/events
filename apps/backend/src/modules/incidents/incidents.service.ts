@@ -11,6 +11,7 @@ import { UpdateIncidentDetailsDto } from "./dto/update-incident-details.dto";
 export interface IncidentRecord {
   id: string;
   eventId: string;
+  name: string;
   lat: number;
   lng: number;
   type: string;
@@ -23,11 +24,28 @@ export interface IncidentRecord {
   updatedAt: string;
   responders: string[];
   nearbyParamedics?: string[];
+  vitals?: string;
+  treatment?: string;
+  transport?: string;
+  closedBy?: string;
+  closedAt?: string;
+}
+
+export interface IncidentMessageRecord {
+  id: string;
+  incidentId: string;
+  eventId: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  photoUrl?: string;
+  createdAt: string;
 }
 
 interface IncidentRow {
   id: string;
   event_id: string;
+  name: string | null;
   lat: number;
   lng: number;
   type: string;
@@ -39,12 +57,23 @@ interface IncidentRow {
   created_at: string;
   updated_at: string;
   responders: string[];
+  vitals: string | null;
+  treatment: string | null;
+  transport: string | null;
+  closed_by: string | null;
+  closed_at: string | null;
+}
+
+function toIso(value: string | Date | null): string | undefined {
+  if (!value) return undefined;
+  return typeof value === "string" ? value : new Date(value).toISOString();
 }
 
 function rowToRecord(r: IncidentRow): IncidentRecord {
   return {
     id: r.id,
     eventId: r.event_id,
+    name: r.name ?? "Incident",
     lat: r.lat,
     lng: r.lng,
     type: r.type,
@@ -56,6 +85,11 @@ function rowToRecord(r: IncidentRow): IncidentRecord {
     createdAt: typeof r.created_at === "string" ? r.created_at : new Date(r.created_at).toISOString(),
     updatedAt: typeof r.updated_at === "string" ? r.updated_at : new Date(r.updated_at).toISOString(),
     responders: Array.isArray(r.responders) ? r.responders : [],
+    vitals: r.vitals ?? undefined,
+    treatment: r.treatment ?? undefined,
+    transport: r.transport ?? undefined,
+    closedBy: r.closed_by ?? undefined,
+    closedAt: toIso(r.closed_at),
   };
 }
 
@@ -97,10 +131,40 @@ export class IncidentsService implements OnModuleInit {
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS status     TEXT NOT NULL DEFAULT 'open'`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS responders JSONB NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS name       TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS vitals     TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS treatment  TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS transport  TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_by  TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_at  TIMESTAMPTZ`,
     ];
     for (const sql of alterations) {
       await this.db.query(sql);
     }
+
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS incident_messages (
+        id          TEXT PRIMARY KEY,
+        incident_id TEXT NOT NULL,
+        event_id    TEXT NOT NULL,
+        author_id   TEXT NOT NULL,
+        author_name TEXT NOT NULL DEFAULT '',
+        text        TEXT NOT NULL DEFAULT '',
+        photo_url   TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    await this.db.query(`
+      CREATE INDEX IF NOT EXISTS idx_incident_messages_incident
+        ON incident_messages (incident_id, created_at ASC)
+    `);
+
+    // Legacy PostGIS `location` geometry column may exist with a NOT NULL
+    // constraint from an older schema. No current code populates it, so relax
+    // the constraint to unblock incident inserts. No-op if absent/already nullable.
+    await this.db
+      .query(`ALTER TABLE incidents ALTER COLUMN location DROP NOT NULL`)
+      .catch(() => undefined);
 
     // Fix legacy UUID column types — convert incidents.id and event_id from UUID to TEXT.
     // Drop FKs where incidents is the CHILD (e.g. incidents.event_id → events.id)
@@ -132,6 +196,9 @@ export class IncidentsService implements OnModuleInit {
     // Retype the columns (TEXT→TEXT is a no-op on subsequent boots)
     await this.db.query(`ALTER TABLE incidents ALTER COLUMN id TYPE TEXT USING id::TEXT`).catch(() => {});
     await this.db.query(`ALTER TABLE incidents ALTER COLUMN event_id TYPE TEXT USING event_id::TEXT`).catch(() => {});
+    // created_by may be a legacy UUID column; medics use UUID ids but the dashboard
+    // (and seed data) use plain text — relax to TEXT so any author can report.
+    await this.db.query(`ALTER TABLE incidents ALTER COLUMN created_by TYPE TEXT USING created_by::TEXT`).catch(() => {});
 
     // Retype child columns and recreate inbound FKs
     for (const fk of inboundFks) {
@@ -147,6 +214,12 @@ export class IncidentsService implements OnModuleInit {
     // Note: outbound FKs (incidents → events) are intentionally NOT recreated
     // because events use plain-text join codes, not UUIDs.
 
+    // Legacy CHECK constraint may restrict status to the old set (no 'closed').
+    // Drop it — status values are validated at the application layer.
+    await this.db
+      .query(`ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_status_check`)
+      .catch(() => undefined);
+
     await this.db.query(`
       CREATE INDEX IF NOT EXISTS idx_incidents_event ON incidents (event_id, created_at DESC)
     `);
@@ -156,14 +229,23 @@ export class IncidentsService implements OnModuleInit {
     const id = randomUUID();
     const now = new Date().toISOString();
 
+    // Sequential per-event name: "Incident 1", "Incident 2", …
+    const { rows: countRows } = await this.db.query<{ count: string }>(
+      `SELECT count(*)::int AS count FROM incidents WHERE event_id = $1`,
+      [eventId],
+    );
+    const sequence = Number(countRows[0]?.count ?? 0) + 1;
+    const name = `Incident ${sequence}`;
+
     const { rows } = await this.db.query<IncidentRow>(
       `INSERT INTO incidents
-         (id, event_id, lat, lng, type, description, severity, photo_url, status, created_by, created_at, updated_at, responders)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10, $10, '[]')
+         (id, event_id, name, lat, lng, type, description, severity, photo_url, status, created_by, created_at, updated_at, responders)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10, $11, $11, '[]')
        RETURNING *`,
       [
         id,
         eventId,
+        name,
         input.lat,
         input.lng,
         input.type ?? "other",
@@ -182,11 +264,14 @@ export class IncidentsService implements OnModuleInit {
       payload: incident,
     });
 
+    // Alarm: every device registered to the event (medics + dashboard) gets pinged.
     void this.notificationsService.sendToEvent(
       eventId,
-      "🚨 New Incident",
-      `${incident.type} at (${incident.lat.toFixed(5)}, ${incident.lng.toFixed(5)})`,
-      { incidentId: incident.id, eventId },
+      `🚨 ${incident.name}`,
+      incident.description?.trim()
+        ? `${incident.type} — ${incident.description}`
+        : `${incident.type} reported`,
+      { incidentId: incident.id, eventId, kind: "incident_alarm", sound: "alarm" },
     );
 
     return { ...incident, nearbyParamedics: [] };
@@ -234,6 +319,13 @@ export class IncidentsService implements OnModuleInit {
     if (action.action === "resolved") {
       newStatus = "resolved";
     }
+    if (action.action === "stand_down") {
+      newResponders = newResponders.filter((id) => id !== userId);
+      // Revert to "open" once the last responder steps away (unless already resolved/closed).
+      if (newResponders.length === 0 && newStatus === "assigned") {
+        newStatus = "open";
+      }
+    }
 
     const now = new Date().toISOString();
     const { rows: updated } = await this.db.query<IncidentRow>(
@@ -249,6 +341,11 @@ export class IncidentsService implements OnModuleInit {
     await this.redisService.publish(`event:${eventId}:ops`, {
       type: "incident.action",
       payload: { incidentId, userId, action: action.action, status: incident.status },
+    });
+    // Broadcast the full record so every client refreshes the responders list.
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.updated",
+      payload: { ...incident, nearbyParamedics: [] },
     });
 
     return incident;
@@ -276,13 +373,17 @@ export class IncidentsService implements OnModuleInit {
        SET type        = COALESCE($1, type),
            description = COALESCE($2, description),
            photo_url   = COALESCE($3, photo_url),
-           updated_at  = $4
-       WHERE id = $5 AND event_id = $6
+           severity    = COALESCE($4, severity),
+           status      = COALESCE($5, status),
+           updated_at  = $6
+       WHERE id = $7 AND event_id = $8
        RETURNING *`,
       [
         input.type ?? null,
         input.description ?? null,
         input.photoUrl ?? null,
+        input.severity ?? null,
+        input.status ?? null,
         now,
         incidentId,
         eventId,
@@ -329,7 +430,138 @@ export class IncidentsService implements OnModuleInit {
       type: "incident.assigned",
       payload: { incidentId, paramedicId, responders: incident.responders },
     });
+    // Broadcast the full record so every client refreshes the responders list.
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.updated",
+      payload: { ...incident, nearbyParamedics: [] },
+    });
 
     return incident;
+  }
+
+  // ─── Close (casualty-care handover) ────────────────────────────────────────
+
+  async close(
+    eventId: string,
+    incidentId: string,
+    userId: string,
+    input: { vitals?: string; treatment?: string; transport?: string },
+  ): Promise<IncidentRecord> {
+    const { rows: existing } = await this.db.query<IncidentRow>(
+      `SELECT * FROM incidents WHERE id = $1 AND event_id = $2`,
+      [incidentId, eventId],
+    );
+    if (!existing[0]) {
+      throw new NotFoundException("Incident not found");
+    }
+
+    const now = new Date().toISOString();
+    const { rows: updated } = await this.db.query<IncidentRow>(
+      `UPDATE incidents
+       SET status     = 'closed',
+           vitals     = COALESCE($1, vitals),
+           treatment  = COALESCE($2, treatment),
+           transport  = COALESCE($3, transport),
+           closed_by  = $4,
+           closed_at  = $5,
+           updated_at = $5
+       WHERE id = $6 AND event_id = $7
+       RETURNING *`,
+      [
+        input.vitals ?? null,
+        input.treatment ?? null,
+        input.transport ?? null,
+        userId,
+        now,
+        incidentId,
+        eventId,
+      ],
+    );
+
+    const incident = rowToRecord(updated[0]);
+
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.updated",
+      payload: { ...incident, nearbyParamedics: [] },
+    });
+
+    return incident;
+  }
+
+  // ─── Chat ──────────────────────────────────────────────────────────────────
+
+  async listMessages(eventId: string, incidentId: string): Promise<IncidentMessageRecord[]> {
+    const { rows } = await this.db.query<{
+      id: string;
+      incident_id: string;
+      event_id: string;
+      author_id: string;
+      author_name: string;
+      text: string;
+      photo_url: string | null;
+      created_at: string;
+    }>(
+      `SELECT * FROM incident_messages WHERE incident_id = $1 AND event_id = $2 ORDER BY created_at ASC`,
+      [incidentId, eventId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      incidentId: r.incident_id,
+      eventId: r.event_id,
+      authorId: r.author_id,
+      authorName: r.author_name,
+      text: r.text,
+      photoUrl: r.photo_url ?? undefined,
+      createdAt: toIso(r.created_at) ?? new Date().toISOString(),
+    }));
+  }
+
+  async addMessage(
+    eventId: string,
+    incidentId: string,
+    authorId: string,
+    input: { text: string; photoUrl?: string },
+  ): Promise<IncidentMessageRecord> {
+    const { rows: incidentRows } = await this.db.query<{ id: string }>(
+      `SELECT id FROM incidents WHERE id = $1 AND event_id = $2`,
+      [incidentId, eventId],
+    );
+    if (!incidentRows[0]) {
+      throw new NotFoundException("Incident not found");
+    }
+
+    // Best-effort display name from the medic roster, else the raw id.
+    // Cast id::text so a non-UUID author (e.g. the dashboard) doesn't error on a UUID column.
+    const { rows: nameRows } = await this.db.query<{ name: string }>(
+      `SELECT name FROM event_medics WHERE id::text = $1 AND event_id = $2`,
+      [authorId, eventId],
+    );
+    const authorName = nameRows[0]?.name ?? "Dashboard";
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await this.db.query(
+      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, now],
+    );
+
+    const message: IncidentMessageRecord = {
+      id,
+      incidentId,
+      eventId,
+      authorId,
+      authorName,
+      text: input.text,
+      photoUrl: input.photoUrl,
+      createdAt: now,
+    };
+
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.message",
+      payload: message,
+    });
+
+    return message;
   }
 }

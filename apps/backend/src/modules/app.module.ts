@@ -10,6 +10,7 @@ import { HealthModule } from "./health/health.module";
 import { IncidentsModule } from "./incidents/incidents.module";
 import { InfraModule } from "./infra/infra.module";
 import { LocationsModule } from "./locations/locations.module";
+import { MapModule } from "./map/map.module";
 import { MedicsModule } from "./medics/medics.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { RealtimeModule } from "./realtime/realtime.module";
@@ -28,6 +29,7 @@ import { UsersModule } from "./users/users.module";
     EventsModule,
     EventUsersModule,
     LocationsModule,
+    MapModule,
     MedicsModule,
     NotificationsModule,
     IncidentsModule,

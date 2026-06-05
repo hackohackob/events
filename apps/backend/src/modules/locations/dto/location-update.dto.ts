@@ -18,6 +18,10 @@ export class LocationUpdateDto implements LocationUpdate {
   @IsNumber()
   accuracy?: number;
 
+  @IsOptional()
+  @IsNumber()
+  battery?: number;
+
   @IsISO8601()
   timestamp!: string;
 }

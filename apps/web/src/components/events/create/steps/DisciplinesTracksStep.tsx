@@ -43,20 +43,32 @@ function haversineKm(a: [number, number], b: [number, number]): number {
   return R * 2 * Math.asin(Math.sqrt(h))
 }
 
-function parseGPX(text: string): { coords: [number, number][]; distanceKm: number; elevationM: number } {
+interface ParsedGpx {
+  coords: [number, number][]
+  distanceKm: number
+  elevationM: number
+  /** Near-raw elevation profile (distance km → elevation m), only lightly smoothed. */
+  profile: { distance: number; elevation: number }[]
+}
+
+const EMPTY_GPX: ParsedGpx = { coords: [], distanceKm: 0, elevationM: 0, profile: [] }
+
+function parseGPX(text: string): ParsedGpx {
   try {
     const parser = new DOMParser()
     const doc = parser.parseFromString(text, 'text/xml')
     const trkpts = Array.from(doc.querySelectorAll('trkpt'))
-    if (trkpts.length === 0) return { coords: [], distanceKm: 0, elevationM: 0 }
+    if (trkpts.length === 0) return EMPTY_GPX
 
     const coords: [number, number][] = trkpts.map(pt => [
       parseFloat(pt.getAttribute('lon') || '0'),
       parseFloat(pt.getAttribute('lat') || '0'),
     ])
 
-    let distanceKm = 0
-    for (let i = 1; i < coords.length; i++) distanceKm += haversineKm(coords[i - 1], coords[i])
+    // Cumulative distance per point + raw elevation
+    const cumDist: number[] = [0]
+    for (let i = 1; i < coords.length; i++) cumDist[i] = cumDist[i - 1] + haversineKm(coords[i - 1], coords[i])
+    const distanceKm = cumDist[cumDist.length - 1] ?? 0
 
     const eles = trkpts.map(pt => parseFloat(pt.querySelector('ele')?.textContent || '0'))
     let elevationM = 0
@@ -65,9 +77,31 @@ function parseGPX(text: string): { coords: [number, number][]; distanceKm: numbe
       if (diff > 0) elevationM += diff
     }
 
-    return { coords, distanceKm: Math.round(distanceKm * 10) / 10, elevationM: Math.round(elevationM) }
+    // Build a near-raw profile. Only very light smoothing: a 3-point moving
+    // average to take the edge off GPS noise, but otherwise the real GPX shape.
+    const hasElevation = eles.some(e => e > 0)
+    let profile: { distance: number; elevation: number }[] = []
+    if (hasElevation) {
+      const smoothed = eles.map((e, i) => {
+        if (i === 0 || i === eles.length - 1) return e
+        return (eles[i - 1] + e + eles[i + 1]) / 3
+      })
+      // Keep it raw, but cap points so the chart stays responsive on huge tracks.
+      const MAX_POINTS = 800
+      const stride = smoothed.length > MAX_POINTS ? Math.ceil(smoothed.length / MAX_POINTS) : 1
+      for (let i = 0; i < smoothed.length; i += stride) {
+        profile.push({ distance: Math.round(cumDist[i] * 100) / 100, elevation: Math.round(smoothed[i]) })
+      }
+      // Always include the final point so the profile spans the full distance.
+      const lastIdx = smoothed.length - 1
+      if (profile[profile.length - 1]?.distance !== Math.round(cumDist[lastIdx] * 100) / 100) {
+        profile.push({ distance: Math.round(cumDist[lastIdx] * 100) / 100, elevation: Math.round(smoothed[lastIdx]) })
+      }
+    }
+
+    return { coords, distanceKm: Math.round(distanceKm * 10) / 10, elevationM: Math.round(elevationM), profile }
   } catch {
-    return { coords: [], distanceKm: 0, elevationM: 0 }
+    return EMPTY_GPX
   }
 }
 
@@ -94,7 +128,11 @@ export default function DisciplinesTracksStep({ data, update, onNext, onBack }: 
 
   const selectedDay = data.days.find(d => d.id === selectedDayId) || data.days[0]
   const selectedDisc = selectedDay?.disciplines.find(d => d.id === selectedDiscId) || selectedDay?.disciplines[0]
-  const elevProfile = generateElevationProfile(80, 900, selectedDisc?.elevation || 800)
+  // Prefer the real (near-raw) GPX elevation profile; fall back to a synthetic
+  // one only when the track has no elevation data.
+  const elevProfile = selectedDisc?.elevationProfile?.length
+    ? selectedDisc.elevationProfile
+    : generateElevationProfile(80, 900, selectedDisc?.elevation || 800)
 
   const getTrackCoords = (disc: Discipline): [number, number][] =>
     disc.gpxCoordinates?.length ? disc.gpxCoordinates : FALLBACK_TRACK
@@ -200,7 +238,7 @@ export default function DisciplinesTracksStep({ data, update, onNext, onBack }: 
 
   const handleGPXUpload = useCallback(async (dayId: string, discId: string, file: File) => {
     const text = await file.text()
-    const { coords, distanceKm, elevationM } = parseGPX(text)
+    const { coords, distanceKm, elevationM, profile } = parseGPX(text)
     const patch: Partial<Discipline> = {
       gpxFile: file.name,
       gpxUploaded: true,
@@ -209,6 +247,7 @@ export default function DisciplinesTracksStep({ data, update, onNext, onBack }: 
       patch.gpxCoordinates = coords
       if (distanceKm > 0) patch.distance = distanceKm
       if (elevationM > 0) patch.elevation = elevationM
+      if (profile.length > 0) patch.elevationProfile = profile
     }
     try {
       const url = await uploadGPX(file)
@@ -693,12 +732,13 @@ export default function DisciplinesTracksStep({ data, update, onNext, onBack }: 
                   labelFormatter={(l: number) => `${l.toFixed(1)} km`}
                 />
                 <Area
-                  type="monotone"
+                  type="linear"
                   dataKey="elevation"
                   stroke={selectedDisc.color}
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                   fill="url(#elevGrad)"
                   dot={false}
+                  isAnimationActive={false}
                   activeDot={{ r: 4, fill: selectedDisc.color, stroke: 'white', strokeWidth: 2 }}
                 />
               </AreaChart>

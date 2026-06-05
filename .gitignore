@@ -9,3 +9,9 @@ coverage
 /android/
 apps/backend/uploads/gpx/
 .claude/worktrees/
+
+# Runtime uploads (persisted via Docker volume in prod)
+apps/backend/uploads/
+
+# TS build info
+*.tsbuildinfo

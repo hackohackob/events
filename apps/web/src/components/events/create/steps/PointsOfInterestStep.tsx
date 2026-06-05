@@ -32,6 +32,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
   const [hiddenTrackIds, setHiddenTrackIds] = useState<Set<string>>(new Set())
   const [editingPoiId, setEditingPoiId] = useState<string | null>(null)
   const [editingPoiName, setEditingPoiName] = useState('')
+  const [editingPoiDescription, setEditingPoiDescription] = useState('')
   const [showAllDays, setShowAllDays] = useState(false)
   const [copyConfirmDayId, setCopyConfirmDayId] = useState<string | null>(null)
 
@@ -112,16 +113,20 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
     const config = POI_CONFIGS.find(c => c.type === poi.type)
     setEditingPoiId(poi.id)
     setEditingPoiName(poi.name || config?.label || '')
+    setEditingPoiDescription(poi.description || '')
   }
 
   const confirmEditPoiName = () => {
     if (!editingPoiId || !selectedDay) return
-    updateDayPois(selectedDay.id, currentPois.map(p => p.id === editingPoiId ? { ...p, name: editingPoiName.trim() || p.name } : p))
+    updateDayPois(selectedDay.id, currentPois.map(p => p.id === editingPoiId
+      ? { ...p, name: editingPoiName.trim() || p.name, description: editingPoiDescription.trim() || undefined }
+      : p))
     setEditingPoiId(null)
     setEditingPoiName('')
+    setEditingPoiDescription('')
   }
 
-  const cancelEditPoiName = () => { setEditingPoiId(null); setEditingPoiName('') }
+  const cancelEditPoiName = () => { setEditingPoiId(null); setEditingPoiName(''); setEditingPoiDescription('') }
 
   const copyPoisFromDay = (fromDayId: string) => {
     if (!selectedDay) return
@@ -339,21 +344,33 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                       </div>
                       <div className="flex-1 min-w-0">
                         {isEditing ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              autoFocus
-                              value={editingPoiName}
-                              onChange={e => setEditingPoiName(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') confirmEditPoiName(); if (e.key === 'Escape') cancelEditPoiName() }}
-                              className="flex-1 min-w-0 px-1.5 py-0.5 rounded text-xs text-slate-100 outline-none"
-                              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(34,197,94,0.4)' }}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1">
+                              <input
+                                autoFocus
+                                value={editingPoiName}
+                                onChange={e => setEditingPoiName(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') confirmEditPoiName(); if (e.key === 'Escape') cancelEditPoiName() }}
+                                placeholder="Name"
+                                className="flex-1 min-w-0 px-1.5 py-0.5 rounded text-xs text-slate-100 outline-none"
+                                style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(34,197,94,0.4)' }}
+                              />
+                              <button onClick={confirmEditPoiName} className="p-0.5 rounded hover:bg-green-500/20">
+                                <Check className="w-3 h-3 text-green-400" />
+                              </button>
+                              <button onClick={cancelEditPoiName} className="p-0.5 rounded hover:bg-white/10">
+                                <X className="w-3 h-3 text-slate-500" />
+                              </button>
+                            </div>
+                            <textarea
+                              value={editingPoiDescription}
+                              onChange={e => setEditingPoiDescription(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Escape') cancelEditPoiName() }}
+                              placeholder="Short description (optional)…"
+                              rows={2}
+                              className="w-full px-1.5 py-1 rounded text-[11px] text-slate-200 outline-none resize-none"
+                              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(148,163,184,0.2)' }}
                             />
-                            <button onClick={confirmEditPoiName} className="p-0.5 rounded hover:bg-green-500/20">
-                              <Check className="w-3 h-3 text-green-400" />
-                            </button>
-                            <button onClick={cancelEditPoiName} className="p-0.5 rounded hover:bg-white/10">
-                              <X className="w-3 h-3 text-slate-500" />
-                            </button>
                           </div>
                         ) : (
                           <button
@@ -365,7 +382,9 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                         )}
                         {!isEditing && (
                           <div className="text-[10px]" style={{ color: '#475569' }}>
-                            {poi.coordinates[0].toFixed(4)}, {poi.coordinates[1].toFixed(4)}
+                            {poi.description
+                              ? poi.description
+                              : `${poi.coordinates[0].toFixed(4)}, ${poi.coordinates[1].toFixed(4)}`}
                           </div>
                         )}
                       </div>

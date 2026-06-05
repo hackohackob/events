@@ -1,7 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Dimensions,
+  Image,
+  Modal,
   PanResponder,
   Pressable,
   ScrollView,
@@ -21,15 +24,33 @@ import {
   RasterSource,
   UserLocation,
 } from "@maplibre/maplibre-react-native";
+import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { IncidentFAB } from "../incidents/IncidentFAB";
 import { ReportIncidentSheet } from "../incidents/ReportIncidentSheet";
 import { incidentQueue } from "../incidents/persistent-incident-queue";
 import { useIncidentStore } from "../incidents/incident-store";
 import { getSocket } from "../realtime/socket-client";
-import { apiFetch } from "../ui/api-client";
+import { apiFetch, resolveMediaUrl } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
 import { useMapStore } from "./map-store";
 import { useSessionStore } from "../security/session-store";
+import { useRosterStore } from "../security/roster-store";
+import { freshnessBucket, freshnessColor, freshnessLabel } from "./freshness";
+import { LocationScreen } from "../debug/LocationScreen";
+import { DebugScreen } from "../debug/DebugScreen";
+import { useLocationStatus } from "../debug/location-status";
+import { debugLog } from "../debug/debug-log";
+import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
+import { Feather } from "@expo/vector-icons";
+import { MedicStatusControl } from "./MedicStatusControl";
+import { AssignDestinationBar } from "./AssignDestinationBar";
+import { IncidentActions } from "./IncidentActions";
+import * as Haptics from "expo-haptics";
+import { NewPoiSheet } from "./NewPoiSheet";
+import { archivePoi, type PoiDto } from "../ui/event-actions";
+import { OfflineControlButton } from "./OfflineControlButton";
+import { showBroadcastNotification } from "../notifications/broadcast-notification";
+import { useNotificationFocus } from "../notifications/notification-focus";
 
 const CURRENT_USER_ID = "mobile-user";
 const FALLBACK_LAT = 42.6977;
@@ -44,6 +65,8 @@ const SHEET_HEIGHT = Math.max(320, SCREEN_HEIGHT - SHEET_TOP_MARGIN_EXPANDED - B
 const SHEET_EXPANDED_Y = 0;
 const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
 const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
+const MARKER_SHEET_SNAP_POINTS = ["42%", "88%"];
+const TRACK_SHEET_SNAP_POINTS = ["46%", "84%"];
 const USE_MAPY_TILES = process.env.EXPO_PUBLIC_USE_MAPY_TILES === "true";
 const TRACK_STUDIO_CAMERA_PADDING = {
   top: 92,
@@ -98,6 +121,99 @@ interface EventLocationResponse {
   description?: string;
   respondingIncidentId?: string;
   respondingParamedicIds?: string[];
+}
+
+interface MedicActiveResponse {
+  medicId: string;
+  eventId: string;
+  name: string;
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  battery?: number;
+  status?: string;
+  destination?: { lat: number; lng: number; label: string } | null;
+  recordedAt?: string;
+  lastSeenAt?: string;
+}
+
+interface IncidentResponse {
+  id: string;
+  name?: string;
+  type: string;
+  description?: string;
+  lat: number;
+  lng: number;
+  status?: string;
+  severity?: string;
+  photoUrl?: string;
+  responders?: string[];
+  createdBy?: string;
+}
+
+function incidentToMarker(incident: IncidentResponse) {
+  return {
+    id: incident.id,
+    type: "incident" as const,
+    label: incident.name ?? incident.type,
+    name: incident.name,
+    lat: incident.lat,
+    lng: incident.lng,
+    description: incident.description,
+    respondingParamedicIds: incident.responders,
+    status: incident.status,
+    incidentType: incident.type,
+    photoUrl: incident.photoUrl,
+  };
+}
+
+function poiToMarker(poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string }) {
+  return {
+    id: poi.id,
+    type: "infrastructure" as const,
+    label: poi.name ?? poi.type,
+    name: poi.name,
+    lat: poi.lat,
+    lng: poi.lng,
+    poiType: poi.type,
+    poiDescription: poi.description,
+  };
+}
+
+/** Resolved/closed incidents stay on the map but render grey instead of red. */
+function isClosedIncidentStatus(status?: string): boolean {
+  return status === "resolved" || status === "closed";
+}
+
+/** Archived incidents are removed from the active map entirely. */
+function isArchivedIncidentStatus(status?: string): boolean {
+  return status === "archived";
+}
+
+const INCIDENT_TYPE_LABELS: Record<string, string> = {
+  medical: "Medical",
+  cardiac: "Cardiac",
+  trauma: "Trauma",
+  fracture: "Fracture",
+  unconscious: "Unconscious",
+  other: "Other",
+};
+function incidentTypeLabel(type?: string): string {
+  if (!type) return "Incident";
+  return INCIDENT_TYPE_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+const INCIDENT_STATUS_LABELS: Record<string, string> = {
+  open: "Reported live",
+  assigned: "Responder assigned",
+  in_progress: "On scene",
+  resolved: "Resolved",
+  closed: "Closed",
+  archived: "Archived",
+};
+function incidentStatusLabel(status?: string): string {
+  if (!status) return "Reported live";
+  return INCIDENT_STATUS_LABELS[status] ?? status;
 }
 
 interface LayerVisibility {
@@ -655,13 +771,13 @@ const MARKER_RENDER_PRIORITY: Record<"runner" | "incident" | "paramedic" | "infr
 };
 
 function markerInitials(label: string): string {
-  const words = label
+  const words = (label ?? "")
     .split(/\s+/)
-    .map((word) => word.replace(/[^A-Za-z]/g, ""))
+    .map((word) => word.replace(/[^A-Za-z0-9]/g, ""))
     .filter(Boolean);
 
   if (words.length >= 2) {
-    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+    return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
   }
   if (words.length === 1) {
     return words[0].slice(0, 2).toUpperCase();
@@ -1072,6 +1188,22 @@ function poiConfig(type?: string): { color: string; icon: string; size: number }
   return POI_CONFIG[type ?? ""] ?? { color: "#64748b", icon: "•", size: 26 };
 }
 
+const POI_TYPE_LABELS: Record<string, string> = {
+  "base-medical-camp": "Medical camp",
+  "ambulance": "Ambulance",
+  "medical-point": "Medical point",
+  "water-point": "Water point",
+  "wc": "Toilets",
+  "wardrobe": "Wardrobe",
+  "parking": "Parking",
+  "custom": "Point of interest",
+  "marker": "Point of interest",
+};
+function poiTypeLabel(type?: string): string {
+  if (!type) return "Point of interest";
+  return POI_TYPE_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1).replace(/-/g, " ");
+}
+
 function buildTrackVisuals(tracks: EventTrackResponse[]): TrackVisual[] {
   if (tracks.length === 0) {
     return [];
@@ -1174,22 +1306,57 @@ function padCollapsedBounds(
   };
 }
 
+/**
+ * Build a GeoJSON polygon approximating a circle of `radiusMeters` around a
+ * lat/lng — used to visualize a paramedic's reported GPS accuracy on the map.
+ */
+function buildAccuracyCircle(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  steps = 48,
+): FeatureCollection<{ type: "Feature"; properties: Record<string, never>; geometry: { type: "Polygon"; coordinates: Array<Array<[number, number]>> } }> {
+  const earthRadius = 6378137;
+  const latRad = (lat * Math.PI) / 180;
+  const ring: Array<[number, number]> = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const dx = (radiusMeters * Math.cos(angle)) / (earthRadius * Math.cos(latRad)) * (180 / Math.PI);
+    const dy = (radiusMeters * Math.sin(angle)) / earthRadius * (180 / Math.PI);
+    ring.push([lng + dx, lat + dy]);
+  }
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Polygon", coordinates: [ring] },
+      },
+    ],
+  };
+}
+
 export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const eventTitle = useSessionStore((state) => state.eventTitle);
   const clearSession = useSessionStore((state) => state.clear);
+  const sessionToken = useSessionStore((state) => state.token);
   const markers = useMapStore((state) => state.markers);
   const tracks = useMapStore((state) => state.tracks);
   const centerOnUserRequestId = useMapStore((state) => state.centerOnUserRequestId);
   const resetNorthRequestId = useMapStore((state) => state.resetNorthRequestId);
   const setMarkers = useMapStore((state) => state.setMarkers);
   const setTracks = useMapStore((state) => state.setTracks);
+  const rosterMedics = useRosterStore((state) => state.medics);
+  const loadRoster = useRosterStore((state) => state.load);
 
   const mapRef = useRef<MapRef | null>(null);
   const cameraRef = useRef<CameraRef | null>(null);
   const didInitialEventFitRef = useRef(false);
-  const sheetBaseTranslate = useRef(new Animated.Value(SHEET_HIDDEN_Y)).current;
-  const sheetDragTranslate = useRef(new Animated.Value(0)).current;
-  const sheetBaseValueRef = useRef(SHEET_HIDDEN_Y);
+  const markerSheetRef = useRef<BottomSheet | null>(null);
+  const trackSheetRef = useRef<BottomSheet | null>(null);
+  const [trackSheetIndex, setTrackSheetIndex] = useState(0);
+  const myLocationFix = useLocationStatus((s) => s.lastFix);
 
   const isOnline = useIncidentStore((s) => s.isOnline);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
@@ -1198,10 +1365,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [incidentTab, setIncidentTab] = useState<IncidentTab>("details");
-  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "reports" | "profile">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "profile">("map");
+  const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [pendingPoi, setPendingPoi] = useState<{ lat: number; lng: number } | null>(null);
+  const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
   const [trackPickerOpen, setTrackPickerOpen] = useState(false);
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
   const [trackProfileProgress, setTrackProfileProgress] = useState(0);
@@ -1209,6 +1379,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const trackProfileChartRef = useRef<View | null>(null);
   const trackProfileChartPageXRef = useRef(0);
   const lastTrackSelectionLayerResetRef = useRef<string | null>(null);
+  // Remembers paramedics/incidents layer visibility before Track Studio hides them,
+  // so we can restore the user's choice when they return to the map.
+  const savedLayersBeforeTrackRef = useRef<{ paramedics: boolean; incidents: boolean } | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({
     participants: false,
     participantsHeatmap: false,
@@ -1270,54 +1443,110 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     updateTrackProfileProgressFromX(pageX - trackProfileChartPageXRef.current);
   };
 
-  const animateSheetTo = (toValue: number) => {
-    sheetBaseValueRef.current = toValue;
-    Animated.spring(sheetBaseTranslate, {
-      toValue,
-      damping: 28,
-      mass: 1,
-      stiffness: 280,
-      useNativeDriver: true,
-    }).start();
-  };
 
-  const sheetPanResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_event, gesture) => {
-        return Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx);
-      },
-      onPanResponderMove: (_event, gesture) => {
-        sheetDragTranslate.setValue(gesture.dy);
-      },
-      onPanResponderRelease: (_event, gesture) => {
-        const projected = sheetBaseValueRef.current + gesture.dy + gesture.vy * 34;
-        const midpoint = (SHEET_EXPANDED_Y + SHEET_COLLAPSED_Y) / 2;
-        const target = projected <= midpoint ? SHEET_EXPANDED_Y : SHEET_COLLAPSED_Y;
-        sheetDragTranslate.setValue(0);
-        animateSheetTo(target);
-      },
-      onPanResponderTerminate: () => {
-        sheetDragTranslate.setValue(0);
-        animateSheetTo(sheetBaseValueRef.current);
-      },
-    }),
-  ).current;
+  // Re-pull the DB-backed last-known medic positions and merge them into the
+  // map. The initial load happens once on mount, but the live socket can miss
+  // the self-broadcast (e.g. when resuming from the background, or if the ping
+  // went out over HTTP), so we also refresh on every foreground.
+  const refreshActiveMedics = useCallback(async () => {
+    const eventId = useSessionStore.getState().eventId ?? "";
+    if (!eventId) return;
+    try {
+      const activeMedics = await apiFetch<MedicActiveResponse[]>(`/events/${eventId}/medics/active`);
+      const medicMarkers = activeMedics.map((medic) => {
+        const ageMs = medic.lastSeenAt ? Date.now() - new Date(medic.lastSeenAt).getTime() : undefined;
+        return {
+          id: medic.medicId,
+          type: "paramedic" as const,
+          label: medic.name ?? medic.medicId,
+          name: medic.name,
+          lat: medic.lat,
+          lng: medic.lng,
+          accuracy: medic.accuracy,
+          battery: medic.battery,
+          staleState: freshnessBucket(ageMs),
+          lastSeenAt: medic.lastSeenAt,
+          status: medic.status,
+          destination: medic.destination ?? null,
+        };
+      });
+      const existing = useMapStore.getState().markers;
+      const others = existing.filter((marker) => marker.type !== "paramedic");
+      setMarkers([...others, ...medicMarkers]);
+      debugLog("api", "info", `pulled ${medicMarkers.length} medic(s) from API`);
+    } catch (err) {
+      debugLog("api", "error", "medics refresh failed", String(err));
+    }
+  }, [setMarkers]);
 
-  const sheetTranslateY = Animated.add(sheetBaseTranslate, sheetDragTranslate).interpolate({
-    inputRange: [SHEET_EXPANDED_Y, SHEET_HIDDEN_Y],
-    outputRange: [SHEET_EXPANDED_Y, SHEET_HIDDEN_Y],
-    extrapolate: "clamp",
-  });
+  // Re-pull incidents (used on foreground + when focusing a notification's incident),
+  // since the live socket may miss events while the app is backgrounded.
+  const refreshIncidents = useCallback(async () => {
+    try {
+      const incidents = await apiFetch<IncidentResponse[]>("/incidents");
+      const existing = useMapStore.getState().markers;
+      const others = existing.filter((m) => m.type !== "incident");
+      const visible = incidents.filter((i) => !isArchivedIncidentStatus(i.status));
+      setMarkers([...others, ...visible.map(incidentToMarker)]);
+    } catch (err) {
+      debugLog("api", "error", "incidents refresh failed", String(err));
+    }
+  }, [setMarkers]);
+
+  // Bounding box around all current markers + tracks, for caching the event area offline.
+  const computeOfflineBounds = useCallback((): [number, number, number, number] | null => {
+    const points: Array<{ lat: number; lng: number }> = [];
+    for (const marker of useMapStore.getState().markers) {
+      if (Number.isFinite(marker.lat) && Number.isFinite(marker.lng)) {
+        points.push({ lat: marker.lat, lng: marker.lng });
+      }
+    }
+    for (const track of useMapStore.getState().tracks) {
+      for (const point of track.points) points.push(point);
+    }
+    if (points.length === 0) return null;
+    let minLat = Infinity;
+    let minLng = Infinity;
+    let maxLat = -Infinity;
+    let maxLng = -Infinity;
+    for (const point of points) {
+      minLat = Math.min(minLat, point.lat);
+      maxLat = Math.max(maxLat, point.lat);
+      minLng = Math.min(minLng, point.lng);
+      maxLng = Math.max(maxLng, point.lng);
+    }
+    const padLat = Math.max((maxLat - minLat) * 0.12, 0.01);
+    const padLng = Math.max((maxLng - minLng) * 0.12, 0.01);
+    return [minLng - padLng, minLat - padLat, maxLng + padLng, maxLat + padLat];
+  }, []);
+
+  useEffect(() => {
+    void refreshActiveMedics();
+    void refreshIncidents();
+    void loadRoster();
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") {
+        void refreshActiveMedics();
+        void refreshIncidents();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshActiveMedics, refreshIncidents, loadRoster]);
 
   useEffect(() => {
     let mounted = true;
 
     const loadInitialData = async () => {
       try {
-        const [initialLocations, eventTracksPayload, eventPois] = await Promise.all([
+        const eventId = useSessionStore.getState().eventId ?? "";
+        const [initialLocations, activeMedics, eventTracksPayload, eventPois, incidents] = await Promise.all([
           apiFetch<EventLocationResponse[]>("/locations/event"),
+          eventId
+            ? apiFetch<MedicActiveResponse[]>(`/events/${eventId}/medics/active`).catch(() => [])
+            : Promise.resolve<MedicActiveResponse[]>([]),
           apiFetch<unknown>("/events/tracks"),
-          apiFetch<Array<{ type: string; name?: string; lat: number; lng: number }>>("/events/pois").catch(() => []),
+          apiFetch<Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number }>>("/events/pois").catch(() => []),
+          apiFetch<IncidentResponse[]>("/incidents").catch(() => [] as IncidentResponse[]),
         ]);
 
         if (!mounted) {
@@ -1339,15 +1568,38 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           respondingIncidentId: item.respondingIncidentId,
           respondingParamedicIds: item.respondingParamedicIds,
         }));
+        // Last-known paramedic positions (DB-backed), so the map matches the web
+        // on launch instead of only showing medics that ping after we connect.
+        const medicMarkers = activeMedics.map((medic) => {
+          const ageMs = medic.lastSeenAt ? Date.now() - new Date(medic.lastSeenAt).getTime() : undefined;
+          return {
+            id: medic.medicId,
+            type: "paramedic" as const,
+            label: medic.name ?? medic.medicId,
+            name: medic.name,
+            lat: medic.lat,
+            lng: medic.lng,
+            accuracy: medic.accuracy,
+            battery: medic.battery,
+            staleState: freshnessBucket(ageMs),
+            lastSeenAt: medic.lastSeenAt,
+            status: medic.status,
+            destination: medic.destination ?? null,
+          };
+        });
         const poiMarkers = eventPois.map((poi, i) => ({
-          id: `poi-${i}-${poi.lat}-${poi.lng}`,
+          id: poi.id ?? `poi-${i}-${poi.lat}-${poi.lng}`,
           type: "infrastructure" as const,
           label: poi.name ?? poi.type,
           lat: poi.lat,
           lng: poi.lng,
           poiType: poi.type,
+          poiDescription: poi.description,
         }));
-        setMarkers([...locationMarkers, ...poiMarkers]);
+        const incidentMarkers = incidents
+          .filter((i) => !isArchivedIncidentStatus(i.status))
+          .map(incidentToMarker);
+        setMarkers([...locationMarkers, ...medicMarkers, ...poiMarkers, ...incidentMarkers]);
         const normalizedTracks = Array.isArray(eventTracksPayload)
           ? eventTracksPayload
               .map((track, index) => normalizeTrack(track, index))
@@ -1403,7 +1655,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       );
     });
 
-    socket.on("medic_location", (payload: { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number }) => {
+    socket.on("medic_location", (payload: { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null }) => {
       const existing = useMapStore.getState().markers;
       const filtered = existing.filter((marker) => marker.id !== payload.medicId);
       const existing_marker = existing.find((marker) => marker.id === payload.medicId);
@@ -1418,35 +1670,89 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             vehicle: existing_marker?.vehicle,
             lat: payload.lat,
             lng: payload.lng,
+            accuracy: payload.accuracy ?? existing_marker?.accuracy,
+            battery: payload.battery ?? existing_marker?.battery,
             staleState: "fresh" as const,
-            lastSeenAt: new Date().toISOString(),
+            lastSeenAt: payload.lastSeenAt ?? new Date().toISOString(),
+            status: payload.status ?? existing_marker?.status,
+            destination: payload.destination !== undefined ? payload.destination : existing_marker?.destination ?? null,
           },
         ].slice(-2200),
       );
     });
 
-    socket.on("incident.created", (payload) => {
+    socket.on("incident.created", (payload: IncidentResponse) => {
       const existing = useMapStore.getState().markers;
       setMarkers(
-        [
-          ...existing,
-          {
-            id: payload.id,
-            type: "incident" as const,
-            label: payload.type,
-            lat: payload.lat,
-            lng: payload.lng,
-          },
-        ].slice(-2200),
+        [...existing.filter((m) => m.id !== payload.id), incidentToMarker(payload)].slice(-2200),
       );
+      // Alarm: heads-up notification for everyone except the medic who reported it.
+      const myId = useSessionStore.getState().userId;
+      if (payload.createdBy !== myId) {
+        const detail = payload.description ? `${payload.type} — ${payload.description}` : `${payload.type} reported`;
+        void showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id });
+      }
+    });
+
+    // Any incident change (details edit, status, close) re-renders its pin in place.
+    const upsertIncident = (payload: IncidentResponse) => {
+      const existing = useMapStore.getState().markers;
+      const existingMarker = existing.find((m) => m.id === payload.id);
+      const withoutIncident = existing.filter((m) => m.id !== payload.id);
+      // Archived incidents drop off the active map entirely.
+      if (isArchivedIncidentStatus(payload.status)) {
+        setMarkers(withoutIncident);
+        return;
+      }
+      const merged = { ...incidentToMarker(payload) };
+      // Preserve responders/description if a partial action payload omits them.
+      if (!merged.respondingParamedicIds && existingMarker?.respondingParamedicIds) {
+        merged.respondingParamedicIds = existingMarker.respondingParamedicIds;
+      }
+      setMarkers([...withoutIncident, merged].slice(-2200));
+    };
+    socket.on("incident.updated", upsertIncident);
+    // Dashboard broadcast → real OS heads-up notification (no in-app banner).
+    socket.on("broadcast", (payload: { title?: string; body?: string }) => {
+      const title = payload.title ?? "📢 Broadcast";
+      const body = payload.body ?? "";
+      void showBroadcastNotification(title, body);
+    });
+    // Status-only changes arrive on the ops channel as incident.action.
+    socket.on("incident.action", (payload: { incidentId: string; status?: string }) => {
+      const existing = useMapStore.getState().markers;
+      setMarkers(
+        existing.map((m) =>
+          m.id === payload.incidentId && m.type === "incident"
+            ? { ...m, status: payload.status ?? m.status }
+            : m,
+        ),
+      );
+    });
+
+    // POIs created/archived elsewhere appear/disappear for everyone live.
+    socket.on("poi.created", (poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string }) => {
+      const existing = useMapStore.getState().markers;
+      setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+    });
+    socket.on("poi.removed", (payload: { id: string }) => {
+      const existing = useMapStore.getState().markers;
+      setMarkers(existing.filter((m) => m.id !== payload.id));
     });
 
     return () => {
       socket.off("location.updated");
       socket.off("medic_location");
       socket.off("incident.created");
+      socket.off("incident.updated");
+      socket.off("incident.action");
+      socket.off("broadcast");
+      socket.off("poi.created");
+      socket.off("poi.removed");
     };
-  }, [setMarkers]);
+    // Re-subscribe when the session token changes: getSocket() reconnects with
+    // the new identity, so we must re-attach listeners to the fresh socket.
+  }, [setMarkers, sessionToken]);
 
   useEffect(() => {
     const centerOnUser = async () => {
@@ -1668,6 +1974,51 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       focusedTrackProfile.maxElevationMeters,
     );
   }, [focusedTrackProfile, focusedTrackSample]);
+
+  // Project the user's current GPS fix onto the focused track to find where they
+  // are along it, then derive remaining distance / climb / descent to the finish.
+  const myTrackPosition = useMemo(() => {
+    if (!focusedTrackProfile || !myLocationFix || focusedTrackProfile.points.length < 2) {
+      return null;
+    }
+    let bestIndex = 0;
+    let bestDistanceKm = Infinity;
+    focusedTrackProfile.points.forEach((point, index) => {
+      const d = distanceKm(myLocationFix.lat, myLocationFix.lng, point.lat, point.lng);
+      if (d < bestDistanceKm) {
+        bestDistanceKm = d;
+        bestIndex = index;
+      }
+    });
+    const here = focusedTrackProfile.points[bestIndex];
+    let ascentLeftMeters = 0;
+    let descentLeftMeters = 0;
+    for (let i = bestIndex + 1; i < focusedTrackProfile.points.length; i += 1) {
+      const delta = focusedTrackProfile.points[i].elevationMeters - focusedTrackProfile.points[i - 1].elevationMeters;
+      if (delta > 0) ascentLeftMeters += delta;
+      else descentLeftMeters += -delta;
+    }
+    return {
+      progress: here.progress,
+      distanceMeters: here.distanceMeters,
+      elevationMeters: here.elevationMeters,
+      lat: here.lat,
+      lng: here.lng,
+      offTrackMeters: bestDistanceKm * 1000,
+      distanceLeftMeters: Math.max(0, focusedTrackProfile.totalDistanceMeters - here.distanceMeters),
+      ascentLeftMeters,
+      descentLeftMeters,
+    };
+  }, [focusedTrackProfile, myLocationFix]);
+
+  const myTrackCursorTopPercent = useMemo(() => {
+    if (!focusedTrackProfile || !myTrackPosition) return 50;
+    return elevationToChartTopPercent(
+      myTrackPosition.elevationMeters,
+      focusedTrackProfile.minElevationMeters,
+      focusedTrackProfile.maxElevationMeters,
+    );
+  }, [focusedTrackProfile, myTrackPosition]);
   const focusedTrackScrubSegmentFeature = useMemo(() => {
     if (!focusedTrack || focusedTrack.points.length < 2) {
       return null;
@@ -1791,6 +2142,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     if (!trackModeActive) {
       setTrackPickerOpen(false);
       lastTrackSelectionLayerResetRef.current = null;
+      // Restore the paramedics/incidents layers the user had on before Track Studio.
+      if (savedLayersBeforeTrackRef.current) {
+        const saved = savedLayersBeforeTrackRef.current;
+        savedLayersBeforeTrackRef.current = null;
+        setLayerVisibility((state) => ({ ...state, paramedics: saved.paramedics, incidents: saved.incidents }));
+      }
       return;
     }
 
@@ -1814,11 +2171,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       return;
     }
     lastTrackSelectionLayerResetRef.current = focusedTrackId;
-    setLayerVisibility((state) => ({
-      ...state,
-      paramedics: false,
-      incidents: false,
-    }));
+    setLayerVisibility((state) => {
+      // Capture the user's layer choice the first time Track Studio hides them.
+      if (savedLayersBeforeTrackRef.current === null) {
+        savedLayersBeforeTrackRef.current = { paramedics: state.paramedics, incidents: state.incidents };
+      }
+      return { ...state, paramedics: false, incidents: false };
+    });
   }, [focusedTrackId, trackModeActive]);
 
   useEffect(() => {
@@ -1844,27 +2203,49 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   useEffect(() => {
     if (selectedMarker) {
-      sheetDragTranslate.setValue(0);
-      animateSheetTo(SHEET_COLLAPSED_Y);
+      markerSheetRef.current?.snapToIndex(0);
+    } else {
+      markerSheetRef.current?.close();
+    }
+  }, [selectedMarker]);
+
+  // Track Studio sheet follows the "tracks" tab.
+  useEffect(() => {
+    if (trackModeActive) {
+      trackSheetRef.current?.snapToIndex(0);
+    } else {
+      trackSheetRef.current?.close();
+    }
+  }, [trackModeActive]);
+
+  // A tapped incident notification focuses the map on it and opens its sheet.
+  const focusIncidentId = useNotificationFocus((s) => s.incidentId);
+  const focusRequestId = useNotificationFocus((s) => s.requestId);
+  const clearNotificationFocus = useNotificationFocus((s) => s.clear);
+  const focusFetchedRef = useRef(-1);
+  useEffect(() => {
+    if (!focusIncidentId) return;
+    const marker = useMapStore
+      .getState()
+      .markers.find((m) => m.id === focusIncidentId && m.type === "incident");
+    if (!marker) {
+      // Created while backgrounded? Fetch incidents once, then this effect retries.
+      if (focusFetchedRef.current !== focusRequestId) {
+        focusFetchedRef.current = focusRequestId;
+        void refreshIncidents();
+      }
       return;
     }
-
-    sheetDragTranslate.setValue(0);
-    animateSheetTo(SHEET_HIDDEN_Y);
-  }, [selectedMarker, sheetDragTranslate]);
+    setActiveTab("map");
+    cameraRef.current?.easeTo({ center: [marker.lng, marker.lat], zoom: USER_FOCUS_ZOOM, duration: 550 });
+    setSelectedMarkerId(marker.id);
+    setIncidentTab("details");
+    clearNotificationFocus();
+  }, [focusRequestId, focusIncidentId, markers, clearNotificationFocus, refreshIncidents]);
 
   const closeSelection = () => {
     setSelectedMarkerId(null);
     setIncidentTab("details");
-  };
-
-  const toggleSheetSnap = () => {
-    if (!selectedMarker) {
-      return;
-    }
-    const midpoint = (SHEET_COLLAPSED_Y + SHEET_EXPANDED_Y) / 2;
-    const nextTarget = sheetBaseValueRef.current <= midpoint ? SHEET_COLLAPSED_Y : SHEET_EXPANDED_Y;
-    animateSheetTo(nextTarget);
   };
 
   const toggleLayer = (key: keyof LayerVisibility) => {
@@ -1920,9 +2301,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     });
   };
 
-  const incidentDistance = selectedIncident
-    ? distanceKm(FALLBACK_LAT, FALLBACK_LNG, selectedIncident.lat, selectedIncident.lng)
-    : 0;
+  const incidentDistance =
+    selectedIncident && myLocationFix
+      ? distanceKm(myLocationFix.lat, myLocationFix.lng, selectedIncident.lat, selectedIncident.lng)
+      : null;
 
   return (
     <View style={styles.container}>
@@ -1945,6 +2327,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         logo={false}
         attribution={false}
         compass={false}
+        onLongPress={(event: any) => {
+          // PressEvent: { nativeEvent: { lngLat: [lng, lat], point: [x, y] } }.
+          const lngLat = event?.nativeEvent?.lngLat ?? event?.geometry?.coordinates;
+          if (Array.isArray(lngLat) && lngLat.length >= 2) {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setMenuOpen(false);
+            setLayersOpen(false);
+            closeSelection();
+            setPendingPoi({ lat: lngLat[1], lng: lngLat[0] });
+          }
+        }}
       >
         <Camera
           ref={cameraRef}
@@ -2268,6 +2661,57 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           );
         })}
 
+        {/* "Going to" lines — everyone sees where each medic is heading */}
+        {markers
+          .filter((m) => m.type === "paramedic" && m.destination)
+          .map((medic) => {
+            const dest = medic.destination!;
+            return (
+              <React.Fragment key={`dest-${medic.id}`}>
+                <GeoJSONSource
+                  id={`dest-line-source-${medic.id}`}
+                  data={lineFeatureFromCoordinates([
+                    { latitude: medic.lat, longitude: medic.lng },
+                    { latitude: dest.lat, longitude: dest.lng },
+                  ])}
+                >
+                  <Layer
+                    id={`dest-line-layer-${medic.id}`}
+                    type="line"
+                    paint={{
+                      "line-color": "rgba(245, 158, 11, 0.85)",
+                      "line-width": 3,
+                      "line-dasharray": [1.5, 1.8],
+                    }}
+                  />
+                </GeoJSONSource>
+                <Marker lngLat={[dest.lng, dest.lat]}>
+                  <View style={styles.destFlag}>
+                    <Text style={styles.destFlagText}>🚩</Text>
+                  </View>
+                </Marker>
+              </React.Fragment>
+            );
+          })}
+
+        {selectedMarker && selectedMarker.type === "paramedic" && selectedMarker.accuracy != null && selectedMarker.accuracy > 0 ? (
+          <GeoJSONSource
+            id="accuracy-circle-source"
+            data={buildAccuracyCircle(selectedMarker.lat, selectedMarker.lng, selectedMarker.accuracy)}
+          >
+            <Layer
+              id="accuracy-circle-fill"
+              type="fill"
+              paint={{ "fill-color": "#22c55e", "fill-opacity": 0.12 }}
+            />
+            <Layer
+              id="accuracy-circle-outline"
+              type="line"
+              paint={{ "line-color": "#22c55e", "line-width": 1.5, "line-opacity": 0.5 }}
+            />
+          </GeoJSONSource>
+        ) : null}
+
         {orderedVisibleMarkers.map((marker) => (
           <Marker
             key={marker.id}
@@ -2280,20 +2724,34 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             }}
           >
             <View>
-              {marker.type === "incident" ? (
-                <View style={styles.incidentDot}>
-                  <Text style={styles.incidentDotText}>!</Text>
-                </View>
-              ) : null}
+              {marker.type === "incident" ? (() => {
+                const closed = isClosedIncidentStatus(marker.status);
+                return (
+                  <View style={[styles.incidentDot, closed && styles.incidentDotClosed]}>
+                    <Text style={[styles.incidentDotText, closed && styles.incidentDotTextClosed]}>
+                      {closed ? "✓" : "!"}
+                    </Text>
+                  </View>
+                );
+              })() : null}
 
               {marker.type === "paramedic" ? (() => {
                 const ageMs = marker.lastSeenAt
                   ? Date.now() - new Date(marker.lastSeenAt).getTime()
                   : undefined;
-                const isStale = ageMs !== undefined ? ageMs > 90_000 : marker.staleState === "stale" || marker.staleState === "offline";
+                // Fresher = greener (0–20m), yellow (20–40m), grey (>40m).
+                const freshColor = freshnessColor(ageMs);
+                const isGrey = freshnessBucket(ageMs) === "stale";
+                // Resting medics show a mellow purple badge (matches the status text).
+                const isResting = marker.status === "rest";
+                const dotColor = isResting ? "#a78bfa" : freshColor;
                 return (
-                  <View style={[styles.paramedicDot, isStale && styles.paramedicDotStale]}>
-                    <Text style={[styles.paramedicDotText, isStale && styles.paramedicDotTextStale]}>
+                  <View style={[styles.paramedicDot, { backgroundColor: dotColor }, isGrey && styles.paramedicDotStale]}>
+                    <Text
+                      style={[styles.paramedicDotText, isGrey && styles.paramedicDotTextStale]}
+                      numberOfLines={1}
+                      allowFontScaling={false}
+                    >
                       {markerInitials(marker.label)}
                     </Text>
                   </View>
@@ -2360,16 +2818,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         />
       ) : null}
 
-      {/* Offline incident badge */}
+      {/* Offline incident badge — tap to inspect pending reports */}
       {(offlineQueueCount > 0 || justFlushed) ? (
-        <Animated.View
-          style={[styles.offlineBadge, { opacity: offlineBadgeOpacity, backgroundColor: justFlushed ? "#22c55e" : "#f97316" }]}
-          pointerEvents="none"
+        <Pressable
+          style={styles.offlineBadgeHit}
+          onPress={() => setPendingSheetOpen(true)}
+          disabled={justFlushed}
         >
-          <Text style={styles.offlineBadgeText}>
-            {justFlushed ? "✓ Sent" : `${offlineQueueCount} unsent`}
-          </Text>
-        </Animated.View>
+          <Animated.View
+            style={[styles.offlineBadge, { opacity: offlineBadgeOpacity, backgroundColor: justFlushed ? "#22c55e" : "#f97316" }]}
+          >
+            <Text style={styles.offlineBadgeText}>
+              {justFlushed ? "✓ Sent" : `${offlineQueueCount} unsent ›`}
+            </Text>
+          </Animated.View>
+        </Pressable>
       ) : null}
 
       {/* <View style={styles.missionStrip}>
@@ -2400,46 +2863,66 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </View>
         </Pressable>
 
-        <View style={styles.headerActions}>
-          <Pressable
-            style={styles.headerActionButton}
-            onPress={() => {
-              setLayersOpen((open) => !open);
-              setMenuOpen(false);
-            }}
-          >
-            <View style={styles.layersIcon}>
-              <View style={styles.layersIconLine} />
-              <View style={[styles.layersIconLine, styles.layersIconLineMiddle]} />
-              <View style={styles.layersIconLine} />
-            </View>
-          </Pressable>
+        {!selectedMarker ? (
+          <View style={styles.headerActions}>
+            <Pressable
+              style={[styles.headerActionButton, layersOpen && styles.headerActionButtonActive]}
+              onPress={() => {
+                setLayersOpen((open) => !open);
+                setMenuOpen(false);
+              }}
+            >
+              <Feather name="layers" size={20} color={layersOpen ? "#34d399" : "#ecf4ff"} />
+            </Pressable>
 
-          <Pressable style={styles.headerActionButton} onPress={centerOnCurrentPosition}>
-            <View style={styles.locationIcon}>
-              <View style={styles.locationIconRing} />
-              <View style={styles.locationIconCenterDot} />
-            </View>
-          </Pressable>
+            <Pressable style={styles.headerActionButton} onPress={centerOnCurrentPosition}>
+              <Feather name="crosshair" size={20} color="#ecf4ff" />
+            </Pressable>
 
-          <Pressable style={styles.headerActionButton} onPress={resetMapNorth}>
-            <Text style={styles.headerActionText}>N</Text>
-          </Pressable>
-        </View>
+            <Pressable style={styles.headerActionButton} onPress={resetMapNorth}>
+              <Feather name="compass" size={20} color="#ecf4ff" />
+            </Pressable>
+
+            <OfflineControlButton
+              tilesUrl={baseTilesTemplateUrl}
+              tileSize={baseRasterTileSize}
+              getBounds={computeOfflineBounds}
+            />
+          </View>
+        ) : null}
       </View>
 
       {menuOpen ? (
         <View style={styles.menuPopup}>
           <Text style={styles.menuPopupTitle}>Menu</Text>
-          {FUTURE_MENU_PAGES.map((page) => (
-            <Pressable key={page.id} style={styles.menuPageRow}>
-              <View style={styles.menuPageTextWrap}>
-                <Text style={styles.menuPageTitle}>{page.title}</Text>
-                <Text style={styles.menuPageSubtitle}>{page.subtitle}</Text>
-              </View>
-              <Text style={styles.menuSoonLabel}>Soon</Text>
-            </Pressable>
-          ))}
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
+              setActiveTab("location");
+              setMenuOpen(false);
+            }}
+          >
+            <Feather name="map-pin" size={18} color="#7dd3fc" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Location & Tracking</Text>
+              <Text style={styles.menuPageSubtitle}>GPS status, accuracy, history</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
+              setActiveTab("debug");
+              setMenuOpen(false);
+            }}
+          >
+            <Feather name="terminal" size={18} color="#a78bfa" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Debug Console</Text>
+              <Text style={styles.menuPageSubtitle}>Logs, network & diagnostics</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
           <Pressable
             style={[styles.menuPageRow, styles.menuLeaveRow]}
             onPress={() => {
@@ -2447,6 +2930,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               clearSession();
             }}
           >
+            <Feather name="log-out" size={18} color="#f87171" style={styles.menuPageIcon} />
             <View style={styles.menuPageTextWrap}>
               <Text style={[styles.menuPageTitle, styles.menuLeaveText]}>Leave Event</Text>
               <Text style={styles.menuPageSubtitle}>Return to the join screen</Text>
@@ -2513,13 +2997,27 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </View>
       ) : null}
 
-      {trackModeActive ? (
+      <BottomSheet
+        ref={trackSheetRef}
+        index={-1}
+        snapPoints={TRACK_SHEET_SNAP_POINTS}
+        enableDynamicSizing={false}
+        enablePanDownToClose={false}
+        // Only the top handle drags the sheet — so scrubbing the elevation graph
+        // doesn't steal the gesture and move the drawer.
+        enableContentPanningGesture={false}
+        onChange={setTrackSheetIndex}
+        backgroundStyle={styles.markerSheetBg}
+        handleIndicatorStyle={styles.sheetHandle}
+      >
+        <BottomSheetView style={styles.markerSheetContent}>
         <View style={styles.tracksDrawer}>
-          <View style={styles.tracksDrawerHandle} />
           <View style={styles.tracksDrawerHeaderRow}>
             <Text style={styles.tracksDrawerKicker}>TRACK STUDIO</Text>
             <Text style={styles.tracksDrawerMeta}>
-              {focusedTrackProfile ? `${(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km` : "No track"}
+              {trackSheetIndex >= 1
+                ? (focusedTrackProfile ? `${(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km` : "No track")
+                : "▲ pull up for details"}
             </Text>
           </View>
 
@@ -2650,8 +3148,59 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     },
                   ]}
                 />
+                {/* The user's own position projected onto the track */}
+                {myTrackPosition ? (
+                  <>
+                    <View style={[styles.profileMyLocationLine, { left: `${myTrackPosition.progress * 100}%` }]} />
+                    <View
+                      style={[
+                        styles.profileMyLocationDot,
+                        { left: `${myTrackPosition.progress * 100}%`, top: `${myTrackCursorTopPercent}%` },
+                      ]}
+                    />
+                  </>
+                ) : null}
               </View>
 
+              {trackSheetIndex >= 1 ? (
+                <View style={styles.trackExpandedSection}>
+                  <Text style={styles.trackExpandedKicker}>YOUR PROGRESS</Text>
+                  {myTrackPosition ? (
+                    <>
+                      <View style={styles.trackMetricsGrid}>
+                        <View style={styles.trackMetricCard}>
+                          <Text style={styles.trackMetricLabel}>Distance left</Text>
+                          <Text style={styles.trackMetricValue}>{(myTrackPosition.distanceLeftMeters / 1000).toFixed(2)} km</Text>
+                        </View>
+                        <View style={styles.trackMetricCard}>
+                          <Text style={styles.trackMetricLabel}>Climb left</Text>
+                          <Text style={[styles.trackMetricValue, { color: "#f97316" }]}>↑ {Math.round(myTrackPosition.ascentLeftMeters)} m</Text>
+                        </View>
+                        <View style={styles.trackMetricCard}>
+                          <Text style={styles.trackMetricLabel}>Descent left</Text>
+                          <Text style={[styles.trackMetricValue, { color: "#38bdf8" }]}>↓ {Math.round(myTrackPosition.descentLeftMeters)} m</Text>
+                        </View>
+                        <View style={styles.trackMetricCard}>
+                          <Text style={styles.trackMetricLabel}>Completed</Text>
+                          <Text style={styles.trackMetricValue}>{Math.round(myTrackPosition.progress * 100)}%</Text>
+                        </View>
+                        <View style={styles.trackMetricCard}>
+                          <Text style={styles.trackMetricLabel}>Off track</Text>
+                          <Text style={[styles.trackMetricValue, myTrackPosition.offTrackMeters > 80 ? { color: "#ef4444" } : null]}>
+                            {Math.round(myTrackPosition.offTrackMeters)} m
+                          </Text>
+                        </View>
+                        <View style={styles.trackMetricCard}>
+                          <Text style={styles.trackMetricLabel}>Total climb</Text>
+                          <Text style={styles.trackMetricValue}>↑ {focusedTrack?.elevationProfile?.totalAscentMeters ?? 0} m</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.profileEmptyText}>Waiting for your location to place you on the track…</Text>
+                  )}
+                </View>
+              ) : null}
             </View>
           ) : (
             <View style={styles.profileEmpty}>
@@ -2659,30 +3208,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             </View>
           )}
         </View>
-      ) : null}
+        </BottomSheetView>
+      </BottomSheet>
 
-      <Animated.View
-        pointerEvents={selectedMarker ? "auto" : "none"}
-        style={[
-          styles.incidentSheet,
-          {
-            transform: [{ translateY: sheetTranslateY }],
-            opacity: sheetBaseTranslate.interpolate({
-              inputRange: [SHEET_COLLAPSED_Y, SHEET_HIDDEN_Y],
-              outputRange: [1, 0],
-              extrapolate: "clamp",
-            }),
-          },
-        ]}
+      <BottomSheet
+        ref={markerSheetRef}
+        index={-1}
+        snapPoints={MARKER_SHEET_SNAP_POINTS}
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        onClose={closeSelection}
+        backgroundStyle={styles.markerSheetBg}
+        handleIndicatorStyle={styles.sheetHandle}
       >
+        {/* Plain View (not BottomSheetView) so the inner BottomSheetScrollView
+            keeps a bounded flex height and actually scrolls long content. */}
+        <View style={styles.markerSheetContent}>
         {selectedMarker ? (
           <>
-            <View {...sheetPanResponder.panHandlers} style={styles.sheetDragZone}>
-              <Pressable onPress={toggleSheetSnap} hitSlop={8}>
-                <View style={styles.sheetHandle} />
-              </Pressable>
-            </View>
-
             <View style={styles.sheetHeader}>
               <View
                 style={[
@@ -2691,37 +3234,50 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     ? styles.sheetParamedicIconBg
                     : selectedMarker.type === "runner"
                       ? styles.sheetParticipantIconBg
-                      : null,
+                      : selectedMarker.type === "infrastructure"
+                        ? { backgroundColor: `${poiConfig(selectedMarker.poiType).color}26` }
+                        : null,
                 ]}
               >
                 <Text
                   style={[
                     styles.incidentIconText,
                     selectedMarker.type === "incident" ? null : styles.sheetCompactIconText,
+                    selectedMarker.type === "infrastructure"
+                      ? { color: poiConfig(selectedMarker.poiType).color }
+                      : null,
                   ]}
                 >
                   {selectedMarker.type === "incident"
                     ? "!"
                     : selectedMarker.type === "paramedic"
                       ? markerInitials(selectedMarker.label)
-                      : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
+                      : selectedMarker.type === "infrastructure"
+                        ? poiConfig(selectedMarker.poiType).icon
+                        : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
                 </Text>
               </View>
               <View style={styles.sheetHeaderTextWrap}>
                 <Text style={styles.sheetTitle}>{selectedMarker.name ?? selectedMarker.label}</Text>
                 <Text style={styles.sheetMetaText}>
                   {selectedMarker.type === "incident"
-                    ? "Injury | Reported live"
+                    ? `${incidentTypeLabel(selectedIncident?.incidentType)} · ${incidentStatusLabel(selectedIncident?.status)}`
                     : selectedMarker.type === "paramedic"
                       ? "Medical unit"
-                      : "Participant"}
+                      : selectedMarker.type === "infrastructure"
+                        ? poiTypeLabel(selectedMarker.poiType)
+                        : "Participant"}
                 </Text>
                 <Text style={styles.sheetMetaText}>
                   {selectedMarker.type === "incident"
-                    ? `${incidentDistance.toFixed(1)} km from your location`
+                    ? incidentDistance != null
+                      ? `${incidentDistance.toFixed(1)} km from your location`
+                      : "Locating you…"
                     : selectedMarker.type === "paramedic"
                       ? selectedMarker.vehicle ?? "Mobile Unit"
-                      : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
+                      : selectedMarker.type === "infrastructure"
+                        ? `${selectedMarker.lat.toFixed(5)}, ${selectedMarker.lng.toFixed(5)}`
+                        : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
                 </Text>
               </View>
 
@@ -2745,19 +3301,39 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </View>
             ) : null}
 
-            <ScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
+            <BottomSheetScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
               {selectedIncident ? (
                 <>
                   {incidentTab === "details" ? (
                     <>
                       <View style={styles.sheetInfoRow}>
-                        <Text style={styles.sheetInfoLabel}>Trail section</Text>
-                        <Text style={styles.sheetInfoValue}>Red Hill Descent</Text>
+                        <Text style={styles.sheetInfoLabel}>Category</Text>
+                        <Text style={styles.sheetInfoValue}>{incidentTypeLabel(selectedIncident.incidentType)}</Text>
+                      </View>
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Status</Text>
+                        <Text style={styles.sheetInfoValue}>{incidentStatusLabel(selectedIncident.status)}</Text>
                       </View>
                       <View style={styles.sheetInfoRow}>
                         <Text style={styles.sheetInfoLabel}>Incident notes</Text>
-                        <Text style={styles.sheetInfoValue}>{selectedIncident.description ?? "Runner collapsed after hard descent."}</Text>
+                        <Text style={styles.sheetInfoValue}>{selectedIncident.description ?? "No notes yet."}</Text>
                       </View>
+                      {selectedIncident.photoUrl ? (
+                        <Pressable
+                          style={styles.incidentPhotoBtn}
+                          onPress={() => setPhotoViewerUrl(resolveMediaUrl(selectedIncident.photoUrl) ?? null)}
+                        >
+                          <Image
+                            source={{ uri: resolveMediaUrl(selectedIncident.photoUrl) }}
+                            style={styles.incidentPhotoThumb}
+                          />
+                          <View style={styles.incidentPhotoMeta}>
+                            <Text style={styles.incidentPhotoTitle}>Photo attached</Text>
+                            <Text style={styles.incidentPhotoHint}>Tap to view full size</Text>
+                          </View>
+                          <Feather name="maximize-2" size={18} color="#93c5fd" />
+                        </Pressable>
+                      ) : null}
                     </>
                   ) : (
                     <>
@@ -2782,49 +3358,163 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     </>
                   )}
                 </>
+              ) : selectedMarker.type === "infrastructure" ? (
+                <>
+                  {selectedMarker.poiDescription ? (
+                    <View style={styles.sheetInfoRow}>
+                      <Text style={styles.sheetInfoLabel}>Description</Text>
+                      <Text style={styles.sheetInfoValue}>{selectedMarker.poiDescription}</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.sheetInfoValue}>Point of interest</Text>
+                  )}
+                  <AssignDestinationBar
+                    destination={{
+                      lat: selectedMarker.lat,
+                      lng: selectedMarker.lng,
+                      label: selectedMarker.name ?? selectedMarker.label,
+                    }}
+                  />
+                  <Pressable
+                    style={styles.poiArchiveBtn}
+                    onPress={() => {
+                      const poiId = selectedMarker.id;
+                      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      const existing = useMapStore.getState().markers;
+                      setMarkers(existing.filter((m) => m.id !== poiId));
+                      closeSelection();
+                      void archivePoi(poiId).catch((err) =>
+                        debugLog("api", "error", "archive POI failed", String(err)),
+                      );
+                    }}
+                  >
+                    <Text style={styles.poiArchiveBtnText}>🗄  Archive point (hide for everyone)</Text>
+                  </Pressable>
+                </>
               ) : (
                 <>
-                  <View style={styles.sheetInfoRow}>
-                    <Text style={styles.sheetInfoLabel}>Role</Text>
-                    <Text style={styles.sheetInfoValue}>{selectedMarker.type === "paramedic" ? "Paramedic" : "Participant"}</Text>
-                  </View>
+                  {(() => {
+                    const rosterEntry =
+                      selectedMarker.type === "paramedic"
+                        ? rosterMedics.find((m) => m.id === selectedMarker.id)
+                        : undefined;
+                    const skills = [...(rosterEntry?.skills ?? []), ...(rosterEntry?.capabilities ?? [])];
+                    return (
+                      <>
+                        <View style={styles.sheetInfoRow}>
+                          <Text style={styles.sheetInfoLabel}>Role</Text>
+                          <Text style={styles.sheetInfoValue}>
+                            {rosterEntry?.type === "coordinator"
+                              ? "Coordinator"
+                              : selectedMarker.type === "paramedic"
+                                ? "Paramedic"
+                                : "Participant"}
+                          </Text>
+                        </View>
+                        {skills.length > 0 ? (
+                          <View style={styles.sheetInfoRow}>
+                            <Text style={styles.sheetInfoLabel}>Skills</Text>
+                            <Text style={[styles.sheetInfoValue, { flex: 1, textAlign: "right" }]}>{skills.join(" · ")}</Text>
+                          </View>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                   <View style={styles.sheetInfoRow}>
                     <Text style={styles.sheetInfoLabel}>Identifier</Text>
                     <Text style={styles.sheetInfoValue}>{selectedMarker.bibNumber ?? selectedMarker.id}</Text>
                   </View>
-                  <View style={styles.sheetInfoRow}>
-                    <Text style={styles.sheetInfoLabel}>Status</Text>
-                    <Text style={styles.sheetInfoValue}>
-                      {selectedMarker.staleState === "fresh" ? "Live" : selectedMarker.staleState ?? "Unknown"}
-                    </Text>
-                  </View>
+                  {(() => {
+                    const ageMs = selectedMarker.lastSeenAt
+                      ? Date.now() - new Date(selectedMarker.lastSeenAt).getTime()
+                      : undefined;
+                    return (
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Last seen</Text>
+                        <Text style={[styles.sheetInfoValue, { color: freshnessColor(ageMs) }]}>
+                          {ageMs === undefined ? "Unknown" : freshnessLabel(ageMs)}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                  {selectedMarker.accuracy != null ? (
+                    <View style={styles.sheetInfoRow}>
+                      <Text style={styles.sheetInfoLabel}>Accuracy</Text>
+                      <Text style={styles.sheetInfoValue}>±{Math.round(selectedMarker.accuracy)} m</Text>
+                    </View>
+                  ) : null}
+                  {selectedMarker.battery != null ? (
+                    <View style={styles.sheetInfoRow}>
+                      <Text style={styles.sheetInfoLabel}>Battery</Text>
+                      <Text style={styles.sheetInfoValue}>{Math.round(selectedMarker.battery * 100)}%</Text>
+                    </View>
+                  ) : null}
                 </>
               )}
-            </ScrollView>
 
             {selectedIncident ? (
-              <View style={styles.sheetActions}>
-                <Pressable style={styles.sheetSecondaryAction}>
-                  <Text style={styles.sheetSecondaryActionText}>Call for backup</Text>
-                </Pressable>
-                <Pressable style={styles.sheetSecondaryAction}>
-                  <Text style={styles.sheetSecondaryActionText}>Need more help</Text>
-                </Pressable>
-                <Pressable style={styles.sheetPrimaryAction}>
-                  <Text style={styles.sheetPrimaryActionText}>Update incident</Text>
-                </Pressable>
-              </View>
+              <IncidentActions
+                incidentId={selectedIncident.id}
+                lat={selectedIncident.lat}
+                lng={selectedIncident.lng}
+                label={selectedIncident.name ?? selectedIncident.label}
+                currentType={selectedIncident.incidentType}
+                onClosed={closeSelection}
+              />
             ) : null}
+            </BottomSheetScrollView>
           </>
         ) : null}
-      </Animated.View>
+        </View>
+      </BottomSheet>
 
-      <IncidentFAB />
+      {activeTab === "map" && !selectedMarker ? <MedicStatusControl /> : null}
+      {!selectedMarker ? <IncidentFAB /> : null}
       <ReportIncidentSheet />
+
+      <NewPoiSheet
+        pending={pendingPoi}
+        onClose={() => setPendingPoi(null)}
+        onCreated={(poi: PoiDto) => {
+          const existing = useMapStore.getState().markers;
+          setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+          setPendingPoi(null);
+        }}
+      />
+
+      <Modal
+        visible={!!photoViewerUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoViewerUrl(null)}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.photoViewerBackdrop} onPress={() => setPhotoViewerUrl(null)}>
+          {photoViewerUrl ? (
+            <Image source={{ uri: photoViewerUrl }} style={styles.photoViewerImage} resizeMode="contain" />
+          ) : null}
+          <Pressable style={styles.photoViewerClose} onPress={() => setPhotoViewerUrl(null)}>
+            <Feather name="x" size={26} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {activeTab === "location" ? (
+        <View style={styles.tabOverlay}>
+          <LocationScreen />
+        </View>
+      ) : null}
+      {activeTab === "debug" ? (
+        <View style={styles.tabOverlay}>
+          <DebugScreen />
+        </View>
+      ) : null}
+
+      <PendingIncidentsSheet visible={pendingSheetOpen} onClose={() => setPendingSheetOpen(false)} />
 
       {/* Bottom navigation bar */}
       <View style={styles.bottomMenu}>
-        {(["map", "tracks", "reports", "profile"] as const).map((tab) => (
+        {(["map", "tracks"] as const).map((tab) => (
           <Pressable
             key={tab}
             style={styles.bottomMenuItem}
@@ -2844,6 +3534,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#020b18" },
   map: { flex: 1 },
+  offlineButtonWrap: {
+    position: "absolute",
+    left: 12,
+    bottom: BOTTOM_BAR_HEIGHT + 14,
+    zIndex: 25,
+  },
+  tabOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: BOTTOM_BAR_HEIGHT,
+    zIndex: 40,
+    backgroundColor: "#020b18",
+  },
   menuBackdrop: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 18,
@@ -2943,15 +3648,24 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   headerActions: {
-    gap: 8,
+    gap: 9,
+  },
+  headerActionButtonActive: {
+    borderColor: "rgba(52, 211, 153, 0.55)",
+    backgroundColor: "rgba(6, 24, 20, 0.95)",
   },
   headerActionButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 46,
+    height: 46,
+    borderRadius: 15,
     backgroundColor: "rgba(8, 15, 28, 0.93)",
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.22)",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3039,6 +3753,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
+  menuPageIcon: {
+    marginRight: 2,
+  },
   menuPageTextWrap: {
     flex: 1,
   },
@@ -3072,11 +3789,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-  offlineBadge: {
+  offlineBadgeHit: {
     position: "absolute",
     top: 90,
     left: 12,
     zIndex: 50,
+  },
+  offlineBadge: {
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -3248,6 +3967,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     lineHeight: 14,
+    textAlign: "center",
+  },
+  incidentDotClosed: {
+    backgroundColor: "#64748b",
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  incidentDotTextClosed: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 12,
   },
   paramedicDot: {
     width: 30,
@@ -3263,8 +3991,9 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 11,
     fontWeight: "900",
-    letterSpacing: 0.25,
-    lineHeight: 12,
+    lineHeight: 13,
+    textAlign: "center",
+    includeFontPadding: false,
   },
   paramedicDotStale: {
     backgroundColor: "#475569",
@@ -3308,6 +4037,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  destFlag: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(245,158,11,0.95)",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  destFlagText: { fontSize: 13 },
   responseArrowText: {
     color: "#f8fafc",
     fontSize: 11,
@@ -3374,6 +4114,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: "rgba(180, 201, 223, 0.28)",
     zIndex: 30,
+  },
+  markerSheetBg: {
+    backgroundColor: "rgba(4, 11, 24, 0.985)",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderTopWidth: 1,
+    borderColor: "rgba(180, 201, 223, 0.28)",
+  },
+  markerSheetContent: {
+    flex: 1,
   },
   sheetDragZone: {
     width: "100%",
@@ -3481,12 +4231,57 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#f25656",
   },
+  poiArchiveBtn: {
+    marginTop: 4,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.22)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+  },
+  poiArchiveBtnText: { color: "#94a3b8", fontSize: 13, fontWeight: "800" },
+  incidentPhotoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.16)",
+    padding: 10,
+  },
+  incidentPhotoThumb: { width: 56, height: 56, borderRadius: 10, backgroundColor: "#1e293b" },
+  incidentPhotoMeta: { flex: 1 },
+  incidentPhotoTitle: { color: "#e2e8f0", fontSize: 13.5, fontWeight: "800" },
+  incidentPhotoHint: { color: "#64748b", fontSize: 12, fontWeight: "600", marginTop: 2 },
+  photoViewerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.94)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoViewerImage: { width: "100%", height: "82%" },
+  photoViewerClose: {
+    position: "absolute",
+    top: 54,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   sheetBody: {
     flex: 1,
   },
   sheetBodyContent: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
+    // Keep the last actions clear of the bottom navigation bar when the
+    // drawer content is taller than the sheet.
+    paddingBottom: BOTTOM_BAR_HEIGHT + 24,
     gap: 12,
   },
   sheetInfoRow: {
@@ -3555,26 +4350,67 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(245, 158, 11, 0.98)",
   },
   tracksDrawer: {
-    position: "absolute",
-    left: 10,
-    right: 10,
-    bottom: 60,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(157, 179, 205, 0.28)",
-    backgroundColor: "rgba(6, 14, 29, 0.96)",
-    zIndex: 31,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 72, // clear the bottom tab bar that overlays the sheet
     gap: 10,
-    shadowColor: "#020617",
-    shadowOpacity: 0.5,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+  },
+  profileMyLocationLine: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 2,
+    marginLeft: -1,
+    backgroundColor: "rgba(56, 189, 248, 0.85)",
+  },
+  profileMyLocationDot: {
+    position: "absolute",
+    width: 14,
+    height: 14,
+    marginLeft: -7,
+    marginTop: -7,
+    borderRadius: 7,
+    backgroundColor: "#38bdf8",
+    borderWidth: 2.5,
+    borderColor: "#021018",
+  },
+  trackExpandedSection: {
+    marginTop: 14,
+    gap: 10,
+  },
+  trackExpandedKicker: {
+    color: "#5f7da0",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+  },
+  trackMetricsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  trackMetricCard: {
+    flexGrow: 1,
+    flexBasis: "30%",
+    minWidth: "30%",
+    backgroundColor: "#0b1729",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.12)",
+  },
+  trackMetricLabel: {
+    color: "#7c8a9c",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  trackMetricValue: {
+    color: "#eaf2fb",
+    fontSize: 16,
+    fontWeight: "800",
   },
   tracksDrawerHandle: {
     alignSelf: "center",

@@ -12,6 +12,10 @@ export class ParticipantLocationDto implements ParticipantLocationRequest {
   @IsNumber()
   accuracy?: number;
 
+  @IsOptional()
+  @IsNumber()
+  battery?: number;
+
   @IsISO8601()
   timestamp!: string;
 }

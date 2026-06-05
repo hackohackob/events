@@ -8,6 +8,7 @@ on:
 env:
   API_IMAGE: hackohackob1/events-api
   WEB_IMAGE: hackohackob1/events-web
+  SIM_IMAGE: hackohackob1/events-simulator
   DEPLOY_HOST: hackohackob.com
   DEPLOY_USER: hacko
   DEPLOY_DIR: /opt/events
@@ -54,6 +55,19 @@ jobs:
           cache-from: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache,mode=max
 
+      - name: Build and push simulator image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/simulator/Dockerfile
+          push: true
+          tags: ${{ env.SIM_IMAGE }}:latest
+          build-args: |
+            VITE_API_URL=https://events-api.hackohackob.com
+            VITE_EVENT_ID=severozapad
+          cache-from: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache,mode=max
+
       - name: Copy docker-compose.prod.yml to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -82,6 +96,7 @@ jobs:
 
             docker pull hackohackob1/events-api:latest
             docker pull hackohackob1/events-web:latest
+            docker pull hackohackob1/events-simulator:latest
 
             docker-compose down
             docker-compose up -d

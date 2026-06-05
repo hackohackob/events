@@ -65,6 +65,10 @@ export class CreateEventDayDto {
 
 export class CreateEventPoiDto {
   @IsString()
+  @IsOptional()
+  id?: string;
+
+  @IsString()
   @IsNotEmpty()
   type!: string;
 
@@ -77,6 +81,10 @@ export class CreateEventPoiDto {
   @IsString()
   @IsOptional()
   name?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
 }
 
 export class CreateEventLocationDto {

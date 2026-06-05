@@ -1,4 +1,9 @@
 import type { ExpoConfig } from "expo/config";
+import * as path from "path";
+
+// @notifee/react-native ships its native artifact in a local Maven repo inside
+// the package; register it so Gradle can resolve app.notifee:core.
+const notifeeMavenRepo = path.resolve(__dirname, "../../node_modules/@notifee/react-native/android/libs");
 
 const config: ExpoConfig = {
   name: "Paramedic Event App",
@@ -20,6 +25,8 @@ const config: ExpoConfig = {
       "ACCESS_BACKGROUND_LOCATION",
       "FOREGROUND_SERVICE",
       "FOREGROUND_SERVICE_LOCATION",
+      "POST_NOTIFICATIONS",
+      "WAKE_LOCK",
     ],
     adaptiveIcon: {
       foregroundImage: "./assets/icon-android.png",
@@ -31,7 +38,17 @@ const config: ExpoConfig = {
       },
     },
   },
-  plugins: ["@maplibre/maplibre-react-native"],
+  plugins: [
+    "@maplibre/maplibre-react-native",
+    [
+      "expo-build-properties",
+      {
+        android: {
+          extraMavenRepos: [notifeeMavenRepo],
+        },
+      },
+    ],
+  ],
   extra: {
     eas: {
       projectId: "ffe5d9fa-a192-4b34-be11-5a43598959c3",

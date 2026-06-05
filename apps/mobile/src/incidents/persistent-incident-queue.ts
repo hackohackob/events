@@ -8,13 +8,18 @@ export interface PendingIncidentPayload {
   timestamp: string;
 }
 
-interface PersistentQueueItem {
+export interface PersistentQueueItem {
   id: string;
   payload: PendingIncidentPayload;
   attempts: number;
   nextRetryAt: number;
   createdAt: number;
+  /** Set once attempts exceed MAX_ATTEMPTS — stops the infinite retry/flash. */
+  failedPermanently?: boolean;
+  lastError?: string;
 }
+
+const MAX_ATTEMPTS = 6;
 
 class PersistentIncidentQueue {
   private items: PersistentQueueItem[] = [];
@@ -56,17 +61,41 @@ class PersistentIncidentQueue {
     }
   }
 
-  async markFailed(id: string): Promise<void> {
+  async markFailed(id: string, error?: string): Promise<void> {
     const item = this.items.find((entry) => entry.id === id);
     if (!item) return;
     item.attempts += 1;
+    item.lastError = error;
+    if (item.attempts >= MAX_ATTEMPTS) {
+      item.failedPermanently = true;
+    }
     const delay = Math.min(30_000, 2 ** item.attempts * 1000);
     item.nextRetryAt = Date.now() + delay;
     await this.persist();
   }
 
+  /** Reset a permanently-failed item so the user can retry it manually. */
+  async retry(id: string): Promise<void> {
+    const item = this.items.find((entry) => entry.id === id);
+    if (!item) return;
+    item.failedPermanently = false;
+    item.attempts = 0;
+    item.nextRetryAt = Date.now();
+    await this.persist();
+  }
+
+  /** Items eligible for an automatic send attempt right now. */
   listReady(now = Date.now()): PersistentQueueItem[] {
-    return this.items.filter((item) => item.nextRetryAt <= now);
+    return this.items.filter((item) => !item.failedPermanently && item.nextRetryAt <= now);
+  }
+
+  /** All pending items (including permanently failed) for UI display. */
+  list(): PersistentQueueItem[] {
+    return [...this.items];
+  }
+
+  get count(): number {
+    return this.items.length;
   }
 
   get isEmpty(): boolean {

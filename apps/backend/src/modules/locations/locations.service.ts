@@ -46,9 +46,8 @@ export class LocationsService {
 
   private computeFreshness(isoTs: string): FreshnessState {
     const ageMs = Date.now() - new Date(isoTs).getTime();
-    if (ageMs < 30_000) return "fresh";
-    if (ageMs < 120_000) return "warning";
-    if (ageMs < 300_000) return "stale";
-    return "offline";
+    if (ageMs < 20 * 60_000) return "fresh"; // 0–20 min
+    if (ageMs < 40 * 60_000) return "warning"; // 20–40 min
+    return "stale"; // > 40 min
   }
 }

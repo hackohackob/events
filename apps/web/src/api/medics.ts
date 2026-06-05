@@ -25,6 +25,19 @@ export async function assignMedicDestination(
   return data;
 }
 
+export async function updateMedicStatus(
+  eventId: string,
+  medicId: string,
+  status: "available" | "rest",
+): Promise<MedicState> {
+  const { data } = await client.patch<MedicState>(`/events/${eventId}/medics/${medicId}/status`, { status });
+  return data;
+}
+
+export async function broadcastToEvent(eventId: string, title: string, body: string): Promise<void> {
+  await client.post(`/events/${eventId}/broadcast`, { title, body });
+}
+
 export async function removeActiveMedic(eventId: string, medicId: string): Promise<void> {
   await client.delete(`/events/${eventId}/medics/${medicId}/active`);
 }

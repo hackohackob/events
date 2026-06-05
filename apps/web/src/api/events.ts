@@ -13,7 +13,7 @@ export interface ApiEventSummary {
   days?: Array<{
     date: string;
     disciplines: Array<{ name: string; type: string; distanceKm: number; ascentMeters: number; color: string; gpxUrl?: string }>;
-    pois: Array<{ type: string; lng: number; lat: number; name?: string }>;
+    pois: Array<{ id?: string; type: string; lng: number; lat: number; name?: string; description?: string }>;
     assignments: Array<{ userId: string; position?: string; vehicle?: string; description?: string }>;
   }>;
 }
@@ -66,6 +66,7 @@ export async function createEvent(data: EventFormData) {
         lng: poi.coordinates[0],
         lat: poi.coordinates[1],
         name: poi.name,
+        description: poi.description,
       })),
       assignments: day.assignments.map((a) => ({
         userId: a.userId,
@@ -110,12 +111,21 @@ export async function updateEvent(id: string, data: EventFormData) {
         gpxFile: disc.gpxFile,
         gpxUrl: disc.gpxUrl,
       })),
-      pois: day.pois.map((poi) => ({ type: poi.type, lng: poi.coordinates[0], lat: poi.coordinates[1], name: poi.name })),
+      pois: day.pois.map((poi) => ({ id: poi.id, type: poi.type, lng: poi.coordinates[0], lat: poi.coordinates[1], name: poi.name, description: poi.description })),
       assignments: day.assignments.map((a) => ({ userId: a.userId, position: a.position, vehicle: a.vehicle, description: a.description })),
     })),
   };
   const res = await client.put(`/events/${id}`, payload);
   return res.data as ApiEventSummary;
+}
+
+export async function updatePoi(
+  eventId: string,
+  poiId: string,
+  patch: { name?: string; description?: string },
+): Promise<{ id: string; type: string; lat: number; lng: number; name?: string; description?: string }> {
+  const res = await client.patch(`/events/${eventId}/pois/${poiId}`, patch);
+  return res.data;
 }
 
 export async function deleteEvent(id: string): Promise<void> {

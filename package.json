@@ -11,12 +11,16 @@
     "expo-dev-client": "~6.0.21",
     "qrcode.react": "^4.2.0",
     "react": "19.1.0",
+    "react-dom": "19.1.0",
     "react-native": "0.81.5"
   },
   "overrides": {
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "@types/react": "~19.1.10"
+    "@types/react": "~19.1.10",
+    "react-native-reanimated": "4.1.1",
+    "react-native-worklets": "0.5.1",
+    "react-dom": "19.1.0"
   },
   "scripts": {
     "build": "npm run build --workspaces",

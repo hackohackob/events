@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, View } from "react-native";
-import * as ExpoLocation from "expo-location";
 import * as Haptics from "expo-haptics";
-import { createIncident } from "./incident-api";
-import { incidentQueue } from "./persistent-incident-queue";
+import { startIncidentReport } from "./start-report";
 import { useIncidentStore } from "./incident-store";
 
 export function IncidentFAB() {
@@ -14,7 +12,13 @@ export function IncidentFAB() {
   const pulseOpacity = useRef(new Animated.Value(0.7)).current;
   const fabScale = useRef(new Animated.Value(1)).current;
 
+  // Restart the pulse each time the FAB becomes visible again. A native-driven
+  // loop halts when its target view is detached (we render null while a report is
+  // in progress) and does not auto-resume on remount — so re-arm it on idle.
   useEffect(() => {
+    if (phase !== "idle") return;
+    pulseScale.setValue(1);
+    pulseOpacity.setValue(0.7);
     const loop = Animated.loop(
       Animated.parallel([
         Animated.sequence([
@@ -29,7 +33,7 @@ export function IncidentFAB() {
     );
     loop.start();
     return () => loop.stop();
-  }, [pulseScale, pulseOpacity]);
+  }, [phase, pulseScale, pulseOpacity]);
 
   const handlePress = async () => {
     if (phase !== "idle") return;
@@ -41,29 +45,7 @@ export function IncidentFAB() {
       Animated.spring(fabScale, { toValue: 1, damping: 28, mass: 1, stiffness: 280, useNativeDriver: true }),
     ]).start();
 
-    const store = useIncidentStore.getState();
-    store.setPhase("submitting");
-
-    try {
-      const location = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.High });
-      const { latitude: lat, longitude: lng } = location.coords;
-      store.setLocation(lat, lng);
-
-      const payload = { lat, lng, timestamp: new Date().toISOString() };
-
-      try {
-        const result = await createIncident(payload);
-        store.setIncidentId(result.id);
-        store.setNearbyParamedics(result.nearbyParamedics ?? []);
-        store.setPhase("success");
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch {
-        await incidentQueue.enqueue(payload);
-        store.setPhase("offline");
-      }
-    } catch {
-      store.setPhase("offline");
-    }
+    await startIncidentReport();
   };
 
   if (phase !== "idle") return null;

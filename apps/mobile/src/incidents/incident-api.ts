@@ -1,7 +1,7 @@
 import { apiFetch } from "../ui/api-client";
 import { useSessionStore } from "../security/session-store";
 import { resolveLocalhostUrl } from "../ui/runtime-host";
-import type { IncidentType, NearbyParamedic } from "./incident-store";
+import type { IncidentSeverity, IncidentType, NearbyParamedic } from "./incident-store";
 import type { PendingIncidentPayload } from "./persistent-incident-queue";
 
 const API_BASE_URL = resolveLocalhostUrl(
@@ -10,6 +10,7 @@ const API_BASE_URL = resolveLocalhostUrl(
 
 export interface CreateIncidentResponse {
   id: string;
+  name?: string;
   nearbyParamedics: NearbyParamedic[];
 }
 
@@ -18,6 +19,7 @@ export interface UpdateIncidentPayload {
   peopleAffected: number;
   description: string;
   photoUrl?: string;
+  severity?: IncidentSeverity;
 }
 
 export async function createIncident(payload: PendingIncidentPayload): Promise<CreateIncidentResponse> {

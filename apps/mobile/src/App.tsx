@@ -1,32 +1,19 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, StyleSheet, Text, View } from "react-native";
+import { Animated, AppState, StyleSheet, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import NetInfo from "@react-native-community/netinfo";
 import { JoinScreen } from "./auth/JoinScreen";
-import { createIncident } from "./incidents/incident-api";
 import { incidentQueue } from "./incidents/persistent-incident-queue";
+import { flushIncidentQueue } from "./incidents/flush-incidents";
+import { startIncidentReport } from "./incidents/start-report";
 import { useIncidentStore } from "./incidents/incident-store";
-import { startLocationLoop } from "./location/location-tracker";
-import { MapScreen } from "./map/MapScreen";
+import { startLocationLoop, sendCurrentLocationNow } from "./location/location-tracker";
+import { showTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken } from "./notifications/push-registration";
+import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
-
-async function flushIncidentQueue() {
-  const ready = incidentQueue.listReady();
-  let flushed = 0;
-  for (const item of ready) {
-    try {
-      await createIncident(item.payload);
-      await incidentQueue.remove(item.id);
-      flushed++;
-    } catch {
-      await incidentQueue.markFailed(item.id);
-    }
-  }
-  if (flushed > 0) {
-    useIncidentStore.getState().showToast(`${flushed} incident report${flushed > 1 ? "s" : ""} sent`);
-  }
-}
 
 function GlobalToast() {
   const toastMessage = useIncidentStore((s) => s.toastMessage);
@@ -56,6 +43,10 @@ function GlobalToast() {
     }
   }, [toastMessage, translateY]);
 
+  // Nothing to show → render nothing. (Previously the green bar stayed parked at
+  // the bottom of the screen because it was always mounted.)
+  if (!toastMessage) return null;
+
   return (
     <Animated.View
       style={[styles.toast, { transform: [{ translateY }] }]}
@@ -71,8 +62,10 @@ function GlobalToast() {
 
 export default function App() {
   const token = useSessionStore((state) => state.token);
+  const role = useSessionStore((state) => state.role);
   const hydrated = useSessionStore((state) => state.hydrated);
   const hydrate = useSessionStore((state) => state.hydrate);
+  const reportRequestId = useIncidentStore((state) => state.reportRequestId);
 
   useEffect(() => {
     void hydrate();
@@ -82,7 +75,11 @@ export default function App() {
     if (!token) return;
 
     void startLocationLoop();
-    // void registerPushToken(); // TODO: re-enable when ExpoPushTokenManager is available
+    void showTrackingNotification(role === "medic" || role === "paramedic");
+    // Register for push so the backend can alert this device when the app is closed.
+    void registerPushToken();
+    // If the app was launched by tapping an incident notification, focus it.
+    void consumeInitialNotification();
     void incidentQueue.hydrate().then(() => {
       if (!incidentQueue.isEmpty) void flushIncidentQueue();
     });
@@ -94,33 +91,55 @@ export default function App() {
     });
 
     return () => unsubscribe();
+  }, [token, role]);
+
+  // Send a fresh location every time the app is opened/brought to the foreground,
+  // so a medic immediately appears at their position without waiting for the
+  // background timer (or having to press "Send location" in the Debug tab).
+  useEffect(() => {
+    if (!token) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") void sendCurrentLocationNow();
+    });
+    return () => sub.remove();
   }, [token]);
 
+  // "Report incident" pressed from the persistent notification.
+  useEffect(() => {
+    if (reportRequestId > 0) {
+      void startIncidentReport();
+    }
+  }, [reportRequestId]);
+
+  let content: React.ReactNode;
   if (!hydrated) {
-    return (
-      <SafeAreaProvider>
-        <View style={[styles.container, { alignItems: "center", justifyContent: "center" }]}>
-          <Text style={{ color: "#64748b", fontSize: 14 }}>Loading…</Text>
-        </View>
-      </SafeAreaProvider>
+    content = (
+      <View style={[styles.container, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ color: "#64748b", fontSize: 14 }}>Loading…</Text>
+      </View>
+    );
+  } else if (!token) {
+    content = <JoinScreen />;
+  } else {
+    content = (
+      <SafeAreaView edges={["top", "left", "right", "bottom"]} style={styles.container}>
+        <MapScreen viewMode="paramedic" />
+        <GlobalToast />
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      {!token ? (
-        <JoinScreen />
-      ) : (
-        <SafeAreaView edges={["top", "left", "right", "bottom"]} style={styles.container}>
-          <MapScreen viewMode="paramedic" />
-          <GlobalToast />
-        </SafeAreaView>
-      )}
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.flex}>
+      <SafeAreaProvider>
+        <BottomSheetModalProvider>{content}</BottomSheetModalProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: "#1f242b" },
   toast: {
     position: "absolute",

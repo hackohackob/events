@@ -44,6 +44,7 @@ export class LocationsController {
       lat: body.lat,
       lng: body.lng,
       accuracy: body.accuracy,
+      battery: body.battery,
       timestamp: body.timestamp,
     });
     return { ok: true };

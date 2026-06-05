@@ -1,19 +1,23 @@
 'use client'
 
-import { use, useState, useEffect, useMemo } from 'react'
+import { use, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import {
   ChevronRight, Calendar, MapPin, Users, Activity,
   Play, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
-  Layers, AlertTriangle, QrCode, X
+  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent } from '@/hooks/useEvents'
 import { useLiveMap } from '@/hooks/useLiveMap'
 import MapWrapper from '@/components/map/MapWrapper'
+import BroadcastModal from '@/components/BroadcastModal'
+import IncidentDrawer from '@/components/IncidentDrawer'
 import { POI_CONFIGS } from '@/lib/constants'
 import { fetchGpxCoordinates } from '@/lib/gpx'
-import type { MedicState } from '@events/contracts'
+import { getMedicRoster } from '@/api/medics'
+import { updatePoi } from '@/api/events'
+import type { EventMedic, MedicState } from '@events/contracts'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
 const STATUS_CONFIG = {
@@ -42,7 +46,7 @@ function msToLabel(ms: number): string {
 }
 
 function isOnline(lastSeenAt: string) {
-  return Date.now() - new Date(lastSeenAt).getTime() < 90_000
+  return Date.now() - new Date(lastSeenAt).getTime() < 120_000 // 2 min — 4× the 30s send interval
 }
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
@@ -106,15 +110,19 @@ function QRModal({ eventId, onClose }: { eventId: string; onClose: () => void })
 
 // ─── Medic Row ────────────────────────────────────────────────────────────────
 
-function MedicRow({ medic, onAssign, onRemove }: {
+function MedicRow({ medic, rosterEntry, onAssign, onRemove }: {
   medic: MedicState
+  rosterEntry?: EventMedic
   onAssign: (id: string, dest: { lat: number; lng: number; label: string } | null) => void
   onRemove?: (id: string) => void
 }) {
   const online = isOnline(medic.lastSeenAt)
   const going = medic.status === 'going_to'
+  const resting = medic.status === 'rest'
   const offlineMs = Date.now() - new Date(medic.lastSeenAt).getTime()
   const offlineLong = !online && offlineMs > 5 * 60_000
+  const isCoordinator = rosterEntry?.type === 'coordinator'
+  const skills = [...(rosterEntry?.skills ?? []), ...(rosterEntry?.capabilities ?? [])]
 
   const initials = medic.name
     .split(' ')
@@ -122,7 +130,7 @@ function MedicRow({ medic, onAssign, onRemove }: {
     .map((w: string) => w[0]?.toUpperCase() ?? '')
     .join('')
 
-  const dotColor = online ? (going ? '#f59e0b' : '#22c55e') : '#475569'
+  const dotColor = online ? (going ? '#f59e0b' : resting ? '#8b5cf6' : '#22c55e') : '#475569'
 
   return (
     <div
@@ -134,7 +142,7 @@ function MedicRow({ medic, onAssign, onRemove }: {
         className="flex items-center justify-center rounded-full font-bold text-xs flex-shrink-0"
         style={{
           width: 34, height: 34,
-          background: online ? (going ? 'rgba(245,158,11,0.18)' : 'rgba(34,197,94,0.15)') : 'rgba(71,85,105,0.18)',
+          background: online ? (going ? 'rgba(245,158,11,0.18)' : resting ? 'rgba(139,92,246,0.18)' : 'rgba(34,197,94,0.15)') : 'rgba(71,85,105,0.18)',
           border: `2px solid ${dotColor}`,
           color: dotColor,
           opacity: online ? 1 : 0.6,
@@ -147,6 +155,13 @@ function MedicRow({ medic, onAssign, onRemove }: {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-200 truncate">{medic.name}</span>
+          {isCoordinator && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1 flex-shrink-0"
+              style={{ background: 'rgba(234,179,8,0.14)', color: '#eab308', border: '1px solid rgba(234,179,8,0.25)' }}
+              title="Coordinator">
+              <Crown className="w-2.5 h-2.5" /> Coord
+            </span>
+          )}
           {online && going && (
             <span className="text-xs px-1.5 py-0.5 rounded-full flex items-center gap-1"
               style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' }}>
@@ -154,13 +169,29 @@ function MedicRow({ medic, onAssign, onRemove }: {
               {medic.destination?.label ?? 'en route'}
             </span>
           )}
+          {online && resting && (
+            <span className="text-xs px-1.5 py-0.5 rounded-full flex items-center gap-1"
+              style={{ background: 'rgba(139,92,246,0.12)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}>
+              <Moon className="w-2.5 h-2.5" /> Rest
+            </span>
+          )}
         </div>
         <div className="text-xs mt-0.5" style={{ color: '#64748b' }}>
           {online
-            ? going ? 'Going to ' + (medic.destination?.label ?? '…') : 'Available'
+            ? going ? 'Going to ' + (medic.destination?.label ?? '…') : resting ? 'On rest' : 'Available'
             : `Last seen ${msToLabel(Date.now() - new Date(medic.lastSeenAt).getTime())}`
           }
         </div>
+        {skills.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {skills.slice(0, 4).map((s, i) => (
+              <span key={i} className="text-[9px] px-1.5 py-0.5 rounded-md flex items-center gap-0.5"
+                style={{ background: 'rgba(59,130,246,0.1)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.18)' }}>
+                <Stethoscope className="w-2 h-2" /> {s}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Status dot */}
@@ -215,9 +246,70 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [addPoiType, setAddPoiType] = useState<POIType>('medical-point')
   const [addPoiName, setAddPoiName] = useState('')
   const [localExtraPois, setLocalExtraPois] = useState<PointOfInterest[]>([])
+  const [editingPoiId, setEditingPoiId] = useState<string | null>(null)
+  const [poiDescDraft, setPoiDescDraft] = useState('')
+  const [poiDescOverrides, setPoiDescOverrides] = useState<Record<string, string>>({})
+
+  async function savePoiDescription(poiId: string) {
+    const description = poiDescDraft.trim()
+    setPoiDescOverrides(prev => ({ ...prev, [poiId]: description }))
+    setEditingPoiId(null)
+    try {
+      await updatePoi(id, poiId, { description })
+    } catch {/* keep optimistic value */}
+  }
 
   const isActive = event?.status === 'active'
-  const { medics, runners, incidents: liveIncidents, connected, assignDestination, removeActiveMedic, assignIncident } = useLiveMap({ eventId: id, enabled: isActive })
+  const {
+    medics, runners, incidents: liveIncidents, incidentMessages, connected,
+    alarmSignal, broadcasts, dismissBroadcast,
+    assignDestination, removeActiveMedic, assignIncident,
+    resolveIncident, closeIncident, loadMessages, sendMessage,
+  } = useLiveMap({ eventId: id, enabled: isActive })
+
+  const [showBroadcast, setShowBroadcast] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
+  const [roster, setRoster] = useState<EventMedic[]>([])
+  const [alarmInc, setAlarmInc] = useState<{ name?: string; type: string } | null>(null)
+
+  // Roster carries skills / capabilities / coordinator type — joined to live medics by id.
+  useEffect(() => {
+    if (!isActive) return
+    getMedicRoster(id).then(setRoster).catch(() => {/* non-critical */})
+  }, [id, isActive])
+  const rosterById = useMemo(() => {
+    const m = new Map<string, EventMedic>()
+    roster.forEach(r => m.set(r.id, r))
+    return m
+  }, [roster])
+
+  // Incident alarm: flash a banner + play a short alert tone when a new incident lands.
+  useEffect(() => {
+    if (alarmSignal.count === 0 || !alarmSignal.incident) return
+    setAlarmInc({ name: alarmSignal.incident.name, type: alarmSignal.incident.type })
+    try {
+      const Ctx = (window.AudioContext || (window as any).webkitAudioContext)
+      if (Ctx) {
+        const ctx = new Ctx()
+        ;[0, 0.28].forEach((offset) => {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.type = 'square'
+          osc.frequency.value = 880
+          gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset)
+          gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + offset + 0.02)
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.22)
+          osc.connect(gain); gain.connect(ctx.destination)
+          osc.start(ctx.currentTime + offset); osc.stop(ctx.currentTime + offset + 0.24)
+        })
+      }
+    } catch {/* audio not available */}
+    const t = setTimeout(() => setAlarmInc(null), 6000)
+    return () => clearTimeout(t)
+  }, [alarmSignal.count])
+
+  const selectedIncident = liveIncidents.find(i => i.id === selectedIncidentId) ?? null
 
   // Fetch GPX coordinates for each discipline that has a gpxUrl
   const [gpxCoords, setGpxCoords] = useState<Record<string, [number, number][]>>({})
@@ -330,7 +422,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     <div className="flex flex-col flex-1 min-h-screen">
       {/* Header */}
       <div
-        className="flex items-center justify-between px-8 py-4 flex-shrink-0"
+        className="flex items-center justify-between gap-2 flex-wrap px-4 lg:px-8 py-3 lg:py-4 flex-shrink-0"
         style={{
           borderBottom: '1px solid rgba(148,163,184,0.08)',
           background: 'rgba(10,20,36,0.9)',
@@ -370,6 +462,17 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               {connected ? 'Live' : 'Reconnecting…'}
             </div>
           )}
+          {/* Broadcast button (active events) */}
+          {isActive && (
+            <button
+              onClick={() => setShowBroadcast(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', color: '#f59e0b' }}
+              title="Broadcast to all medics"
+            >
+              <Megaphone className="w-4 h-4" /> Broadcast
+            </button>
+          )}
           {/* QR Code button */}
           <button
             onClick={() => setShowQR(true)}
@@ -402,12 +505,45 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left panel */}
-        <div
-          className="w-[400px] flex-shrink-0 flex flex-col h-full"
-          style={{ borderRight: '1px solid rgba(148,163,184,0.08)', background: 'rgba(10,18,34,0.6)' }}
+      {/* Incident alarm banner */}
+      {alarmInc && (
+        <button
+          onClick={() => { setActiveTab('incidents'); setAlarmInc(null) }}
+          className="flex items-center gap-3 px-8 py-3 flex-shrink-0 w-full text-left"
+          style={{ background: 'rgba(239,68,68,0.16)', borderBottom: '1px solid rgba(239,68,68,0.35)', animation: 'pulse 1.1s infinite' }}
         >
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" style={{ color: '#f87171' }} />
+          <span className="text-sm font-bold" style={{ color: '#fecaca' }}>
+            🚨 {alarmInc.name ?? 'New incident'} reported
+          </span>
+          <span className="text-xs capitalize" style={{ color: '#f87171' }}>{alarmInc.type}</span>
+          <span className="ml-auto text-xs font-semibold" style={{ color: '#fca5a5' }}>View →</span>
+        </button>
+      )}
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Mobile backdrop when the panel is open */}
+        {panelOpen && (
+          <div
+            className="absolute inset-0 z-20 lg:hidden"
+            style={{ background: 'rgba(2,8,18,0.6)' }}
+            onClick={() => setPanelOpen(false)}
+          />
+        )}
+        {/* Left panel — overlay drawer on mobile, fixed sidebar on desktop */}
+        <div
+          className={`absolute lg:relative inset-y-0 left-0 z-30 w-[88vw] max-w-[380px] lg:max-w-none lg:w-[400px] flex-shrink-0 flex flex-col h-full transition-transform duration-300 ${panelOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
+          style={{ borderRight: '1px solid rgba(148,163,184,0.08)', background: 'rgba(8,15,28,0.98)' }}
+        >
+          {/* Mobile close button */}
+          <button
+            onClick={() => setPanelOpen(false)}
+            className="lg:hidden absolute top-2 right-2 z-10 p-2 rounded-xl"
+            style={{ color: '#64748b', background: 'rgba(255,255,255,0.05)' }}
+            aria-label="Close panel"
+          >
+            <X className="w-5 h-5" />
+          </button>
           {/* Day selector tab strip — only when event has >1 day */}
           {eventDays.length > 1 && (
             <div
@@ -583,6 +719,66 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   </div>
                 )}
 
+                {/* Points of interest — editable descriptions (live + draft) */}
+                {allPois.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold mb-3" style={{ color: '#64748b' }}>POINTS OF INTEREST</div>
+                    <div className="space-y-1.5">
+                      {allPois.map((poi: any, i: number) => {
+                        const poiId = poi.id ?? `idx-${i}`
+                        const desc = poiDescOverrides[poiId] ?? poi.description
+                        const editing = editingPoiId === poiId
+                        const canEdit = Boolean(poi.id)
+                        return (
+                          <div key={poiId} className="flex items-start gap-2.5 p-2.5 rounded-xl"
+                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.07)' }}>
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                              style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>
+                              {POI_ICON[poi.type] ?? '•'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-slate-200 truncate">
+                                  {poi.name || POI_CONFIGS.find(c => c.type === poi.type)?.label || poi.type}
+                                </span>
+                                {canEdit && !editing && (
+                                  <button onClick={() => { setEditingPoiId(poiId); setPoiDescDraft(desc ?? '') }}
+                                    className="ml-auto p-1 rounded hover:bg-white/10 flex-shrink-0" title="Edit description">
+                                    <Pencil className="w-3 h-3" style={{ color: '#64748b' }} />
+                                  </button>
+                                )}
+                              </div>
+                              {editing ? (
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                  <input
+                                    autoFocus
+                                    value={poiDescDraft}
+                                    onChange={e => setPoiDescDraft(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') void savePoiDescription(poiId); if (e.key === 'Escape') setEditingPoiId(null) }}
+                                    placeholder="Short description…"
+                                    className="flex-1 min-w-0 px-2 py-1 rounded-lg text-xs text-slate-100 outline-none"
+                                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(34,197,94,0.4)' }}
+                                  />
+                                  <button onClick={() => void savePoiDescription(poiId)} className="p-1 rounded hover:bg-green-500/20">
+                                    <Check className="w-3.5 h-3.5 text-green-400" />
+                                  </button>
+                                  <button onClick={() => setEditingPoiId(null)} className="p-1 rounded hover:bg-white/10">
+                                    <X className="w-3.5 h-3.5 text-slate-500" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-xs mt-0.5" style={{ color: desc ? '#94a3b8' : '#475569' }}>
+                                  {desc || 'No description — click ✎ to add one'}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Live participant tracking card */}
                 {isActive && (
                   <div className="rounded-2xl p-4" style={{ background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.15)' }}>
@@ -639,40 +835,49 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     </div>
                   </div>
                 ) : (
-                  liveIncidents.map(inc => (
-                    <div
+                  [...liveIncidents]
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .map(inc => {
+                    const resolvedOrClosed = inc.status === 'resolved' || inc.status === 'closed'
+                    const statusColor = inc.status === 'resolved' ? '#22c55e' : inc.status === 'closed' ? '#64748b' : inc.status === 'in_progress' || inc.status === 'assigned' ? '#f59e0b' : '#f87171'
+                    return (
+                    <button
                       key={inc.id}
-                      className="rounded-xl px-4 py-3 flex items-start gap-3"
-                      style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)' }}
+                      onClick={() => setSelectedIncidentId(inc.id)}
+                      className="w-full text-left rounded-xl px-4 py-3 flex items-start gap-3 transition-all hover:brightness-125"
+                      style={{
+                        background: resolvedOrClosed ? 'rgba(255,255,255,0.03)' : 'rgba(239,68,68,0.07)',
+                        border: `1px solid ${resolvedOrClosed ? 'rgba(148,163,184,0.12)' : 'rgba(239,68,68,0.2)'}`,
+                      }}
                     >
                       <div
                         className="flex items-center justify-center rounded-full font-black flex-shrink-0 mt-0.5"
-                        style={{ width: 28, height: 28, background: 'rgba(239,68,68,0.18)', color: '#f87171', fontSize: 14 }}
+                        style={{ width: 28, height: 28, background: `${statusColor}28`, color: statusColor, fontSize: 14 }}
                       >
                         !
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold text-slate-200 capitalize">{inc.type ?? 'Incident'}</span>
+                          <span className="text-sm font-semibold text-slate-200 truncate">
+                            {inc.name ?? 'Incident'}<span className="font-normal capitalize" style={{ color: '#64748b' }}> · {inc.type}</span>
+                          </span>
                           <span
-                            className="text-xs font-semibold px-2 py-0.5 rounded-full capitalize"
-                            style={{
-                              background: inc.status === 'resolved' ? 'rgba(34,197,94,0.12)' : inc.status === 'in_progress' ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)',
-                              color: inc.status === 'resolved' ? '#22c55e' : inc.status === 'in_progress' ? '#f59e0b' : '#f87171',
-                            }}
+                            className="text-xs font-semibold px-2 py-0.5 rounded-full capitalize flex-shrink-0"
+                            style={{ background: `${statusColor}20`, color: statusColor }}
                           >
                             {inc.status.replace('_', ' ')}
                           </span>
                         </div>
                         {inc.description && (
-                          <div className="text-xs mt-1" style={{ color: '#94a3b8' }}>{inc.description}</div>
+                          <div className="text-xs mt-1 truncate" style={{ color: '#94a3b8' }}>{inc.description}</div>
                         )}
                         <div className="text-xs mt-1" style={{ color: '#475569' }}>
                           {inc.lat.toFixed(5)}, {inc.lng.toFixed(5)} · {msToLabel(Date.now() - new Date(inc.createdAt).getTime())}
                         </div>
                       </div>
-                    </div>
-                  ))
+                    </button>
+                    )
+                  })
                 )}
               </div>
             )}
@@ -705,7 +910,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                         </div>
                         <div className="space-y-2">
                           {onlineMedics.map(m => (
-                            <MedicRow key={m.medicId} medic={m} onAssign={assignDestination} onRemove={removeActiveMedic} />
+                            <MedicRow key={m.medicId} medic={m} rosterEntry={rosterById.get(m.medicId)} onAssign={assignDestination} onRemove={removeActiveMedic} />
                           ))}
                         </div>
                       </div>
@@ -721,7 +926,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                         </div>
                         <div className="space-y-2">
                           {offlineMedics.map(m => (
-                            <MedicRow key={m.medicId} medic={m} onAssign={assignDestination} onRemove={removeActiveMedic} />
+                            <MedicRow key={m.medicId} medic={m} rosterEntry={rosterById.get(m.medicId)} onAssign={assignDestination} onRemove={removeActiveMedic} />
                           ))}
                         </div>
                       </div>
@@ -734,7 +939,20 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
         </div>
 
         {/* Map */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0">
+          {/* Mobile: open the info/medics/incidents panel */}
+          <button
+            onClick={() => setPanelOpen(true)}
+            className="lg:hidden absolute top-4 left-4 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold"
+            style={{ zIndex: 10, background: 'rgba(10,18,34,0.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(148,163,184,0.18)', color: '#e2e8f0' }}
+          >
+            <Layers className="w-4 h-4" /> Panel
+            {isActive && liveIncidents.filter(i => i.status === 'open').length > 0 && (
+              <span className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black" style={{ background: '#ef4444', color: '#fff' }}>
+                {liveIncidents.filter(i => i.status === 'open').length}
+              </span>
+            )}
+          </button>
           <MapWrapper
             center={[23.3219, 42.6977]}
             zoom={11}
@@ -876,6 +1094,52 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </div>
       </div>
+
+      {/* Broadcast composer */}
+      {showBroadcast && <BroadcastModal eventId={event.id} onClose={() => setShowBroadcast(false)} />}
+
+      {/* Incident detail drawer (status / chat / close) */}
+      {selectedIncident && (
+        <IncidentDrawer
+          incident={selectedIncident}
+          messages={incidentMessages.get(selectedIncident.id) ?? []}
+          onClose={() => setSelectedIncidentId(null)}
+          onResolve={resolveIncident}
+          onCloseIncident={closeIncident}
+          onSendMessage={sendMessage}
+          loadMessages={loadMessages}
+        />
+      )}
+
+      {/* Broadcast toasts — stack newest-first, each dismissible */}
+      {broadcasts.length > 0 && (
+        <div className="fixed bottom-6 right-6 flex flex-col gap-2.5" style={{ zIndex: 40, maxWidth: 'min(92vw, 360px)' }}>
+          {broadcasts.map(b => (
+            <div
+              key={b.id}
+              className="flex items-start gap-3 px-4 py-3 rounded-2xl"
+              style={{ background: 'rgba(8,15,28,0.97)', border: '1px solid rgba(245,158,11,0.3)', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
+            >
+              <Megaphone className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#f59e0b' }} />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-slate-100 truncate">{b.title}</div>
+                <div className="text-[11px]" style={{ color: '#94a3b8' }}>{b.body}</div>
+                <div className="text-[10px] mt-0.5" style={{ color: '#475569' }}>
+                  {new Date(b.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · sent to all medics
+                </div>
+              </div>
+              <button
+                onClick={() => dismissBroadcast(b.id)}
+                className="p-1 rounded-lg flex-shrink-0 transition-colors"
+                style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)' }}
+                aria-label="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* QR Code Modal */}
       {showQR && <QRModal eventId={event.id} onClose={() => setShowQR(false)} />}

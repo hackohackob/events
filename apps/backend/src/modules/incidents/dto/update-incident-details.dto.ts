@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString } from "class-validator";
+import { IsIn, IsNumber, IsOptional, IsString } from "class-validator";
 
 export class UpdateIncidentDetailsDto {
   @IsOptional()
@@ -16,4 +16,12 @@ export class UpdateIncidentDetailsDto {
   @IsOptional()
   @IsString()
   photoUrl?: string;
+
+  @IsOptional()
+  @IsIn(["low", "medium", "high", "critical"])
+  severity?: string;
+
+  @IsOptional()
+  @IsIn(["open", "assigned", "in_progress", "resolved", "closed", "archived"])
+  status?: string;
 }

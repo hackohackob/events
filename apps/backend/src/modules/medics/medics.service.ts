@@ -1,8 +1,35 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { MedicDestination, MedicState, MedicStatus } from "@events/contracts";
+import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
+import { MedicDestination, MedicState, MedicStatus, MedicType } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
+
+interface RosterRow {
+  id: string;
+  name: string;
+  unit: string | null;
+  vehicle: string | null;
+  type: string | null;
+  skills: unknown;
+  capabilities: unknown;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+  return [];
+}
+
+function rosterRowToMedic(r: RosterRow) {
+  return {
+    id: r.id,
+    name: r.name,
+    unit: r.unit ?? undefined,
+    vehicle: r.vehicle ?? undefined,
+    type: (r.type ?? undefined) as MedicType | undefined,
+    skills: asStringArray(r.skills),
+    capabilities: asStringArray(r.capabilities),
+  };
+}
 
 export interface UpsertMedicLocationParams {
   eventId: string;
@@ -13,10 +40,11 @@ export interface UpsertMedicLocationParams {
   heading?: number;
   speed?: number;
   accuracy?: number;
+  battery?: number;
 }
 
 @Injectable()
-export class MedicsService {
+export class MedicsService implements OnModuleInit {
   private readonly logger = new Logger(MedicsService.name);
 
   constructor(
@@ -25,33 +53,71 @@ export class MedicsService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  async onModuleInit() {
+    // Idempotent column additions — safe to run on every boot
+    const alterations = [
+      `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
+      `ALTER TABLE participant_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
+      `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS type TEXT`,
+      `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL DEFAULT '[]'`,
+    ];
+    for (const sql of alterations) {
+      await this.db.query(sql).catch((err) => this.logger.warn(`battery column migration skipped: ${String(err)}`));
+    }
+  }
+
   // ─── Roster ──────────────────────────────────────────────────────────────
 
   async getMedicRoster(eventId: string) {
-    const { rows } = await this.db.query<{ id: string; name: string; unit?: string; vehicle?: string }>(
-      "SELECT id, name, unit, vehicle FROM event_medics WHERE event_id = $1 ORDER BY name",
+    const { rows } = await this.db.query<RosterRow>(
+      "SELECT id, name, unit, vehicle, type, skills, capabilities FROM event_medics WHERE event_id = $1 ORDER BY name",
       [eventId],
     );
-    return rows;
+    return rows.map(rosterRowToMedic);
   }
 
-  async addMedic(eventId: string, data: { name: string; unit?: string; vehicle?: string }) {
-    const { rows } = await this.db.query<{ id: string; name: string; unit?: string; vehicle?: string }>(
-      `INSERT INTO event_medics (event_id, name, unit, vehicle)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle
-       RETURNING id, name, unit, vehicle`,
-      [eventId, data.name, data.unit ?? null, data.vehicle ?? null],
+  async addMedic(
+    eventId: string,
+    data: { name: string; unit?: string; vehicle?: string; type?: MedicType; skills?: string[]; capabilities?: string[] },
+  ) {
+    const { rows } = await this.db.query<RosterRow>(
+      `INSERT INTO event_medics (event_id, name, unit, vehicle, type, skills, capabilities)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+       ON CONFLICT (event_id, name) DO UPDATE SET
+         unit = EXCLUDED.unit,
+         vehicle = EXCLUDED.vehicle,
+         type = EXCLUDED.type,
+         skills = EXCLUDED.skills,
+         capabilities = EXCLUDED.capabilities
+       RETURNING id, name, unit, vehicle, type, skills, capabilities`,
+      [
+        eventId,
+        data.name,
+        data.unit ?? null,
+        data.vehicle ?? null,
+        data.type ?? null,
+        JSON.stringify(data.skills ?? []),
+        JSON.stringify(data.capabilities ?? []),
+      ],
     );
-    return rows[0];
+    return rosterRowToMedic(rows[0]);
   }
 
   async getMedicById(eventId: string, medicId: string) {
-    const { rows } = await this.db.query<{ id: string; name: string; unit?: string; vehicle?: string }>(
-      "SELECT id, name, unit, vehicle FROM event_medics WHERE event_id = $1 AND id = $2",
+    const { rows } = await this.db.query<RosterRow>(
+      "SELECT id, name, unit, vehicle, type, skills, capabilities FROM event_medics WHERE event_id = $1 AND id = $2",
       [eventId, medicId],
     );
-    return rows[0] ?? null;
+    return rows[0] ? rosterRowToMedic(rows[0]) : null;
+  }
+
+  async isCoordinator(eventId: string, medicId: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ type: string | null }>(
+      "SELECT type FROM event_medics WHERE event_id = $1 AND id = $2",
+      [eventId, medicId],
+    );
+    return rows[0]?.type === "coordinator";
   }
 
   async getMedicState(eventId: string, medicId: string): Promise<MedicState | null> {
@@ -75,6 +141,7 @@ export class MedicsService {
       heading: params.heading,
       speed: params.speed,
       accuracy: params.accuracy,
+      battery: params.battery,
       status: existing?.status ?? "available",
       destination: existing?.destination ?? null,
       recordedAt: now,
@@ -83,8 +150,8 @@ export class MedicsService {
 
     await this.db.query(
       `INSERT INTO medic_last_location
-         (medic_id, event_id, name, lat, lng, heading, speed, accuracy, status, destination, recorded_at, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         (medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, status, destination, recorded_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (event_id, medic_id) DO UPDATE SET
          name        = EXCLUDED.name,
          lat         = EXCLUDED.lat,
@@ -92,12 +159,13 @@ export class MedicsService {
          heading     = EXCLUDED.heading,
          speed       = EXCLUDED.speed,
          accuracy    = EXCLUDED.accuracy,
+         battery     = EXCLUDED.battery,
          recorded_at = EXCLUDED.recorded_at,
          last_seen_at = EXCLUDED.last_seen_at`,
       [
         params.medicId, params.eventId, params.name,
         params.lat, params.lng, params.heading ?? null,
-        params.speed ?? null, params.accuracy ?? null,
+        params.speed ?? null, params.accuracy ?? null, params.battery ?? null,
         state.status, state.destination ? JSON.stringify(state.destination) : null,
         now, now,
       ],
@@ -111,11 +179,30 @@ export class MedicsService {
     return state;
   }
 
+  /**
+   * Assign (or clear) a medic's destination.
+   *
+   * @param requesterId  Who initiated this. Self-assignment (requesterId === medicId)
+   *                     is always allowed; assigning *another* medic requires the
+   *                     requester to be a coordinator (roster type) or the dashboard.
+   * @param requesterIsCoordinatorRole  True when the caller's session role is
+   *                     "coordinator" (the dashboard).
+   */
   async assignDestination(
     eventId: string,
     medicId: string,
     destination: MedicDestination | null,
+    requesterId?: string,
+    requesterIsCoordinatorRole = false,
   ): Promise<MedicState> {
+    const isSelf = !requesterId || requesterId === medicId;
+    if (!isSelf && !requesterIsCoordinatorRole) {
+      const requesterIsCoordinator = await this.isCoordinator(eventId, requesterId!);
+      if (!requesterIsCoordinator) {
+        throw new ForbiddenException("Only a coordinator can assign another medic");
+      }
+    }
+
     const existing = await this.getMedicLastLocation(eventId, medicId);
     if (!existing) {
       throw new NotFoundException(`Medic ${medicId} has no location recorded for event ${eventId}`);
@@ -138,17 +225,61 @@ export class MedicsService {
       payload: updated,
     });
 
-    if (destination) {
+    // Notify the assigned medic only when somebody else dispatched them.
+    if (destination && !isSelf) {
       await this.notifications.sendToUser(
         medicId,
         eventId,
         "📍 New Assignment",
         `Head to: ${destination.label}`,
-        { medicId, eventId, label: destination.label },
+        { medicId, eventId, label: destination.label, kind: "assignment" },
       );
     }
 
     return updated;
+  }
+
+  /** Manually set a medic's status (Available / Rest). "going_to" is set via assignDestination. */
+  async updateStatus(
+    eventId: string,
+    medicId: string,
+    status: Extract<MedicStatus, "available" | "rest">,
+  ): Promise<MedicState> {
+    const existing = await this.getMedicLastLocation(eventId, medicId);
+    if (!existing) {
+      throw new NotFoundException(`Medic ${medicId} has no location recorded for event ${eventId}`);
+    }
+
+    const now = new Date().toISOString();
+    // Switching to a manual status always clears any standing destination.
+    await this.db.query(
+      `UPDATE medic_last_location
+       SET status = $1, destination = NULL, last_seen_at = $2
+       WHERE event_id = $3 AND medic_id = $4`,
+      [status, now, eventId, medicId],
+    );
+
+    const updated: MedicState = { ...existing, status, destination: null, lastSeenAt: now };
+
+    await this.redis.publish(`event:${eventId}:map`, {
+      type: "medic_location",
+      payload: updated,
+    });
+
+    return updated;
+  }
+
+  /** Dashboard alert blasted to every device registered to the event. */
+  async broadcast(eventId: string, title: string, body: string): Promise<{ ok: true }> {
+    await this.notifications.sendToEvent(eventId, title, body, {
+      eventId,
+      kind: "broadcast",
+    });
+    await this.redis.publish(`event:${eventId}:ops`, {
+      type: "broadcast",
+      payload: { title, body, sentAt: new Date().toISOString() },
+    });
+    return { ok: true };
   }
 
   async getActiveMedics(eventId: string): Promise<MedicState[]> {
@@ -161,12 +292,13 @@ export class MedicsService {
       heading: number | null;
       speed: number | null;
       accuracy: number | null;
+      battery: number | null;
       status: string;
       destination: unknown;
       recorded_at: string;
       last_seen_at: string;
     }>(
-      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy,
+      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery,
               status, destination, recorded_at, last_seen_at
        FROM medic_last_location
        WHERE event_id = $1
@@ -183,6 +315,7 @@ export class MedicsService {
       heading: r.heading ?? undefined,
       speed: r.speed ?? undefined,
       accuracy: r.accuracy ?? undefined,
+      battery: r.battery ?? undefined,
       status: r.status as MedicStatus,
       destination: r.destination as MedicDestination | null,
       recordedAt: r.recorded_at,
@@ -200,12 +333,13 @@ export class MedicsService {
       heading: number | null;
       speed: number | null;
       accuracy: number | null;
+      battery: number | null;
       status: string;
       destination: unknown;
       recorded_at: string;
       last_seen_at: string;
     }>(
-      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy,
+      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery,
               status, destination, recorded_at, last_seen_at
        FROM medic_last_location
        WHERE event_id = $1 AND medic_id = $2`,
@@ -222,6 +356,7 @@ export class MedicsService {
       heading: r.heading ?? undefined,
       speed: r.speed ?? undefined,
       accuracy: r.accuracy ?? undefined,
+      battery: r.battery ?? undefined,
       status: r.status as MedicStatus,
       destination: r.destination as MedicDestination | null,
       recordedAt: r.recorded_at,
@@ -247,24 +382,26 @@ export class MedicsService {
     lat: number;
     lng: number;
     accuracy?: number;
+    battery?: number;
     timestamp: string;
   }): Promise<void> {
     const now = new Date().toISOString();
 
     await this.db.query(
       `INSERT INTO participant_last_location
-         (user_id, event_id, name, bib_number, phone, lat, lng, accuracy, recorded_at, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (user_id, event_id, name, bib_number, phone, lat, lng, accuracy, battery, recorded_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (event_id, user_id) DO UPDATE SET
          lat         = EXCLUDED.lat,
          lng         = EXCLUDED.lng,
          accuracy    = EXCLUDED.accuracy,
+         battery     = EXCLUDED.battery,
          recorded_at = EXCLUDED.recorded_at,
          last_seen_at = EXCLUDED.last_seen_at`,
       [
         params.userId, params.eventId, params.name,
         params.bibNumber ?? null, params.phone ?? null,
-        params.lat, params.lng, params.accuracy ?? null,
+        params.lat, params.lng, params.accuracy ?? null, params.battery ?? null,
         params.timestamp, now,
       ],
     );
@@ -297,6 +434,7 @@ export class MedicsService {
         lat: params.lat,
         lng: params.lng,
         accuracy: params.accuracy ?? null,
+        battery: params.battery ?? null,
         timestamp: params.timestamp,
         role: 'runner',
         name: params.name,

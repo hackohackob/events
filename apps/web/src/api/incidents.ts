@@ -1,5 +1,11 @@
 import client from "./client";
-import type { CreateIncidentRequest, IncidentActionRequest } from "@events/contracts";
+import type {
+  CloseIncidentRequest,
+  CreateIncidentRequest,
+  IncidentActionRequest,
+  IncidentMessage,
+  SendIncidentMessageRequest,
+} from "@events/contracts";
 
 export async function listIncidents(eventId?: string) {
   const headers: Record<string, string> = {};
@@ -13,8 +19,13 @@ export async function createIncident(payload: CreateIncidentRequest) {
   return res.data;
 }
 
-export async function actionIncident(incidentId: string, payload: IncidentActionRequest) {
-  const res = await client.patch(`/incidents/${incidentId}/action`, payload);
+/** Scope a request to a specific event (the dashboard has no per-event session token). */
+function eventHeaders(eventId?: string): Record<string, string> {
+  return eventId ? { "x-event-id": eventId } : {};
+}
+
+export async function actionIncident(incidentId: string, payload: IncidentActionRequest, eventId?: string) {
+  const res = await client.patch(`/incidents/${incidentId}/action`, payload, { headers: eventHeaders(eventId) });
   return res.data;
 }
 
@@ -30,4 +41,23 @@ export async function assignMedicToIncident(
 ): Promise<void> {
   // eventId is carried by the auth interceptor via x-event-id header
   await client.patch(`/incidents/${incidentId}/assign/${paramedicId}`);
+}
+
+export async function closeIncident(incidentId: string, payload: CloseIncidentRequest, eventId?: string) {
+  const res = await client.patch(`/incidents/${incidentId}/close`, payload, { headers: eventHeaders(eventId) });
+  return res.data;
+}
+
+export async function listIncidentMessages(incidentId: string, eventId?: string): Promise<IncidentMessage[]> {
+  const res = await client.get<IncidentMessage[]>(`/incidents/${incidentId}/messages`, { headers: eventHeaders(eventId) });
+  return res.data;
+}
+
+export async function sendIncidentMessage(
+  incidentId: string,
+  payload: SendIncidentMessageRequest,
+  eventId?: string,
+): Promise<IncidentMessage> {
+  const res = await client.post<IncidentMessage>(`/incidents/${incidentId}/messages`, payload, { headers: eventHeaders(eventId) });
+  return res.data;
 }

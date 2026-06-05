@@ -46,6 +46,28 @@ export class EventsController {
     return this.eventsService.listPoisForEvent(user.eventId);
   }
 
+  @Post("pois")
+  createPoi(
+    @CurrentUser() user: RequestUser,
+    @Body() body: { lat: number; lng: number; type?: string; name?: string; description?: string },
+  ) {
+    return this.eventsService.createPoi(user.eventId, body);
+  }
+
+  @Delete("pois/:poiId")
+  archivePoi(@CurrentUser() user: RequestUser, @Param("poiId") poiId: string) {
+    return this.eventsService.archivePoi(user.eventId, poiId);
+  }
+
+  @Patch(":id/pois/:poiId")
+  updatePoi(
+    @Param("id") id: string,
+    @Param("poiId") poiId: string,
+    @Body() body: { name?: string; description?: string },
+  ) {
+    return this.eventsService.updatePoi(id, poiId, body);
+  }
+
   @Put(":id")
   async update(@Param("id") id: string, @Body() body: CreateEventDto) {
     const event = await this.eventsService.update(id, body);

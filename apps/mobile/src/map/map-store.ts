@@ -15,7 +15,19 @@ interface Marker {
   respondingIncidentId?: string;
   respondingParamedicIds?: string[];
   lastSeenAt?: string;
+  accuracy?: number;
+  battery?: number;
   poiType?: string;
+  /** Live medic status: "available" | "rest" | "going_to" */
+  status?: string;
+  /** Where a medic is currently heading (for the "going to" line + label). */
+  destination?: { lat: number; lng: number; label: string } | null;
+  /** POI free-text description (shown in the marker detail sheet). */
+  poiDescription?: string;
+  /** Incident category (medical | cardiac | trauma | …). */
+  incidentType?: string;
+  /** Server-relative photo path attached to an incident, if any. */
+  photoUrl?: string;
 }
 
 export interface RaceTrack {

@@ -46,8 +46,9 @@ export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
 
-  const [apiUrl, setApiUrl] = useState('http://localhost:8500')
-  const [eventId, setEventId] = useState('event-demo')
+  const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {}
+  const [apiUrl, setApiUrl] = useState(viteEnv.VITE_API_URL ?? 'http://localhost:8500')
+  const [eventId, setEventId] = useState(viteEnv.VITE_EVENT_ID ?? 'event-demo')
   const [running, setRunning] = useState(false)
   const [speedMultiplier, setSpeedMultiplier] = useState(1)
   const [entities, setEntities] = useState<SimEntity[]>([])

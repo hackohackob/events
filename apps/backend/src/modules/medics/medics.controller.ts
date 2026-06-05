@@ -1,7 +1,11 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "../common/guards/auth.guard";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
+import { RequestUser } from "../common/types/request-user.type";
 import { AddMedicDto } from "./dto/add-medic.dto";
 import { AssignDestinationDto } from "./dto/assign-destination.dto";
+import { BroadcastDto } from "./dto/broadcast.dto";
+import { UpdateMedicStatusDto } from "./dto/update-medic-status.dto";
 import { MedicsService } from "./medics.service";
 
 @Controller("events/:eventId")
@@ -33,7 +37,7 @@ export class MedicsController {
   async postMedicLocation(
     @Param("eventId") eventId: string,
     @Param("medicId") medicId: string,
-    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number },
+    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number },
   ) {
     const medic = await this.medicsService.getMedicById(eventId, medicId);
     await this.medicsService.upsertMedicLocation({
@@ -45,16 +49,38 @@ export class MedicsController {
       accuracy: body.accuracy,
       speed: body.speed,
       heading: body.heading,
+      battery: body.battery,
     });
   }
 
   @Patch("medics/:medicId/assign")
   assignDestination(
+    @CurrentUser() user: RequestUser,
     @Param("eventId") eventId: string,
     @Param("medicId") medicId: string,
     @Body() body: AssignDestinationDto,
   ) {
-    return this.medicsService.assignDestination(eventId, medicId, body.destination);
+    return this.medicsService.assignDestination(
+      eventId,
+      medicId,
+      body.destination,
+      user.userId,
+      user.role === "coordinator",
+    );
+  }
+
+  @Patch("medics/:medicId/status")
+  updateStatus(
+    @Param("eventId") eventId: string,
+    @Param("medicId") medicId: string,
+    @Body() body: UpdateMedicStatusDto,
+  ) {
+    return this.medicsService.updateStatus(eventId, medicId, body.status);
+  }
+
+  @Post("broadcast")
+  broadcast(@Param("eventId") eventId: string, @Body() body: BroadcastDto) {
+    return this.medicsService.broadcast(eventId, body.title, body.body);
   }
 
   @Delete("medics/:medicId/active")

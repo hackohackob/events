@@ -1,7 +1,9 @@
-import { ConflictException, Injectable, OnModuleInit } from "@nestjs/common";
+import { randomUUID } from "crypto";
+import { ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { DbService } from "../infra/db.service";
+import { RedisService } from "../infra/redis.service";
 import { ExampleDataService } from "../example-data/example-data.service";
 import { CreateEventDto } from "./dto/create-event.dto";
 
@@ -24,10 +26,14 @@ export interface StoredDay {
 }
 
 export interface StoredPoi {
+  id: string;
   type: string;
   lng: number;
   lat: number;
   name?: string;
+  description?: string;
+  /** Archived POIs are hidden from the map for everyone. */
+  archived?: boolean;
 }
 
 export interface StoredAssignment {
@@ -151,6 +157,7 @@ export class EventsService implements OnModuleInit {
   constructor(
     private readonly exampleDataService: ExampleDataService,
     private readonly db: DbService,
+    private readonly redisService: RedisService,
   ) {}
 
   private events: EventRecord[] = [];
@@ -159,6 +166,19 @@ export class EventsService implements OnModuleInit {
     try {
       const raw = await readFile(DATA_FILE, "utf-8");
       this.events = JSON.parse(raw) as EventRecord[];
+      // Backfill stable POI ids for events stored before ids existed.
+      let mutated = false;
+      for (const event of this.events) {
+        for (const day of event.days) {
+          for (const poi of day.pois ?? []) {
+            if (!poi.id) {
+              poi.id = randomUUID();
+              mutated = true;
+            }
+          }
+        }
+      }
+      if (mutated) await this.persist();
     } catch {
       this.events = [...DEFAULT_EVENTS];
       await this.persist();
@@ -196,7 +216,7 @@ export class EventsService implements OnModuleInit {
           gpxUrl: disc.gpxUrl,
           trackId: disc.trackId,
         })),
-        pois: (d.pois || []).map((p) => ({ ...p })),
+        pois: (d.pois || []).map((p) => ({ ...p, id: p.id?.trim() || randomUUID() })),
         assignments: (d.assignments || []).map((a) => ({ ...a })),
       })),
     };
@@ -233,7 +253,7 @@ export class EventsService implements OnModuleInit {
           gpxUrl: disc.gpxUrl,
           trackId: disc.trackId,
         })),
-        pois: (d.pois || []).map((p) => ({ ...p })),
+        pois: (d.pois || []).map((p) => ({ ...p, id: p.id?.trim() || randomUUID() })),
         assignments: (d.assignments || []).map((a) => ({ ...a })),
       })),
     };
@@ -325,7 +345,70 @@ export class EventsService implements OnModuleInit {
   listPoisForEvent(eventId: string): StoredPoi[] {
     const event = this.events.find((e) => e.id === eventId);
     if (!event) return [];
-    return event.days.flatMap((d) => d.pois);
+    return event.days.flatMap((d) => d.pois).filter((p) => !p.archived);
+  }
+
+  /** Create a POI at the given coordinates (long-press on the map). */
+  async createPoi(
+    eventId: string,
+    input: { lat: number; lng: number; type?: string; name?: string; description?: string },
+  ): Promise<StoredPoi> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.days.length === 0) {
+      event.days.push({ date: new Date().toISOString().slice(0, 10), disciplines: [], pois: [], assignments: [] });
+    }
+    const poi: StoredPoi = {
+      id: randomUUID(),
+      type: input.type?.trim() || "marker",
+      lat: input.lat,
+      lng: input.lng,
+      name: input.name?.trim() || undefined,
+      description: input.description?.trim() || undefined,
+    };
+    event.days[0].pois.push(poi);
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:map`, { type: "poi.created", payload: poi });
+    return poi;
+  }
+
+  /** Archive a POI — hides it from the map for everyone. */
+  async archivePoi(eventId: string, poiId: string): Promise<{ id: string }> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    for (const day of event.days) {
+      const poi = day.pois.find((p) => p.id === poiId);
+      if (poi) {
+        poi.archived = true;
+        await this.persist();
+        await this.redisService.publish(`event:${eventId}:map`, {
+          type: "poi.removed",
+          payload: { id: poiId },
+        });
+        return { id: poiId };
+      }
+    }
+    throw new NotFoundException(`POI ${poiId} not found`);
+  }
+
+  /** Edit a single POI (name/description) while the event is live. */
+  async updatePoi(
+    eventId: string,
+    poiId: string,
+    patch: { name?: string; description?: string },
+  ): Promise<StoredPoi> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    for (const day of event.days) {
+      const poi = day.pois.find((p) => p.id === poiId);
+      if (poi) {
+        if (patch.name !== undefined) poi.name = patch.name;
+        if (patch.description !== undefined) poi.description = patch.description;
+        await this.persist();
+        return poi;
+      }
+    }
+    throw new NotFoundException(`POI ${poiId} not found`);
   }
 
   private async syncMedicRoster(event: EventRecord): Promise<void> {
