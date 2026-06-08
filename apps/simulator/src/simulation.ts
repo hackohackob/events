@@ -7,6 +7,10 @@ export interface RoutePoint {
   lng: number
 }
 
+export type RouteMode = 'loop' | 'pingpong' | 'once'
+export type MedicStatus = 'available' | 'rest' | 'going_to'
+export type SendChannel = 'ws' | 'http'
+
 export interface SimEntity {
   id: string
   role: EntityRole
@@ -17,13 +21,25 @@ export interface SimEntity {
   speed: number        // m/s
   heading: number      // degrees
   token?: string       // auth token once joined
+  medicId?: string     // roster id (event_medics.id) for REST calls
   joined: boolean
   color: string
   // Route-following fields
   routePoints?: RoutePoint[]   // ordered waypoints
   routeIndex?: number          // current waypoint index (integer)
-  routeLoop?: boolean          // restart from start when end is reached
+  routeLoop?: boolean          // legacy: restart from start when end is reached
+  routeMode?: RouteMode        // loop | pingpong | once
+  routeDir?: 1 | -1            // travel direction along the route
   routeVariance?: number       // meters of Gaussian noise to add (for medics)
+  routeLabel?: string          // human label of the active route/destination
+  // Per-medic controls
+  accuracy?: number            // reported GPS accuracy (m)
+  jitterM?: number             // continuous GPS noise added to every sent fix (m)
+  paused?: boolean             // frozen in place
+  offline?: boolean            // joined but intentionally not sending
+  sendChannel?: SendChannel    // medic transport (ws | http)
+  status?: MedicStatus         // live medic status
+  assignedIncidentId?: string  // incident this medic is responding to
 }
 
 // Sofia city center + trails
@@ -69,6 +85,12 @@ export function createMedic(index: number, name?: string): SimEntity {
     heading: rand(0, 360),
     joined: false,
     color: MEDIC_COLORS[index % MEDIC_COLORS.length],
+    accuracy: 5,
+    jitterM: 0,
+    paused: false,
+    offline: false,
+    sendChannel: 'ws',
+    status: 'available',
   }
 }
 
@@ -120,52 +142,73 @@ function gaussianNoise(): number {
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
 }
 
+/** Offset a point by `meters` of Gaussian noise — used for reported GPS jitter. */
+export function jitterPoint(lat: number, lng: number, meters: number): { lat: number; lng: number } {
+  if (!meters || meters <= 0) return { lat, lng }
+  const noiseDeg = meters / 111_320
+  const nLat = lat + gaussianNoise() * noiseDeg
+  const nLng = lng + (gaussianNoise() * noiseDeg) / Math.cos(lat * Math.PI / 180)
+  return { lat: nLat, lng: nLng }
+}
+
 /** Move entity by one tick (seconds), following a route if assigned, else random walk */
 export function stepEntity(entity: SimEntity, deltaSec: number, speedMultiplier: number): SimEntity {
+  // Frozen entities don't move at all.
+  if (entity.paused) return entity
+
   const dist = entity.speed * speedMultiplier * deltaSec
 
   // ── Route-following mode ────────────────────────────────────────────────────
   if (entity.routePoints && entity.routePoints.length >= 2) {
     const points = entity.routePoints
+    const lastIdx = points.length - 1
+    const mode: RouteMode = entity.routeMode ?? (entity.routeLoop ? 'loop' : 'once')
     let idx = entity.routeIndex ?? 0
+    let dir: 1 | -1 = entity.routeDir ?? 1
 
-    // Already finished and not looping — stay put
-    if (idx >= points.length - 1 && !entity.routeLoop) {
-      return entity
+    // Determine the next waypoint to head toward based on direction.
+    let nextIdx = idx + dir
+    // Handle reaching an edge.
+    if (nextIdx < 0 || nextIdx > lastIdx) {
+      if (mode === 'once') {
+        return { ...entity, status: entity.status }
+      } else if (mode === 'loop') {
+        idx = dir > 0 ? 0 : lastIdx
+        nextIdx = idx + dir
+      } else {
+        // pingpong — flip direction
+        dir = (dir * -1) as 1 | -1
+        nextIdx = idx + dir
+      }
+      if (nextIdx < 0 || nextIdx > lastIdx) return entity // degenerate (single point)
     }
 
-    // Normalise index for looping
-    const targetIdx = entity.routeLoop ? idx % (points.length - 1) : Math.min(idx, points.length - 2)
-    const waypoint = points[targetIdx + 1] ?? points[0]
+    const waypoint = points[nextIdx]
     const current: RoutePoint = { lat: entity.lat, lng: entity.lng }
-
     const dToWaypoint = distanceMeters(current, waypoint)
     const newHeading = bearing(current, waypoint)
 
     let lat: number
     let lng: number
-    let newIdx: number
+    let newIdx = idx
 
     if (dToWaypoint <= 5 || dToWaypoint <= dist) {
-      // Snap to waypoint and advance index
       lat = waypoint.lat
       lng = waypoint.lng
-      newIdx = targetIdx + 1
+      newIdx = nextIdx
     } else {
-      // Move toward waypoint
       lat = entity.lat + (dist / 111_320) * Math.cos(newHeading * Math.PI / 180)
       lng = entity.lng + dist / (111_320 * Math.cos(entity.lat * Math.PI / 180)) * Math.sin(newHeading * Math.PI / 180)
-      newIdx = targetIdx
     }
 
-    // Add Gaussian noise if requested (e.g. medics patrolling)
+    // Gaussian path noise (e.g. medics patrolling a track).
     if (entity.routeVariance && entity.routeVariance > 0) {
       const noiseDeg = entity.routeVariance / 111_320
       lat += gaussianNoise() * noiseDeg
       lng += gaussianNoise() * noiseDeg / Math.cos(lat * Math.PI / 180)
     }
 
-    return { ...entity, lat, lng, heading: newHeading, routeIndex: newIdx }
+    return { ...entity, lat, lng, heading: newHeading, routeIndex: newIdx, routeDir: dir }
   }
 
   // ── Random-walk mode ────────────────────────────────────────────────────────

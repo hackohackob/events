@@ -2,19 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import {
   Play, Square, Plus, Trash2, Users, Shield,
-  Settings, ChevronDown, ChevronUp, Wifi, AlertTriangle
+  ChevronDown, ChevronUp,
 } from 'lucide-react'
 import {
   createMedic, createParticipant, stepEntity,
-  type SimEntity, type EntityRole
+  type SimEntity, type MedicStatus, type RouteMode,
 } from './simulation'
 import {
   setApiBase, connectMedicSocket, disconnectMedicSocket, disconnectAllSockets,
   joinAsParticipant, joinAsMedic, sendMedicLocation,
   sendParticipantLocation, fetchMedicRoster, addMedicToRoster,
-  createIncident, fetchTracks,
-  type LogEntry, type Track
+  createIncident, fetchTracks, fetchIncidents,
+  assignMedicDestination, setMedicStatus, respondToIncident,
+  sendIncidentMessage, createIncidentAsMedic,
+  type LogEntry, type Track, type SimIncident,
 } from './api'
+import { MedicControlPanel, type MapMode } from './MedicControlPanel'
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const CENTER: [number, number] = [23.3219, 42.6977]
@@ -64,8 +67,21 @@ export default function App() {
   const [participantRouteId, setParticipantRouteId] = useState<string>('random')
   const [participantSpeed, setParticipantSpeed] = useState<number>(3)
 
+  // ── Per-medic control ──
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [mapMode, setMapMode] = useState<MapMode>(null)
+  const [incidents, setIncidents] = useState<SimIncident[]>([])
+  const [medicCtx, setMedicCtx] = useState<{ x: number; y: number; id: string } | null>(null)
+
   const entitiesRef = useRef<SimEntity[]>([])
+  const mapModeRef = useRef<MapMode>(null)
+  const selectedIdRef = useRef<string | null>(null)
+  const onMapModeClickRef = useRef<((lat: number, lng: number) => void) | null>(null)
+  const selectMedicRef = useRef<((id: string | null) => void) | null>(null)
+  const openMedicCtxRef = useRef<((x: number, y: number, id: string) => void) | null>(null)
   const runningRef = useRef(false)
+  mapModeRef.current = mapMode
+  selectedIdRef.current = selectedId
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const medicSendRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const participantSendRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -118,7 +134,11 @@ export default function App() {
       })
     })
 
-    map.on('click', () => setCtxMenu(null))
+    map.on('click', (e) => {
+      setCtxMenu(null)
+      setMedicCtx(null)
+      onMapModeClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
+    })
 
     return () => {
       map.remove()
@@ -150,13 +170,22 @@ export default function App() {
           width: 30px; height: 30px; border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
           font-size: 10px; font-weight: 800; color: #fff;
-          border: 2.5px solid rgba(255,255,255,0.85);
           box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-          cursor: default; transition: background 0.3s;
+          cursor: pointer; transition: box-shadow 0.2s, border 0.2s, opacity 0.2s;
         `
         el.style.background = entity.color
         el.title = entity.name
         el.textContent = entity.name.split(' ').slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('')
+
+        if (entity.role === 'medic') {
+          const id = entity.id
+          el.addEventListener('click', (ev) => { ev.stopPropagation(); selectMedicRef.current?.(id) })
+          el.addEventListener('contextmenu', (ev) => {
+            ev.preventDefault(); ev.stopPropagation()
+            const rect = mapContainerRef.current!.getBoundingClientRect()
+            openMedicCtxRef.current?.(ev.clientX - rect.left, ev.clientY - rect.top, id)
+          })
+        }
 
         marker = new maplibregl.Marker({ element: el })
           .setLngLat([entity.lng, entity.lat])
@@ -166,11 +195,25 @@ export default function App() {
         marker.setLngLat([entity.lng, entity.lat])
       }
 
-      // Dim if not joined
+      // Reflect live state in the marker visuals.
       const el = marker.getElement() as HTMLElement
-      el.style.opacity = entity.joined ? '1' : '0.5'
+      const selected = entity.id === selectedId
+      const borderColor =
+        selected ? '#ffffff'
+        : entity.offline ? '#475569'
+        : entity.paused ? '#f59e0b'
+        : entity.status === 'going_to' ? '#f59e0b'
+        : entity.status === 'rest' ? '#a78bfa'
+        : 'rgba(255,255,255,0.85)'
+      el.style.border = `${selected ? 3 : 2.5}px solid ${borderColor}`
+      el.style.borderStyle = entity.offline ? 'dashed' : 'solid'
+      el.style.opacity = entity.joined && !entity.offline ? '1' : '0.45'
+      el.style.boxShadow = selected
+        ? `0 0 0 4px ${entity.color}55, 0 2px 12px rgba(0,0,0,0.6)`
+        : '0 2px 10px rgba(0,0,0,0.5)'
+      el.style.zIndex = selected ? '10' : '1'
     }
-  }, [entities])
+  }, [entities, selectedId])
 
   // ─── Movement tick ───────────────────────────────────────────────────────────
 
@@ -194,7 +237,7 @@ export default function App() {
     }
     medicSendRef.current = setInterval(() => {
       const medics = entitiesRef.current.filter(e => e.role === 'medic' && e.joined)
-      for (const m of medics) sendMedicLocation(m, log)
+      for (const m of medics) sendMedicLocation(m, eventId, log)
     }, 2_000)
     return () => { if (medicSendRef.current) clearInterval(medicSendRef.current) }
   }, [running, log])
@@ -278,9 +321,9 @@ export default function App() {
         const token = await joinAsMedic(eventId, entity, rosterEntry.id, log)
         if (token) {
           connectMedicSocket(entity.id, eventId, token, log)
-          newMedics.push({ ...entity, token, joined: true })
+          newMedics.push({ ...entity, token, medicId: rosterEntry.id, joined: true })
         } else {
-          newMedics.push(entity)
+          newMedics.push({ ...entity, medicId: rosterEntry.id })
         }
       } catch (err) {
         log({ type: 'error', message: `Could not add medic to roster: ${(err as Error).message}` })
@@ -349,7 +392,7 @@ export default function App() {
       // Send first location immediately on start
       setTimeout(() => {
         const medics = entitiesRef.current.filter(e => e.role === 'medic' && e.joined)
-        for (const m of medics) sendMedicLocation(m, log)
+        for (const m of medics) sendMedicLocation(m, eventId, log)
         const parts = entitiesRef.current.filter(e => e.role === 'participant' && e.joined)
         for (const p of parts) void sendParticipantLocation(eventId, p, log)
       }, 500)
@@ -369,9 +412,9 @@ export default function App() {
       const token = await joinAsMedic(eventId, entity, rosterEntry.id, log)
       if (token) {
         connectMedicSocket(entity.id, eventId, token, log)
-        setEntities(prev => [...prev, { ...entity, token, joined: true }])
+        setEntities(prev => [...prev, { ...entity, token, medicId: rosterEntry.id, joined: true }])
       } else {
-        setEntities(prev => [...prev, entity])
+        setEntities(prev => [...prev, { ...entity, medicId: rosterEntry.id }])
       }
     } catch (err) {
       log({ type: 'error', message: `Could not add medic: ${(err as Error).message}` })
@@ -399,6 +442,131 @@ export default function App() {
       log({ type: 'error', message: `Incident failed: ${(err as Error).message}` })
     }
   }, [apiUrl, eventId, log])
+
+  // ─── Per-medic control handlers ───────────────────────────────────────────────
+
+  const patchEntity = useCallback((id: string, patch: Partial<SimEntity>) => {
+    setEntities(prev => prev.map(e => (e.id === id ? { ...e, ...patch } : e)))
+  }, [])
+
+  const getEntity = useCallback((id: string) => entitiesRef.current.find(e => e.id === id), [])
+
+  const selectMedic = useCallback((id: string | null) => {
+    setSelectedId(id)
+    setMapMode(null)
+    if (id) {
+      const e = entitiesRef.current.find(x => x.id === id)
+      if (e) mapRef.current?.flyTo({ center: [e.lng, e.lat], zoom: Math.max(mapRef.current.getZoom(), 14), duration: 600 })
+    }
+  }, [])
+
+  const refreshIncidents = useCallback(async () => {
+    setApiBase(apiUrl)
+    try {
+      const list = await fetchIncidents(eventId)
+      setIncidents(list.filter(i => i.status !== 'closed' && i.status !== 'archived'))
+    } catch (err) {
+      log({ type: 'error', message: `Incidents load failed: ${(err as Error).message}` })
+    }
+  }, [apiUrl, eventId, log])
+
+  const setMedicStatusFn = useCallback((id: string, status: MedicStatus) => {
+    const e = getEntity(id); if (!e) return
+    patchEntity(id, { status })
+    void setMedicStatus(eventId, e, status, log)
+  }, [eventId, getEntity, log, patchEntity])
+
+  const sendMedicHere = useCallback((id: string, lat: number, lng: number, label = 'map point') => {
+    const e = getEntity(id); if (!e) return
+    patchEntity(id, {
+      routePoints: [{ lat: e.lat, lng: e.lng }, { lat, lng }],
+      routeIndex: 0, routeMode: 'once', routeDir: 1, routeLabel: label,
+      status: 'going_to', paused: false,
+    })
+    void assignMedicDestination(eventId, e, { lat, lng, label }, log)
+    void setMedicStatus(eventId, e, 'going_to', log)
+  }, [eventId, getEntity, log, patchEntity])
+
+  const addWaypoint = useCallback((id: string, lat: number, lng: number) => {
+    const e = getEntity(id); if (!e) return
+    const existing = e.routePoints && e.routePoints.length >= 1 ? e.routePoints : [{ lat: e.lat, lng: e.lng }]
+    patchEntity(id, {
+      routePoints: [...existing, { lat, lng }],
+      routeIndex: e.routePoints ? e.routeIndex ?? 0 : 0,
+      routeMode: e.routeMode === 'loop' || e.routeMode === 'pingpong' ? e.routeMode : 'once',
+      routeDir: 1, routeLabel: 'waypoint queue', paused: false,
+    })
+    log({ type: 'info', message: `[M] ${e.name} waypoint added (${existing.length})` })
+  }, [getEntity, log, patchEntity])
+
+  const clearMedicRoute = useCallback((id: string) => {
+    const e = getEntity(id); if (!e) return
+    patchEntity(id, { routePoints: undefined, routeIndex: undefined, routeLabel: undefined, routeMode: undefined, assignedIncidentId: undefined, status: 'available' })
+    void assignMedicDestination(eventId, e, null, log)
+    void setMedicStatus(eventId, e, 'available', log)
+  }, [eventId, getEntity, log, patchEntity])
+
+  const followTrack = useCallback((id: string, trackId: string, mode: RouteMode, dir: 1 | -1) => {
+    const e = getEntity(id); if (!e) return
+    const track = tracks.find(t => t.id === trackId)
+    if (!track || track.points.length < 2) return
+    const startPt = dir > 0 ? track.points[0] : track.points[track.points.length - 1]
+    patchEntity(id, {
+      lat: startPt.lat, lng: startPt.lng,
+      routePoints: track.points, routeIndex: dir > 0 ? 0 : track.points.length - 1,
+      routeMode: mode, routeDir: dir, routeLabel: track.label, routeVariance: 8,
+      status: 'going_to', paused: false,
+    })
+    log({ type: 'info', message: `[M] ${e.name} following ${track.label} (${mode})` })
+  }, [getEntity, log, patchEntity, tracks])
+
+  const sendToIncident = useCallback((id: string, incident: SimIncident) => {
+    const e = getEntity(id); if (!e) return
+    const label = incident.name ?? 'incident'
+    patchEntity(id, {
+      routePoints: [{ lat: e.lat, lng: e.lng }, { lat: incident.lat, lng: incident.lng }],
+      routeIndex: 0, routeMode: 'once', routeDir: 1, routeLabel: label,
+      status: 'going_to', assignedIncidentId: incident.id, paused: false,
+    })
+    void assignMedicDestination(eventId, e, { lat: incident.lat, lng: incident.lng, label }, log)
+    void respondToIncident(eventId, incident.id, e, log)
+    void setMedicStatus(eventId, e, 'going_to', log)
+  }, [eventId, getEntity, log, patchEntity])
+
+  const reportIncident = useCallback(async (id: string, at?: { lat: number; lng: number }, details?: { type?: string; severity?: string; description?: string }) => {
+    const e = getEntity(id); if (!e) return
+    const lat = at?.lat ?? e.lat
+    const lng = at?.lng ?? e.lng
+    const incId = await createIncidentAsMedic(eventId, e, lat, lng, details ?? {}, log)
+    if (incId) {
+      patchEntity(id, { assignedIncidentId: incId })
+      void refreshIncidents()
+    }
+  }, [eventId, getEntity, log, patchEntity, refreshIncidents])
+
+  const sendChat = useCallback((id: string, text: string) => {
+    const e = getEntity(id); if (!e || !e.assignedIncidentId || !text.trim()) return
+    void sendIncidentMessage(eventId, e.assignedIncidentId, e, text.trim(), log)
+  }, [eventId, getEntity, log])
+
+  // Map-mode click: send-here / add-waypoint / report-incident for the active medic.
+  onMapModeClickRef.current = (lat: number, lng: number) => {
+    const mode = mapModeRef.current
+    if (!mode) return
+    if (mode.kind === 'sendHere') sendMedicHere(mode.id, lat, lng)
+    else if (mode.kind === 'addWaypoint') { addWaypoint(mode.id, lat, lng); return /* keep mode for multi-add */ }
+    else if (mode.kind === 'report') void reportIncident(mode.id, { lat, lng })
+    setMapMode(null)
+  }
+  selectMedicRef.current = selectMedic
+  openMedicCtxRef.current = (x: number, y: number, id: string) => setMedicCtx({ x, y, id })
+
+  // Refresh the incident list when a medic is selected (for the "send to incident" picker).
+  useEffect(() => {
+    if (selectedId) void refreshIncidents()
+  }, [selectedId, refreshIncidents])
+
+  const selectedEntity = entities.find(e => e.id === selectedId && e.role === 'medic') ?? null
 
   // ─── Counts ──────────────────────────────────────────────────────────────────
 
@@ -472,6 +640,8 @@ export default function App() {
                 entities={entities.filter(e => e.role === 'medic')}
                 onRemove={removeEntity}
                 accentColor="#22c55e"
+                onSelect={selectMedic}
+                selectedId={selectedId}
               />
             </div>
           )}
@@ -629,6 +799,66 @@ export default function App() {
               </button>
             ))}
           </div>
+        )}
+
+        {/* Map-mode banner */}
+        {mapMode && (
+          <div style={{
+            position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 65,
+            background: 'rgba(245,158,11,0.95)', color: '#1a1206', borderRadius: 999,
+            padding: '9px 18px', fontSize: 12.5, fontWeight: 800, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            {mapMode.kind === 'sendHere' ? 'Click the map to send the medic there'
+              : mapMode.kind === 'addWaypoint' ? 'Click to queue waypoints — finish in the panel'
+              : 'Click the map to report an incident there'}
+            <button onClick={() => setMapMode(null)} style={{ border: 'none', background: 'rgba(0,0,0,0.18)', color: '#1a1206', borderRadius: 999, width: 22, height: 22, cursor: 'pointer', fontWeight: 900 }}>✕</button>
+          </div>
+        )}
+
+        {/* Medic marker context menu */}
+        {medicCtx && (() => {
+          const m = entities.find(e => e.id === medicCtx.id)
+          if (!m) return null
+          const items: Array<{ label: string; color: string; action: () => void }> = [
+            { label: 'Open control panel', color: '#e2e8f0', action: () => selectMedic(m.id) },
+            { label: 'Send here (pick on map)', color: '#22c55e', action: () => { selectMedic(m.id); setMapMode({ kind: 'sendHere', id: m.id }) } },
+            { label: m.paused ? 'Resume movement' : 'Freeze in place', color: '#f59e0b', action: () => patchEntity(m.id, { paused: !m.paused }) },
+            { label: m.offline ? 'Go online' : 'Go offline', color: '#64748b', action: () => patchEntity(m.id, { offline: !m.offline }) },
+            { label: 'Report incident here', color: '#ef4444', action: () => void reportIncident(m.id) },
+            { label: 'Remove medic', color: '#f87171', action: () => removeEntity(m.id) },
+          ]
+          return (
+            <div style={{ position: 'absolute', top: medicCtx.y, left: medicCtx.x, zIndex: 100, background: 'rgba(8,18,36,0.98)', border: '1px solid rgba(148,163,184,0.18)', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.55)', overflow: 'hidden', minWidth: 210 }}>
+              <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid rgba(148,163,184,0.08)', fontSize: 11, fontWeight: 800, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
+              {items.map(item => (
+                <button key={item.label} onClick={() => { item.action(); setMedicCtx(null) }} style={{ display: 'block', width: '100%', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 12.5, fontWeight: 700, color: item.color }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = `${item.color}14` }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none' }}>{item.label}</button>
+              ))}
+            </div>
+          )
+        })()}
+
+        {/* Medic control panel */}
+        {selectedEntity && (
+          <MedicControlPanel
+            medic={selectedEntity}
+            incidents={incidents}
+            tracks={tracks}
+            mapMode={mapMode}
+            onClose={() => selectMedic(null)}
+            onPatch={(patch) => patchEntity(selectedEntity.id, patch)}
+            onStatus={(s) => setMedicStatusFn(selectedEntity.id, s)}
+            onSetMapMode={setMapMode}
+            onSendToIncident={(inc) => sendToIncident(selectedEntity.id, inc)}
+            onFollowTrack={(tid, mode, dir) => followTrack(selectedEntity.id, tid, mode, dir)}
+            onClearRoute={() => clearMedicRoute(selectedEntity.id)}
+            onReportNow={(details) => void reportIncident(selectedEntity.id, undefined, details)}
+            onChat={(text) => sendChat(selectedEntity.id, text)}
+            onRefreshIncidents={refreshIncidents}
+            onRemove={() => { removeEntity(selectedEntity.id); selectMedic(null) }}
+          />
         )}
       </div>
 
@@ -852,10 +1082,12 @@ function SpeedDropdown({
   )
 }
 
-function EntityList({ entities, onRemove, accentColor }: {
+function EntityList({ entities, onRemove, accentColor, onSelect, selectedId }: {
   entities: SimEntity[]
   onRemove: (id: string) => void
   accentColor: string
+  onSelect?: (id: string) => void
+  selectedId?: string | null
 }) {
   if (entities.length === 0) return (
     <div style={{ textAlign: 'center', padding: '24px 0', color: '#334155', fontSize: 12 }}>
@@ -865,10 +1097,11 @@ function EntityList({ entities, onRemove, accentColor }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {entities.map(e => (
-        <div key={e.id} style={{
+        <div key={e.id} onClick={() => onSelect?.(e.id)} style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-          borderRadius: 10, background: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(148,163,184,0.06)',
+          borderRadius: 10, cursor: onSelect ? 'pointer' : 'default',
+          background: selectedId === e.id ? `${accentColor}1c` : 'rgba(255,255,255,0.03)',
+          border: `1px solid ${selectedId === e.id ? accentColor + '55' : 'rgba(148,163,184,0.06)'}`,
         }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
@@ -884,11 +1117,12 @@ function EntityList({ entities, onRemove, accentColor }: {
               {e.name}
             </div>
             <div style={{ fontSize: 10, color: e.joined ? accentColor : '#475569' }}>
-              {e.joined ? 'joined' : 'not joined'}{e.bibNumber ? ` · #${e.bibNumber}` : ''}
+              {e.offline ? 'offline' : e.paused ? 'frozen' : e.role === 'medic' ? (e.status ?? 'available') : e.joined ? 'joined' : 'not joined'}
+              {e.bibNumber ? ` · #${e.bibNumber}` : ''}{e.role === 'medic' && e.routeLabel ? ` · → ${e.routeLabel}` : ''}
             </div>
           </div>
           <button
-            onClick={() => onRemove(e.id)}
+            onClick={(ev) => { ev.stopPropagation(); onRemove(e.id) }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#334155', padding: 4 }}
             onMouseEnter={el => { (el.currentTarget as HTMLElement).style.color = '#ef4444' }}
             onMouseLeave={el => { (el.currentTarget as HTMLElement).style.color = '#334155' }}
