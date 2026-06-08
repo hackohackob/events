@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useCallback, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Info, Trash2, Eye, EyeOff, Check, X, Copy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info, Trash2, Eye, EyeOff, Check, X, Copy, Mountain, TrendingUp } from 'lucide-react'
+import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, PointOfInterest, POIType } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
@@ -35,6 +36,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
   const [editingPoiDescription, setEditingPoiDescription] = useState('')
   const [showAllDays, setShowAllDays] = useState(false)
   const [copyConfirmDayId, setCopyConfirmDayId] = useState<string | null>(null)
+  const [profileTrackId, setProfileTrackId] = useState<string | null>(null)
 
   const selectedDay = data.days.find(d => d.id === selectedDayId) || data.days[0]
   const dayIndex = data.days.findIndex(d => d.id === selectedDayId)
@@ -58,6 +60,9 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
       name: disc.name,
       color: disc.color,
       coordinates: disc.gpxCoordinates?.length ? disc.gpxCoordinates : [],
+      elevationProfile: disc.elevationProfile ?? [],
+      distance: disc.distance,
+      elevation: disc.elevation,
     })).filter(t => t.coordinates.length > 0),
   })), [data.days])
 
@@ -65,6 +70,8 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
   const allTracks = dayTracks.flatMap(g => g.tracks)
 
   const visibleTracks = showAllDays ? allTracks : selectedDayTracks
+
+  const profileTrack = profileTrackId ? allTracks.find(t => t.id === profileTrackId) ?? null : null
 
   const visibleTrackIds = useMemo(() => {
     if (visibleTracks.length === 0) return undefined
@@ -410,21 +417,37 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
               <div className="space-y-1">
                 {selectedDayTracks.map(track => {
                   const visible = !hiddenTrackIds.has(track.id)
+                  const hasProfile = (track.elevationProfile?.length ?? 0) > 1
+                  const profileOpen = profileTrackId === track.id
                   return (
-                    <button
+                    <div
                       key={track.id}
-                      onClick={() => toggleTrack(track.id)}
-                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left"
+                      className="w-full flex items-center gap-1.5 px-2.5 py-2 rounded-xl transition-all"
                       style={{
                         background: visible ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
-                        border: `1px solid ${visible ? track.color + '40' : 'rgba(148,163,184,0.06)'}`,
+                        border: `1px solid ${profileOpen ? track.color + '70' : visible ? track.color + '40' : 'rgba(148,163,184,0.06)'}`,
                         opacity: visible ? 1 : 0.5,
                       }}
                     >
-                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: track.color }} />
-                      <div className="flex-1 text-xs font-medium text-slate-300 truncate">{track.name}</div>
-                      {visible ? <Eye className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#64748b' }} /> : <EyeOff className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#475569' }} />}
-                    </button>
+                      <button onClick={() => toggleTrack(track.id)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left">
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: track.color }} />
+                        <div className="flex-1 text-xs font-medium text-slate-300 truncate">{track.name}</div>
+                        {visible ? <Eye className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#64748b' }} /> : <EyeOff className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#475569' }} />}
+                      </button>
+                      {hasProfile && (
+                        <button
+                          onClick={() => setProfileTrackId(profileOpen ? null : track.id)}
+                          title="Show elevation profile"
+                          className="p-1 rounded-lg flex-shrink-0 transition-all"
+                          style={{
+                            background: profileOpen ? track.color + '22' : 'transparent',
+                            color: profileOpen ? track.color : '#64748b',
+                          }}
+                        >
+                          <TrendingUp className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   )
                 })}
               </div>
@@ -490,6 +513,64 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
             fitBounds={trackBounds?.bounds}
           />
         </div>
+
+        {/* Elevation profile panel (toggled from the TRACKS list) */}
+        {profileTrack && (profileTrack.elevationProfile?.length ?? 0) > 1 && (
+          <div
+            className="h-[150px] flex-shrink-0 p-4"
+            style={{ background: 'rgba(10,18,34,0.95)', borderTop: '1px solid rgba(148,163,184,0.08)' }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Mountain className="w-3.5 h-3.5" style={{ color: profileTrack.color }} />
+                <span className="text-xs font-medium text-slate-300">Elevation Profile — {profileTrack.name}</span>
+                <span className="text-xs" style={{ color: '#64748b' }}>
+                  {Math.round(profileTrack.elevation).toLocaleString()} m gain · {profileTrack.distance} km
+                </span>
+              </div>
+              <button
+                onClick={() => setProfileTrackId(null)}
+                className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+                title="Hide elevation profile"
+              >
+                <X className="w-3.5 h-3.5" style={{ color: '#64748b' }} />
+              </button>
+            </div>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={profileTrack.elevationProfile} margin={{ top: 0, right: 0, bottom: 12, left: 0 }}>
+                <defs>
+                  <linearGradient id="poiElevGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={profileTrack.color} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={profileTrack.color} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="distance" hide />
+                <YAxis hide domain={['auto', 'auto']} />
+                <Tooltip
+                  contentStyle={{
+                    background: 'rgba(10,20,36,0.95)',
+                    border: '1px solid rgba(148,163,184,0.15)',
+                    borderRadius: '10px',
+                    fontSize: '11px',
+                    color: '#f1f5f9',
+                  }}
+                  formatter={(v: number) => [`${v} m`, 'Elevation']}
+                  labelFormatter={(l: number) => `${Number(l).toFixed(1)} km`}
+                />
+                <Area
+                  type="linear"
+                  dataKey="elevation"
+                  stroke={profileTrack.color}
+                  strokeWidth={1.5}
+                  fill="url(#poiElevGrad)"
+                  dot={false}
+                  isAnimationActive={false}
+                  activeDot={{ r: 4, fill: profileTrack.color, stroke: 'white', strokeWidth: 2 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
         {/* POI summary bar */}
         <div
