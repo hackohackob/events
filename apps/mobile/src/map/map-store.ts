@@ -28,6 +28,8 @@ interface Marker {
   incidentType?: string;
   /** Server-relative photo path attached to an incident, if any. */
   photoUrl?: string;
+  /** Display name of whoever reported the incident. */
+  reportedBy?: string;
 }
 
 export interface RaceTrack {

@@ -47,6 +47,8 @@ import { AssignDestinationBar } from "./AssignDestinationBar";
 import { IncidentActions } from "./IncidentActions";
 import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
+import { SettingsScreen } from "../settings/SettingsScreen";
+import { useSettingsStore } from "../settings/settings-store";
 import { archivePoi, type PoiDto } from "../ui/event-actions";
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
@@ -149,6 +151,7 @@ interface IncidentResponse {
   photoUrl?: string;
   responders?: string[];
   createdBy?: string;
+  reportedBy?: string;
 }
 
 function incidentToMarker(incident: IncidentResponse) {
@@ -164,6 +167,7 @@ function incidentToMarker(incident: IncidentResponse) {
     status: incident.status,
     incidentType: incident.type,
     photoUrl: incident.photoUrl,
+    reportedBy: incident.reportedBy,
   };
 }
 
@@ -1365,7 +1369,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [incidentTab, setIncidentTab] = useState<IncidentTab>("details");
-  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "profile">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "settings" | "profile">("map");
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2038,7 +2042,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       { latitude: end.lat, longitude: end.lng },
     ]);
   }, [focusedTrack, trackProfileProgress]);
-  const trackRenderOffsetOverride = trackModeActive ? 0 : null;
+  // When the user disables track offsetting, overlapping routes draw on top of
+  // each other (offset 0) instead of side by side.
+  const trackOffsetEnabled = useSettingsStore((s) => s.trackOffsetEnabled);
+  const trackRenderOffsetOverride = trackModeActive || !trackOffsetEnabled ? 0 : null;
   const trackLineOffsetValue = (lineOffset: number): any => {
     if (trackRenderOffsetOverride !== null) {
       return trackRenderOffsetOverride;
@@ -2912,6 +2919,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <Pressable
             style={styles.menuPageRow}
             onPress={() => {
+              setActiveTab("settings");
+              setMenuOpen(false);
+            }}
+          >
+            <Feather name="settings" size={18} color="#34d399" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Settings</Text>
+              <Text style={styles.menuPageSubtitle}>Map display & location tracking</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
               setActiveTab("debug");
               setMenuOpen(false);
             }}
@@ -3315,6 +3336,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                         <Text style={styles.sheetInfoValue}>{incidentStatusLabel(selectedIncident.status)}</Text>
                       </View>
                       <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Reported by</Text>
+                        <Text style={styles.sheetInfoValue}>{selectedIncident.reportedBy ?? "Unknown"}</Text>
+                      </View>
+                      <View style={styles.sheetInfoRow}>
                         <Text style={styles.sheetInfoLabel}>Incident notes</Text>
                         <Text style={styles.sheetInfoValue}>{selectedIncident.description ?? "No notes yet."}</Text>
                       </View>
@@ -3507,6 +3532,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {activeTab === "debug" ? (
         <View style={styles.tabOverlay}>
           <DebugScreen />
+        </View>
+      ) : null}
+      {activeTab === "settings" ? (
+        <View style={styles.tabOverlay}>
+          <SettingsScreen onClose={() => setActiveTab("map")} />
         </View>
       ) : null}
 

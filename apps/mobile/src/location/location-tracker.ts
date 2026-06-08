@@ -1,16 +1,44 @@
 import * as ExpoLocation from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as Battery from "expo-battery";
+import { Linking, Platform } from "react-native";
 import { apiFetch } from "../ui/api-client";
 import { getSocket } from "../realtime/socket-client";
 import { useSessionStore } from "../security/session-store";
 import { OfflineQueue } from "../offline/offline-queue";
 import { debugLog } from "../debug/debug-log";
 import { useLocationStatus } from "../debug/location-status";
+import { useSettingsStore } from "../settings/settings-store";
 
 export const LOCATION_TASK_NAME = "background-location-task";
 
 const locationQueue = new OfflineQueue<Record<string, unknown>>();
+let openedBackgroundLocationSettings = false;
+
+// ─── Accuracy gating ─────────────────────────────────────────────────────────
+// Drop fixes that are too imprecise to be useful so the map/server never get a
+// position that's off by hundreds of metres.
+const MAX_ACCURACY_M = 200;
+const RELATIVE_RECENCY_MS = 10 * 60_000;
+let lastAcceptedAccuracy: number | null = null;
+let lastAcceptedAt: number | null = null;
+
+/** Returns a reason string if the fix should be dropped, otherwise null. */
+function accuracyRejectReason(accuracy?: number): string | null {
+  if (accuracy == null) return null; // no accuracy reported → can't judge, allow
+  if (accuracy > MAX_ACCURACY_M) return `accuracy ${Math.round(accuracy)}m > ${MAX_ACCURACY_M}m`;
+  // Much broader than a recent good fix → likely a bad sample; keep the good one.
+  if (
+    lastAcceptedAccuracy != null &&
+    lastAcceptedAt != null &&
+    Date.now() - lastAcceptedAt < RELATIVE_RECENCY_MS &&
+    accuracy > lastAcceptedAccuracy * 2.5 &&
+    accuracy > 60
+  ) {
+    return `accuracy ${Math.round(accuracy)}m ≫ last ${Math.round(lastAcceptedAccuracy)}m`;
+  }
+  return null;
+}
 
 async function readBatteryLevel(): Promise<number | undefined> {
   try {
@@ -29,6 +57,18 @@ async function readBatteryLevel(): Promise<number | undefined> {
 async function sendLocation(location: ExpoLocation.LocationObject): Promise<void> {
   const session = useSessionStore.getState();
   const isMedic = session.role === "medic" || session.role === "paramedic";
+
+  // Gate on accuracy before doing anything — a too-broad fix is worse than none.
+  const accuracy = location.coords.accuracy ?? undefined;
+  const rejectReason = accuracyRejectReason(accuracy);
+  if (rejectReason) {
+    debugLog("location", "warn", "location dropped — too imprecise", rejectReason);
+    useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "skipped", error: rejectReason });
+    return;
+  }
+  lastAcceptedAccuracy = accuracy ?? lastAcceptedAccuracy;
+  lastAcceptedAt = Date.now();
+
   const battery = await readBatteryLevel();
 
   useLocationStatus.getState().setFix({
@@ -143,54 +183,71 @@ export async function sendCurrentLocationNow(): Promise<void> {
   }
 }
 
-export async function startLocationLoop(): Promise<void> {
+export async function requestAlwaysLocationPermission(): Promise<boolean> {
+  const { status: fgStatus } = await ExpoLocation.requestForegroundPermissionsAsync();
+  if (fgStatus !== "granted") {
+    debugLog("location", "error", "foreground location permission denied");
+    return false;
+  }
+
+  const { status: bgStatus } = await ExpoLocation.requestBackgroundPermissionsAsync();
+  if (bgStatus === "granted") return true;
+
+  debugLog("location", "warn", "background location permission not granted", { status: bgStatus });
+  if (Platform.OS === "android" && !openedBackgroundLocationSettings) {
+    openedBackgroundLocationSettings = true;
+    debugLog("location", "info", "opening app settings for Allow all the time location permission");
+    await Linking.openSettings();
+  }
+  return false;
+}
+
+export async function startLocationLoop(): Promise<boolean> {
   const session = useSessionStore.getState();
   const isMedic = session.role === "medic" || session.role === "paramedic";
 
-  // 1. Foreground permission (required before asking for background)
-  const { status: fgStatus } = await ExpoLocation.requestForegroundPermissionsAsync();
-  if (fgStatus !== "granted") {
-    console.warn("[LocationTracker] foreground location permission denied");
-    debugLog("location", "error", "foreground location permission denied");
-    return;
-  }
+  if (!(await requestAlwaysLocationPermission())) return false;
 
-  // 2. Background permission (Android shows a system dialog)
-  const { status: bgStatus } = await ExpoLocation.requestBackgroundPermissionsAsync();
-  if (bgStatus !== "granted") {
-    console.warn("[LocationTracker] background location permission denied — updates will stop when app is backgrounded");
-    debugLog("location", "warn", "background location permission denied");
-  }
+  try {
+    // 3. Stop any previously running task before (re)starting
+    const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    if (running) {
+      await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+    }
 
-  // 3. Stop any previously running task before (re)starting
-  const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-  if (running) {
-    await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-  }
+    // 4. Start continuous background updates. Android treats timeInterval as
+    // best-effort, but distanceInterval 0 avoids suppressing stationary users.
+    const intervalMs = useSettingsStore.getState().locationIntervalMs;
+    await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+      accuracy: isMedic ? ExpoLocation.Accuracy.Balanced : ExpoLocation.Accuracy.Low,
+      timeInterval: intervalMs,
+      distanceInterval: 0,
+      foregroundService: {
+        notificationTitle: "Paramedic Event App",
+        notificationBody: isMedic
+          ? "Sharing your location with the event command centre"
+          : "Sharing location with event coordinators",
+        notificationColor: "#00C37A",
+        killServiceOnDestroy: false,
+      },
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+    });
 
-  // 4. Start continuous background updates
-  await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-    accuracy: isMedic ? ExpoLocation.Accuracy.Balanced : ExpoLocation.Accuracy.Low,
-    timeInterval: isMedic ? 30_000 : 60_000,   // ms between updates
-    // distanceInterval 0 for medics → purely time-based, so a stationary medic
-    // still reports on the timer instead of waiting to physically move.
-    distanceInterval: isMedic ? 0 : 50,        // min metres between updates
-    // Android foreground service — keeps the task alive and shows a notification
-    foregroundService: {
-      notificationTitle: "Paramedic Event App",
-      notificationBody: isMedic
-        ? "Sharing your location with the event command centre"
-        : "Sharing location with event coordinators",
-      notificationColor: "#00C37A",
-    },
-    // iOS: show the blue location indicator when in background
-    showsBackgroundLocationIndicator: true,
-    pausesUpdatesAutomatically: false,
-  });
-  debugLog("location", "info", "background location updates started", { isMedic });
+    const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    if (!registered) {
+      debugLog("location", "error", "background location task did not register after start");
+      return false;
+    }
+    debugLog("location", "info", "background location updates started", { isMedic });
+  } catch (err) {
+    debugLog("location", "error", "background location updates failed to start", String(err));
+    return false;
+  }
 
   // 5. Fire an immediate one-shot send so the map shows a position right away.
   void sendCurrentLocationNow();
+  return true;
 }
 
 export async function stopLocationLoop(): Promise<void> {

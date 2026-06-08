@@ -39,6 +39,20 @@ const config: ExpoConfig = {
     },
   },
   plugins: [
+    [
+      "expo-location",
+      {
+        isAndroidBackgroundLocationEnabled: true,
+        isAndroidForegroundServiceEnabled: true,
+        isIosBackgroundLocationEnabled: true,
+        locationAlwaysAndWhenInUsePermission:
+          "Allow Paramedic Event App to share your location with event command while you are on duty.",
+        locationAlwaysPermission:
+          "Allow Paramedic Event App to share your location with event command while you are on duty.",
+        locationWhenInUsePermission:
+          "Allow Paramedic Event App to use your location while reporting incidents and viewing the event map.",
+      },
+    ],
     "@maplibre/maplibre-react-native",
     [
       "expo-build-properties",

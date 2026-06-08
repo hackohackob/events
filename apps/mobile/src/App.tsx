@@ -10,10 +10,11 @@ import { flushIncidentQueue } from "./incidents/flush-incidents";
 import { startIncidentReport } from "./incidents/start-report";
 import { useIncidentStore } from "./incidents/incident-store";
 import { startLocationLoop, sendCurrentLocationNow } from "./location/location-tracker";
-import { showTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
+import { showTrackingNotification, hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken } from "./notifications/push-registration";
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
+import { useSettingsStore } from "./settings/settings-store";
 
 function GlobalToast() {
   const toastMessage = useIncidentStore((s) => s.toastMessage);
@@ -69,13 +70,19 @@ export default function App() {
 
   useEffect(() => {
     void hydrate();
+    void useSettingsStore.getState().hydrate();
   }, [hydrate]);
 
   useEffect(() => {
     if (!token) return;
 
-    void startLocationLoop();
-    void showTrackingNotification(role === "medic" || role === "paramedic");
+    void startLocationLoop().then((started) => {
+      if (started) {
+        void showTrackingNotification(role === "medic" || role === "paramedic");
+      } else {
+        void hideTrackingNotification();
+      }
+    });
     // Register for push so the backend can alert this device when the app is closed.
     void registerPushToken();
     // If the app was launched by tapping an incident notification, focus it.

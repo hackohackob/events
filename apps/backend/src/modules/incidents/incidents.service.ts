@@ -20,6 +20,7 @@ export interface IncidentRecord {
   photoUrl?: string;
   status: IncidentStatus;
   createdBy: string;
+  reportedBy?: string;
   createdAt: string;
   updatedAt: string;
   responders: string[];
@@ -54,6 +55,7 @@ interface IncidentRow {
   photo_url: string | null;
   status: string;
   created_by: string;
+  reporter_name: string | null;
   created_at: string;
   updated_at: string;
   responders: string[];
@@ -82,6 +84,7 @@ function rowToRecord(r: IncidentRow): IncidentRecord {
     photoUrl: r.photo_url ?? undefined,
     status: r.status as IncidentStatus,
     createdBy: r.created_by,
+    reportedBy: r.reporter_name ?? undefined,
     createdAt: typeof r.created_at === "string" ? r.created_at : new Date(r.created_at).toISOString(),
     updatedAt: typeof r.updated_at === "string" ? r.updated_at : new Date(r.updated_at).toISOString(),
     responders: Array.isArray(r.responders) ? r.responders : [],
@@ -130,6 +133,7 @@ export class IncidentsService implements OnModuleInit {
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS photo_url  TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS status     TEXT NOT NULL DEFAULT 'open'`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reporter_name TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS responders JSONB NOT NULL DEFAULT '[]'`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS name       TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS vitals     TEXT`,
@@ -225,6 +229,23 @@ export class IncidentsService implements OnModuleInit {
     `);
   }
 
+  /** Resolve a human-readable reporter name from the creator's id. */
+  private async resolveReporterName(eventId: string, userId: string): Promise<string> {
+    if (!userId || userId === "system") return "Dashboard";
+    // App medics carry their event_medics.id as the session userId.
+    const medic = await this.db.query<{ name: string }>(
+      `SELECT name FROM event_medics WHERE id::text = $1 AND event_id = $2`,
+      [userId, eventId],
+    );
+    if (medic.rows[0]?.name) return medic.rows[0].name;
+    // Dashboard / admin users live in the users table.
+    const user = await this.db
+      .query<{ name: string }>(`SELECT name FROM users WHERE id::text = $1`, [userId])
+      .catch(() => ({ rows: [] as { name: string }[] }));
+    if (user.rows[0]?.name) return user.rows[0].name;
+    return "Dashboard";
+  }
+
   async create(eventId: string, userId: string, input: CreateIncidentDto): Promise<IncidentRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -237,10 +258,12 @@ export class IncidentsService implements OnModuleInit {
     const sequence = Number(countRows[0]?.count ?? 0) + 1;
     const name = `Incident ${sequence}`;
 
+    const reporterName = await this.resolveReporterName(eventId, userId);
+
     const { rows } = await this.db.query<IncidentRow>(
       `INSERT INTO incidents
-         (id, event_id, name, lat, lng, type, description, severity, photo_url, status, created_by, created_at, updated_at, responders)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10, $11, $11, '[]')
+         (id, event_id, name, lat, lng, type, description, severity, photo_url, status, created_by, reporter_name, created_at, updated_at, responders)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10, $11, $12, $12, '[]')
        RETURNING *`,
       [
         id,
@@ -253,6 +276,7 @@ export class IncidentsService implements OnModuleInit {
         input.severity ?? null,
         input.photoUrl ?? null,
         userId,
+        reporterName,
         now,
       ],
     );

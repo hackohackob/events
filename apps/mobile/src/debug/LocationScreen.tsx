@@ -2,9 +2,15 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as ExpoLocation from "expo-location";
 import * as Battery from "expo-battery";
-import { LOCATION_TASK_NAME, sendCurrentLocationNow } from "../location/location-tracker";
+import Constants from "expo-constants";
+import {
+  LOCATION_TASK_NAME,
+  requestAlwaysLocationPermission,
+  sendCurrentLocationNow,
+  startLocationLoop,
+} from "../location/location-tracker";
 import * as TaskManager from "expo-task-manager";
-import { isBatteryOptimizationIgnored } from "../location/battery-optimization";
+import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "../location/battery-optimization";
 import { resolveLocalhostUrl } from "../ui/runtime-host";
 import { useLocationStatus } from "./location-status";
 import { freshnessLabel } from "../map/freshness";
@@ -13,6 +19,7 @@ import { useSessionStore } from "../security/session-store";
 const API_BASE_URL = resolveLocalhostUrl(
   process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
 );
+const ANDROID_PACKAGE = Constants.expoConfig?.android?.package ?? "com.a.atanasov.paramediceventapp";
 
 function Row({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" | "bad" }) {
   const color = tone === "ok" ? "#22ff88" : tone === "warn" ? "#f5c518" : tone === "bad" ? "#ff6b6b" : "#cdd9e8";
@@ -140,6 +147,33 @@ export function LocationScreen() {
           tone={battOpt ? "ok" : "bad"}
         />
         <Row label="Device battery" value={battery != null ? `${Math.round(battery * 100)}%` : "unknown"} />
+        <Pressable
+          style={styles.btn}
+          onPress={async () => {
+            await requestAlwaysLocationPermission();
+            await refreshDiagnostics();
+          }}
+        >
+          <Text style={styles.btnText}>Request Allow all the time location</Text>
+        </Pressable>
+        <Pressable
+          style={styles.btn}
+          onPress={async () => {
+            await requestDisableBatteryOptimization(ANDROID_PACKAGE);
+            await refreshDiagnostics();
+          }}
+        >
+          <Text style={styles.btnText}>Open battery optimization settings</Text>
+        </Pressable>
+        <Pressable
+          style={styles.btn}
+          onPress={async () => {
+            await startLocationLoop();
+            await refreshDiagnostics();
+          }}
+        >
+          <Text style={styles.btnText}>Restart tracking</Text>
+        </Pressable>
       </Section>
 
       <Section title="SERVER">

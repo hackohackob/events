@@ -11,7 +11,7 @@ export interface LocationFix {
 export interface LocationReport {
   at: number; // epoch ms of the attempt
   ok: boolean;
-  via: "ws" | "http" | "queue";
+  via: "ws" | "http" | "queue" | "skipped";
   error?: string;
 }
 

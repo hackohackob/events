@@ -139,6 +139,11 @@ export default function IncidentDrawer({
                 )}
               </div>
 
+              <div>
+                <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: '#475569' }}>REPORTED BY</div>
+                <div className="text-sm text-slate-300">{incident.reportedBy ?? 'Unknown'}</div>
+              </div>
+
               {/* Casualty handover (when closed) */}
               {(incident.vitals || incident.treatment || incident.transport) && (
                 <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.18)' }}>

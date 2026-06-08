@@ -35,6 +35,7 @@ export interface LiveIncident {
   photoUrl?: string
   status: string
   responders?: string[]
+  reportedBy?: string
   vitals?: string
   treatment?: string
   transport?: string
@@ -61,6 +62,7 @@ function toLiveIncident(inc: any): LiveIncident {
     photoUrl: inc.photoUrl,
     status: inc.status ?? 'open',
     responders: inc.responders,
+    reportedBy: inc.reportedBy,
     vitals: inc.vitals,
     treatment: inc.treatment,
     transport: inc.transport,
