@@ -36,35 +36,60 @@
             "type": "base-medical-camp",
             "lng": 22.878325419155743,
             "lat": 43.38592409592411,
-            "name": "Base Medical Camp1"
+            "name": "Base Medical Camp1",
+            "id": "b6a46f13-119c-4afc-b5ff-f479da1cfe7e",
+            "archived": true
           },
           {
             "type": "base-medical-camp",
             "lng": 22.692600650449634,
             "lat": 43.52892032881954,
-            "name": "Base Medical Camp2"
+            "name": "Base Medical Camp2",
+            "id": "99508d95-9acc-4312-9580-4a087e832fb3",
+            "archived": true
           },
           {
             "type": "ambulance",
             "lng": 22.778357469773084,
             "lat": 43.50155668702712,
-            "name": "Ambulance1"
+            "name": "Ambulance1",
+            "id": "c8250772-e618-4aff-a309-382144a46657"
           },
           {
             "type": "ambulance",
             "lng": 22.77518443321742,
             "lat": 43.59251209609306,
-            "name": "Ambulance2"
+            "name": "Ambulance2",
+            "id": "37c4bdbd-c41d-4e1e-9ca3-f4ba5d5c7c1e",
+            "archived": true
           },
           {
             "type": "water-point",
             "lng": 22.68811260553366,
-            "lat": 43.523826247995146
+            "lat": 43.523826247995146,
+            "id": "a8af45f1-6f37-48fa-927c-e7d215e94894",
+            "archived": true
           },
           {
             "type": "mrs",
             "lng": 22.887047254714645,
-            "lat": 43.46422333592133
+            "lat": 43.46422333592133,
+            "id": "4e6bf1e7-b193-4123-964f-45af52e24d6c"
+          },
+          {
+            "id": "5ec9f0f4-1e8f-431d-bb0a-d40da580b405",
+            "type": "parking",
+            "lat": 42.76437367205284,
+            "lng": 23.39525779483654,
+            "archived": true
+          },
+          {
+            "id": "7b7e0bf5-abb0-41bc-b549-25a98c37f974",
+            "type": "custom",
+            "lat": 42.7174950022123,
+            "lng": 23.427787780455418,
+            "name": "тест",
+            "archived": true
           }
         ],
         "assignments": [
@@ -100,33 +125,42 @@
             "type": "base-medical-camp",
             "lng": 22.878325419155743,
             "lat": 43.38592409592411,
-            "name": "Base Medical Camp3"
+            "name": "Base Medical Camp3",
+            "id": "607e7556-1a68-48e1-a5ec-35b241c9e295",
+            "archived": true
           },
           {
             "type": "base-medical-camp",
             "lng": 22.67216696311661,
             "lat": 43.60444476776942,
-            "name": "Base Medical Camp4"
+            "name": "Base Medical Camp4",
+            "id": "910145bb-9c32-4206-9de6-afbfb58c0e27",
+            "archived": true
           },
           {
             "type": "ambulance",
             "lng": 22.778357469773084,
-            "lat": 43.50155668702712
+            "lat": 43.50155668702712,
+            "id": "c41227f7-4034-4767-9d61-36687ee0dc48"
           },
           {
             "type": "ambulance",
             "lng": 22.733564336388184,
-            "lat": 43.656339168622
+            "lat": 43.656339168622,
+            "id": "ec9aad05-b048-495f-8192-39898d37e397"
           },
           {
             "type": "water-point",
             "lng": 22.676431461233108,
-            "lat": 43.59942655622564
+            "lat": 43.59942655622564,
+            "id": "8e021990-b2a0-498a-b9ae-393938e807bc"
           },
           {
             "type": "mrs",
             "lng": 22.78304391413218,
-            "lat": 43.605988748648684
+            "lat": 43.605988748648684,
+            "id": "84649998-868f-4fad-98ee-705755d35014",
+            "archived": true
           }
         ],
         "assignments": [
@@ -194,18 +228,21 @@
             "type": "base-medical-camp",
             "lng": 22.77749293235678,
             "lat": 43.49998211141863,
-            "name": "Base Medical Camp1"
+            "name": "Base Medical Camp1",
+            "id": "ce7cb9ca-8f53-41ea-aaca-2760b8319786"
           },
           {
             "type": "base-medical-camp",
             "lng": 22.87531331034066,
             "lat": 43.38517650361473,
-            "name": "Base Medical Camp2"
+            "name": "Base Medical Camp2",
+            "id": "b4e94f43-6b9f-4f31-9144-507e2bf26452"
           },
           {
             "type": "parking",
             "lng": 22.88111999944539,
-            "lat": 43.38387802038645
+            "lat": 43.38387802038645,
+            "id": "4a7ef82f-21c9-4faf-b973-20fbc2c07848"
           }
         ],
         "assignments": [
@@ -240,18 +277,21 @@
             "type": "base-medical-camp",
             "lng": 22.78374628985256,
             "lat": 43.49917210123422,
-            "name": "Base Medical Camp1"
+            "name": "Base Medical Camp1",
+            "id": "56c5cecb-5364-4548-8073-d320a1205d6b"
           },
           {
             "type": "base-medical-camp",
             "lng": 22.87531331034066,
             "lat": 43.38517650361473,
-            "name": "Base Medical Camp2"
+            "name": "Base Medical Camp2",
+            "id": "c18dbf72-8548-4ba4-ab43-666f709ae3c7"
           },
           {
             "type": "parking",
             "lng": 22.88111999944539,
-            "lat": 43.38387802038645
+            "lat": 43.38387802038645,
+            "id": "809e5b3f-078d-439c-b810-1b78e8c3e56b"
           }
         ],
         "assignments": [
@@ -305,47 +345,56 @@
           {
             "type": "base-medical-camp",
             "lng": 22.87682364470035,
-            "lat": 43.38544498778768
+            "lat": 43.38544498778768,
+            "id": "c879a2e9-1e29-4203-a243-a4f24c42691f"
           },
           {
             "type": "base-medical-camp",
             "lng": 22.776765355301677,
-            "lat": 43.50314646836037
+            "lat": 43.50314646836037,
+            "id": "faee9ddc-e0f4-4ab9-8546-d5336d836307"
           },
           {
             "type": "base-medical-camp",
             "lng": 22.77291695955563,
-            "lat": 43.59240461196427
+            "lat": 43.59240461196427,
+            "id": "f423de4c-1034-425b-9eea-a4241b51f8b9"
           },
           {
             "type": "ambulance",
             "lng": 22.782429121335355,
-            "lat": 43.50170256862998
+            "lat": 43.50170256862998,
+            "id": "75fe6e64-0e07-4e1e-a545-87d15856b1a9"
           },
           {
             "type": "ambulance",
             "lng": 22.692251666875762,
-            "lat": 43.52828069060408
+            "lat": 43.52828069060408,
+            "id": "64dd1ba6-9124-48eb-9bcb-206fce8576e0"
           },
           {
             "type": "water-point",
             "lng": 22.780500191828224,
-            "lat": 43.505200358729184
+            "lat": 43.505200358729184,
+            "id": "f13bd977-6bf6-4559-a211-79c97e9d9582"
           },
           {
             "type": "water-point",
             "lng": 22.77905349469785,
-            "lat": 43.594325528908485
+            "lat": 43.594325528908485,
+            "id": "114c14a2-218f-4f1b-a2d6-436c08957a30"
           },
           {
             "type": "wc",
             "lng": 22.785921748615294,
-            "lat": 43.503866778481466
+            "lat": 43.503866778481466,
+            "id": "976defcf-4974-447c-9222-87f21239947b"
           },
           {
             "type": "parking",
             "lng": 22.8808049214733,
-            "lat": 43.37915382955222
+            "lat": 43.37915382955222,
+            "id": "7f25adf8-aad4-4518-b1aa-b6bb8a1eaca3"
           }
         ],
         "assignments": [

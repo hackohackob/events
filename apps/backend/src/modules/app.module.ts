@@ -5,6 +5,7 @@ import { AuthModule } from "./auth/auth.module";
 import { CommonModule } from "./common/common.module";
 import { ExampleDataModule } from "./example-data/example-data.module";
 import { EventsModule } from "./events/events.module";
+import { FieldGuideModule } from "./field-guide/field-guide.module";
 import { EventUsersModule } from "./event-users/event-users.module";
 import { HealthModule } from "./health/health.module";
 import { IncidentsModule } from "./incidents/incidents.module";
@@ -14,6 +15,7 @@ import { MapModule } from "./map/map.module";
 import { MedicsModule } from "./medics/medics.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { RealtimeModule } from "./realtime/realtime.module";
+import { RoutingModule } from "./routing/routing.module";
 import { SearchModule } from "./search/search.module";
 import { UnitsModule } from "./units/units.module";
 import { UsersModule } from "./users/users.module";
@@ -27,6 +29,7 @@ import { UsersModule } from "./users/users.module";
     HealthModule,
     AuthModule,
     EventsModule,
+    FieldGuideModule,
     EventUsersModule,
     LocationsModule,
     MapModule,
@@ -35,6 +38,7 @@ import { UsersModule } from "./users/users.module";
     IncidentsModule,
     AssignmentsModule,
     RealtimeModule,
+    RoutingModule,
     SearchModule,
     UnitsModule,
     UsersModule,

@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Info, Trash2, Eye, EyeOff, Check, X, Copy, M
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, PointOfInterest, POIType } from '@/lib/types'
-import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
+import { POI_CONFIGS, MAP_CENTER, CUSTOM_POI_ICONS } from '@/lib/constants'
 import { computeTrackBounds } from '@/lib/utils'
 
 interface Props {
@@ -26,14 +26,43 @@ const POI_ICON_LABEL: Record<string, string> = {
   'custom': '★',
 }
 
+/** Grid of selectable glyphs for a custom point of interest. */
+function IconPicker({ value, onChange }: { value: string; onChange: (icon: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {CUSTOM_POI_ICONS.map(opt => {
+        const active = value === opt.icon
+        return (
+          <button
+            key={opt.icon}
+            type="button"
+            onClick={() => onChange(opt.icon)}
+            title={opt.label}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-base transition-all"
+            style={{
+              background: active ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
+              border: active ? '1px solid rgba(34,197,94,0.5)' : '1px solid rgba(148,163,184,0.12)',
+            }}
+          >
+            {opt.icon}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function PointsOfInterestStep({ data, update, onNext, onBack }: Props) {
   const [selectedDayId, setSelectedDayId] = useState(data.days[0]?.id || '')
   const [selectedType, setSelectedType] = useState<POIType | null>(null)
   const [customPoiName, setCustomPoiName] = useState('')
+  const [customPoiIcon, setCustomPoiIcon] = useState(CUSTOM_POI_ICONS[0].icon)
   const [hiddenTrackIds, setHiddenTrackIds] = useState<Set<string>>(new Set())
   const [editingPoiId, setEditingPoiId] = useState<string | null>(null)
   const [editingPoiName, setEditingPoiName] = useState('')
   const [editingPoiDescription, setEditingPoiDescription] = useState('')
+  const [editingPoiIcon, setEditingPoiIcon] = useState<string | undefined>(undefined)
+  const [hoverElevIndex, setHoverElevIndex] = useState<number | null>(null)
   const [showAllDays, setShowAllDays] = useState(false)
   const [copyConfirmDayId, setCopyConfirmDayId] = useState<string | null>(null)
   const [profileTrackId, setProfileTrackId] = useState<string | null>(null)
@@ -73,6 +102,15 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
 
   const profileTrack = profileTrackId ? allTracks.find(t => t.id === profileTrackId) ?? null : null
 
+  // Map the elevation-chart hover index → a coordinate on the track, so a dot
+  // follows the cursor along the course (matching the Disciplines step).
+  const hoverCoord: [number, number] | undefined =
+    hoverElevIndex !== null && profileTrack && profileTrack.coordinates.length > 0 && (profileTrack.elevationProfile?.length ?? 0) > 1
+      ? profileTrack.coordinates[
+          Math.round((hoverElevIndex / Math.max((profileTrack.elevationProfile?.length ?? 1) - 1, 1)) * (profileTrack.coordinates.length - 1))
+        ]
+      : undefined
+
   const visibleTrackIds = useMemo(() => {
     if (visibleTracks.length === 0) return undefined
     return new Set(visibleTracks.filter(t => !hiddenTrackIds.has(t.id)).map(t => t.id))
@@ -102,9 +140,10 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
       type: selectedType,
       coordinates: coords,
       name: selectedType === 'custom' ? (customPoiName.trim() || 'Custom Point') : undefined,
+      icon: selectedType === 'custom' ? customPoiIcon : undefined,
     }
     updateDayPois(selectedDay.id, [...currentPois, newPOI])
-  }, [selectedType, customPoiName, currentPois, selectedDay, updateDayPois])
+  }, [selectedType, customPoiName, customPoiIcon, currentPois, selectedDay, updateDayPois])
 
   const handlePOIMove = useCallback((id: string, coords: [number, number]) => {
     if (!selectedDay) return
@@ -121,19 +160,26 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
     setEditingPoiId(poi.id)
     setEditingPoiName(poi.name || config?.label || '')
     setEditingPoiDescription(poi.description || '')
+    setEditingPoiIcon(poi.icon ?? (poi.type === 'custom' ? CUSTOM_POI_ICONS[0].icon : undefined))
   }
 
   const confirmEditPoiName = () => {
     if (!editingPoiId || !selectedDay) return
     updateDayPois(selectedDay.id, currentPois.map(p => p.id === editingPoiId
-      ? { ...p, name: editingPoiName.trim() || p.name, description: editingPoiDescription.trim() || undefined }
+      ? {
+          ...p,
+          name: editingPoiName.trim() || p.name,
+          description: editingPoiDescription.trim() || undefined,
+          icon: p.type === 'custom' ? editingPoiIcon : p.icon,
+        }
       : p))
     setEditingPoiId(null)
     setEditingPoiName('')
     setEditingPoiDescription('')
+    setEditingPoiIcon(undefined)
   }
 
-  const cancelEditPoiName = () => { setEditingPoiId(null); setEditingPoiName(''); setEditingPoiDescription('') }
+  const cancelEditPoiName = () => { setEditingPoiId(null); setEditingPoiName(''); setEditingPoiDescription(''); setEditingPoiIcon(undefined) }
 
   const copyPoisFromDay = (fromDayId: string) => {
     if (!selectedDay) return
@@ -293,7 +339,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
             </div>
 
             {selectedType === 'custom' && (
-              <div className="mt-2">
+              <div className="mt-2 space-y-2">
                 <input
                   value={customPoiName}
                   onChange={e => setCustomPoiName(e.target.value)}
@@ -301,6 +347,8 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                   className="w-full px-3 py-2 rounded-xl text-sm text-slate-100 outline-none"
                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(148,163,184,0.2)' }}
                 />
+                <div className="text-[10px] font-semibold" style={{ color: '#64748b' }}>ICON</div>
+                <IconPicker value={customPoiIcon} onChange={setCustomPoiIcon} />
               </div>
             )}
           </div>
@@ -347,7 +395,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                         className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
                         style={{ background: config?.bg || '#1e293b', color: config?.color || '#fff' }}
                       >
-                        {POI_ICON_LABEL[poi.type] || '•'}
+                        {poi.icon || POI_ICON_LABEL[poi.type] || '•'}
                       </div>
                       <div className="flex-1 min-w-0">
                         {isEditing ? (
@@ -378,6 +426,9 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                               className="w-full px-1.5 py-1 rounded text-[11px] text-slate-200 outline-none resize-none"
                               style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(148,163,184,0.2)' }}
                             />
+                            {poi.type === 'custom' && (
+                              <IconPicker value={editingPoiIcon ?? CUSTOM_POI_ICONS[0].icon} onChange={setEditingPoiIcon} />
+                            )}
                           </div>
                         ) : (
                           <button
@@ -511,6 +562,8 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
             onMapClick={handleMapClick}
             onPOIMove={handlePOIMove}
             fitBounds={trackBounds?.bounds}
+            hoverCoord={hoverCoord}
+            hoverCoordColor={profileTrack?.color || '#f97316'}
           />
         </div>
 
@@ -537,7 +590,16 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
               </button>
             </div>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={profileTrack.elevationProfile} margin={{ top: 0, right: 0, bottom: 12, left: 0 }}>
+              <AreaChart
+                data={profileTrack.elevationProfile}
+                margin={{ top: 0, right: 0, bottom: 12, left: 0 }}
+                onMouseMove={(state: { activeTooltipIndex?: number }) => {
+                  if (state?.activeTooltipIndex !== undefined && state.activeTooltipIndex !== null) {
+                    setHoverElevIndex(state.activeTooltipIndex)
+                  }
+                }}
+                onMouseLeave={() => setHoverElevIndex(null)}
+              >
                 <defs>
                   <linearGradient id="poiElevGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={profileTrack.color} stopOpacity={0.3} />

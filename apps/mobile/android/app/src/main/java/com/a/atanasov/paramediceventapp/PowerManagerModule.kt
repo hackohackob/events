@@ -1,7 +1,6 @@
 package com.a.atanasov.paramediceventapp
 
 import android.content.Context
-import android.os.Build
 import android.os.PowerManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -16,14 +15,9 @@ class PowerManagerModule(private val reactContext: ReactApplicationContext) :
   @ReactMethod
   fun isIgnoringBatteryOptimizations(promise: Promise) {
     try {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-        promise.resolve(true)
-        return
-      }
-
       val powerManager = reactContext.getSystemService(Context.POWER_SERVICE) as PowerManager
       promise.resolve(powerManager.isIgnoringBatteryOptimizations(reactContext.packageName))
-    } catch (error: Throwable) {
+    } catch (error: Exception) {
       promise.reject("POWER_MANAGER_ERROR", error)
     }
   }

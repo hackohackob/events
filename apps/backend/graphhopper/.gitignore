@@ -1,0 +1,4 @@
+# OSM extracts, built graph cache, elevation tiles and logs — all regenerable.
+data/
+logs/
+*.osm.pbf

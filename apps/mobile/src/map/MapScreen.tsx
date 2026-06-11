@@ -32,7 +32,7 @@ import { useIncidentStore } from "../incidents/incident-store";
 import { getSocket } from "../realtime/socket-client";
 import { apiFetch, resolveMediaUrl } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
-import { useMapStore } from "./map-store";
+import { useMapStore, type MedicMarkerRoute } from "./map-store";
 import { useSessionStore } from "../security/session-store";
 import { useRosterStore } from "../security/roster-store";
 import { freshnessBucket, freshnessColor, freshnessLabel } from "./freshness";
@@ -43,16 +43,32 @@ import { debugLog } from "../debug/debug-log";
 import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
+import { MedicDot } from "./MedicDot";
+import { SelectionPulse } from "./SelectionPulse";
 import { AssignDestinationBar } from "./AssignDestinationBar";
-import { IncidentActions } from "./IncidentActions";
+import { IncidentSheet } from "../incidents/IncidentSheet";
 import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
 import { SettingsScreen } from "../settings/SettingsScreen";
+import { FieldGuideScreen } from "../guide/FieldGuideScreen";
 import { useSettingsStore } from "../settings/settings-store";
-import { archivePoi, type PoiDto } from "../ui/event-actions";
+import { useTrackingHealth } from "../location/tracking-health";
+import { archivePoi, assignDestination, setMyRoute, type PoiDto } from "../ui/event-actions";
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { useNotificationFocus } from "../notifications/notification-focus";
+import { useNavStore } from "../navigation/nav-store";
+import { useNavigationCamera } from "../navigation/useNavigationCamera";
+import { NavigationMapLayers } from "../navigation/NavigationMapLayers";
+import { MedicRoutesLayer } from "../navigation/MedicRoutesLayer";
+import { AssignedRoutesLayer } from "../navigation/AssignedRoutesLayer";
+import { AssignedIncidentBanner } from "../navigation/AssignedIncidentBanner";
+import { NavRadialMenu, type RadialAnchor } from "../navigation/NavRadialMenu";
+import { TransportSheet } from "../navigation/TransportSheet";
+import { RouteVariantsOverlay } from "../navigation/RouteVariantsOverlay";
+import { RouteEditingSheet, RouteEditHelperBanner } from "../navigation/RouteEditingSheet";
+import { ActiveNavOverlay } from "../navigation/ActiveNavOverlay";
+import { startIncidentReport } from "../incidents/start-report";
 
 const CURRENT_USER_ID = "mobile-user";
 const FALLBACK_LAT = 42.6977;
@@ -60,6 +76,7 @@ const FALLBACK_LNG = 23.3219;
 const FALLBACK_ZOOM = 12.4;
 const USER_FOCUS_ZOOM = 15.8;
 const SCREEN_HEIGHT = Dimensions.get("window").height;
+const SCREEN_WIDTH = Dimensions.get("window").width;
 const SHEET_TOP_MARGIN_EXPANDED = 88;
 const BOTTOM_BAR_HEIGHT = 60;
 const SHEET_PEEK_HEIGHT = 320;
@@ -78,7 +95,6 @@ const TRACK_STUDIO_CAMERA_PADDING = {
 };
 
 type AppViewMode = "runner" | "paramedic";
-type IncidentTab = "details" | "responders";
 
 interface EventTrackResponse {
   id: string;
@@ -135,6 +151,7 @@ interface MedicActiveResponse {
   battery?: number;
   status?: string;
   destination?: { lat: number; lng: number; label: string } | null;
+  route?: MedicMarkerRoute | null;
   recordedAt?: string;
   lastSeenAt?: string;
 }
@@ -149,9 +166,11 @@ interface IncidentResponse {
   status?: string;
   severity?: string;
   photoUrl?: string;
+  photoUrls?: string[];
   responders?: string[];
   createdBy?: string;
   reportedBy?: string;
+  createdAt?: string;
 }
 
 function incidentToMarker(incident: IncidentResponse) {
@@ -167,7 +186,9 @@ function incidentToMarker(incident: IncidentResponse) {
     status: incident.status,
     incidentType: incident.type,
     photoUrl: incident.photoUrl,
+    photoUrls: incident.photoUrls,
     reportedBy: incident.reportedBy,
+    createdAt: incident.createdAt,
   };
 }
 
@@ -225,8 +246,26 @@ interface LayerVisibility {
   participantsHeatmap: boolean;
   paramedics: boolean;
   incidents: boolean;
-  trackGradient: boolean;
 }
+
+/** Participants display: hidden, individual dots, or aggregated heatmap. */
+type ParticipantsMode = "off" | "individual" | "heatmap";
+
+/** Selectable base map. */
+type BaseLayer = "regular" | "terrain" | "satellite";
+
+const BASE_LAYERS: Record<BaseLayer, { label: string; icon: keyof typeof Feather.glyphMap; tiles?: string; tileSize?: number; maxZoom: number }> = {
+  // `regular` tiles are resolved at runtime (Mapy key or OSM fallback).
+  regular: { label: "Regular", icon: "map", maxZoom: 19 },
+  terrain: { label: "Terrain", icon: "triangle", tiles: "https://tile.opentopomap.org/{z}/{x}/{y}.png", tileSize: 256, maxZoom: 17 },
+  satellite: {
+    label: "Satellite",
+    icon: "globe",
+    tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    tileSize: 256,
+    maxZoom: 19,
+  },
+};
 
 type TrackVisibility = Record<string, boolean>;
 
@@ -808,6 +847,15 @@ function pointDistanceMeters(
   return distanceKm(pointA.lat, pointA.lng, pointB.lat, pointB.lng) * 1000;
 }
 
+/**
+ * True only for a usable, finite lng/lat pair. Native map Markers crash with a
+ * null-cast error if handed a null/undefined/NaN coordinate, so every marker is
+ * filtered through this before rendering.
+ */
+function isFiniteCoord(lng: unknown, lat: unknown): boolean {
+  return typeof lng === "number" && typeof lat === "number" && Number.isFinite(lng) && Number.isFinite(lat);
+}
+
 function trackColor(trackId: string): string {
   if (trackId.includes("10")) {
     return "#22c55e";
@@ -1343,6 +1391,7 @@ function buildAccuracyCircle(
 
 export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const eventTitle = useSessionStore((state) => state.eventTitle);
+  const sessionUserId = useSessionStore((state) => state.userId);
   const clearSession = useSessionStore((state) => state.clear);
   const sessionToken = useSessionStore((state) => state.token);
   const markers = useMapStore((state) => state.markers);
@@ -1353,6 +1402,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const setTracks = useMapStore((state) => state.setTracks);
   const rosterMedics = useRosterStore((state) => state.medics);
   const loadRoster = useRosterStore((state) => state.load);
+  const trackingHealth = useTrackingHealth();
 
   const mapRef = useRef<MapRef | null>(null);
   const cameraRef = useRef<CameraRef | null>(null);
@@ -1368,13 +1418,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const offlineBadgeOpacity = useRef(new Animated.Value(1)).current;
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-  const [incidentTab, setIncidentTab] = useState<IncidentTab>("details");
-  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "settings" | "profile">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "settings" | "profile" | "guide">("map");
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mapZoom, setMapZoom] = useState(FALLBACK_ZOOM);
   const [layersOpen, setLayersOpen] = useState(false);
   const [pendingPoi, setPendingPoi] = useState<{ lat: number; lng: number } | null>(null);
+  const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
+  const navPhase = useNavStore((s) => s.phase);
+  const navCameraMode = useNavStore((s) => s.navCameraMode);
+  const navPendingInsert = useNavStore((s) => s.pendingInsertIndex);
+  useNavigationCamera(cameraRef);
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
   const [trackPickerOpen, setTrackPickerOpen] = useState(false);
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
@@ -1391,14 +1446,19 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     participantsHeatmap: false,
     paramedics: true,
     incidents: true,
-    trackGradient: true,
   });
   const [trackVisibility, setTrackVisibility] = useState<TrackVisibility>({});
   const [heatWeightScale, setHeatWeightScale] = useState(0.12);
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>("regular");
 
   const mapyTilesTemplateUrl = USE_MAPY_TILES ? getMapyTilesTemplateUrl() : null;
-  const baseTilesTemplateUrl = mapyTilesTemplateUrl ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-  const baseRasterTileSize = mapyTilesTemplateUrl ? 512 : 256;
+  const regularTilesTemplateUrl = mapyTilesTemplateUrl ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  const regularRasterTileSize = mapyTilesTemplateUrl ? 512 : 256;
+  // Active base map (regular street / topo terrain / satellite imagery).
+  const baseLayerConfig = BASE_LAYERS[baseLayer];
+  const baseTilesTemplateUrl = baseLayer === "regular" ? regularTilesTemplateUrl : baseLayerConfig.tiles!;
+  const baseRasterTileSize = baseLayer === "regular" ? regularRasterTileSize : baseLayerConfig.tileSize!;
+  const baseRasterMaxZoom = baseLayerConfig.maxZoom;
   const heatWeightNormalized =
     (heatWeightScale - HEATMAP_WEIGHT_MIN) / (HEATMAP_WEIGHT_MAX - HEATMAP_WEIGHT_MIN);
   const heatSliderPosition = Math.max(0, Math.min(1, heatWeightNormalized)) * HEATMAP_SLIDER_WIDTH;
@@ -1472,6 +1532,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           lastSeenAt: medic.lastSeenAt,
           status: medic.status,
           destination: medic.destination ?? null,
+          route: medic.route ?? null,
         };
       });
       const existing = useMapStore.getState().markers;
@@ -1589,6 +1650,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             lastSeenAt: medic.lastSeenAt,
             status: medic.status,
             destination: medic.destination ?? null,
+            route: medic.route ?? null,
           };
         });
         const poiMarkers = eventPois.map((poi, i) => ({
@@ -1659,7 +1721,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       );
     });
 
-    socket.on("medic_location", (payload: { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null }) => {
+    socket.on("medic_location", (payload: { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null }) => {
       const existing = useMapStore.getState().markers;
       const filtered = existing.filter((marker) => marker.id !== payload.medicId);
       const existing_marker = existing.find((marker) => marker.id === payload.medicId);
@@ -1680,6 +1742,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             lastSeenAt: payload.lastSeenAt ?? new Date().toISOString(),
             status: payload.status ?? existing_marker?.status,
             destination: payload.destination !== undefined ? payload.destination : existing_marker?.destination ?? null,
+            route: payload.route !== undefined ? payload.route : existing_marker?.route ?? null,
           },
         ].slice(-2200),
       );
@@ -1694,7 +1757,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const myId = useSessionStore.getState().userId;
       if (payload.createdBy !== myId) {
         const detail = payload.description ? `${payload.type} — ${payload.description}` : `${payload.type} reported`;
-        void showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id });
+        void showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id }, true);
       }
     });
 
@@ -1712,6 +1775,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       // Preserve responders/description if a partial action payload omits them.
       if (!merged.respondingParamedicIds && existingMarker?.respondingParamedicIds) {
         merged.respondingParamedicIds = existingMarker.respondingParamedicIds;
+      }
+      // Just became a responder (dashboard assigned me) → alarm with a tap-to-focus.
+      const myUserId = useSessionStore.getState().userId ?? "";
+      const wasResponder = (existingMarker?.respondingParamedicIds ?? []).includes(myUserId);
+      const isResponder = (merged.respondingParamedicIds ?? []).includes(myUserId);
+      if (!wasResponder && isResponder && !isClosedIncidentStatus(merged.status)) {
+        const detail = merged.description ? `${merged.incidentType} — ${merged.description}` : "Respond now";
+        void showBroadcastNotification(`🚑 Assigned: ${merged.name ?? merged.label}`, detail, { incidentId: merged.id }, true);
       }
       setMarkers([...withoutIncident, merged].slice(-2200));
     };
@@ -1803,6 +1874,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       return;
     }
 
+    // Launched from an incident notification → that focus owns the camera;
+    // don't fight it with the tracks overview fit.
+    if (useNotificationFocus.getState().incidentId) {
+      didInitialEventFitRef.current = true;
+      return;
+    }
+
     const trackPoints = tracks.flatMap((track) => track.points);
     if (trackPoints.length === 0) {
       return;
@@ -1887,6 +1965,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           return layerVisibility.participants;
         }
         if (marker.type === "paramedic") {
+          // While navigating, the nav puck stands in for the user's own position —
+          // hide the server-echoed marker of themselves.
+          if (navPhase === "active" && marker.id === sessionUserId) return false;
           return layerVisibility.paramedics;
         }
         if (marker.type === "incident") {
@@ -1895,7 +1976,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         // infrastructure (POIs) — always visible
         return true;
       }),
-    [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, nonCurrentMarkers],
+    [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, nonCurrentMarkers, navPhase, sessionUserId],
   );
   const orderedVisibleMarkers = useMemo(
     () =>
@@ -1903,6 +1984,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         (a, b) => MARKER_RENDER_PRIORITY[a.type] - MARKER_RENDER_PRIORITY[b.type],
       ),
     [visibleMarkers],
+  );
+
+  // Am I currently responding to an open incident? (Mirrors the
+  // AssignedIncidentBanner visibility — used to swap the status button out.)
+  const assignedToIncident = useMemo(
+    () =>
+      markers.some(
+        (marker) =>
+          marker.type === "incident" &&
+          !isClosedIncidentStatus(marker.status) &&
+          !isArchivedIncidentStatus(marker.status) &&
+          (marker.respondingParamedicIds ?? []).includes(sessionUserId ?? "__none__"),
+      ),
+    [markers, sessionUserId],
   );
 
   const runnerHeatFeatureCollection = useMemo(
@@ -2045,6 +2140,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // When the user disables track offsetting, overlapping routes draw on top of
   // each other (offset 0) instead of side by side.
   const trackOffsetEnabled = useSettingsStore((s) => s.trackOffsetEnabled);
+  const trackGradientEnabled = useSettingsStore((s) => s.trackGradientEnabled);
   const trackRenderOffsetOverride = trackModeActive || !trackOffsetEnabled ? 0 : null;
   const trackLineOffsetValue = (lineOffset: number): any => {
     if (trackRenderOffsetOverride !== null) {
@@ -2244,21 +2340,109 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       return;
     }
     setActiveTab("map");
-    cameraRef.current?.easeTo({ center: [marker.lng, marker.lat], zoom: USER_FOCUS_ZOOM, duration: 550 });
+    didInitialEventFitRef.current = true; // the tracks-overview fit must not override this
+    // Frame BOTH me and the incident, horizontally centred on their midpoint and
+    // pushed into the upper part of the screen — the incident sheet covers the
+    // lower ~half of the map.
+    const myFix = useLocationStatus.getState().lastFix;
+    if (myFix && isFiniteCoord(myFix.lng, myFix.lat)) {
+      const midLng = (myFix.lng + marker.lng) / 2;
+      const midLat = (myFix.lat + marker.lat) / 2;
+      const latSpan = Math.abs(myFix.lat - marker.lat);
+      const lngSpan = Math.abs(myFix.lng - marker.lng) * Math.cos((midLat * Math.PI) / 180);
+      const spanDeg = Math.max(latSpan, lngSpan, 0.003) * 2.6; // breathing room
+      const zoom = Math.max(10.5, Math.min(16.5, Math.log2(360 / spanDeg)));
+      cameraRef.current?.easeTo({
+        center: [midLng, midLat],
+        zoom,
+        padding: { top: 90, bottom: Math.round(SCREEN_HEIGHT * 0.5), left: 0, right: 0 },
+        duration: 600,
+      });
+    } else {
+      cameraRef.current?.easeTo({
+        center: [marker.lng, marker.lat],
+        zoom: USER_FOCUS_ZOOM,
+        padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.4), left: 0, right: 0 },
+        duration: 550,
+      });
+    }
     setSelectedMarkerId(marker.id);
-    setIncidentTab("details");
     clearNotificationFocus();
   }, [focusRequestId, focusIncidentId, markers, clearNotificationFocus, refreshIncidents]);
 
   const closeSelection = () => {
     setSelectedMarkerId(null);
-    setIncidentTab("details");
   };
+
+  // Starting navigation (e.g. "Navigate" from a marker sheet) opens the transport
+  // overlay — close any open marker selection / menus so they don't overlap it.
+  useEffect(() => {
+    if (navPhase !== "idle") {
+      setSelectedMarkerId(null);
+      setMenuOpen(false);
+      setLayersOpen(false);
+    }
+  }, [navPhase]);
+
+  // Broadcast my active navigation path to the whole team when navigation starts,
+  // and clear it when it ends — so everyone + the dashboard sees the route + ETA.
+  const navWasActiveRef = useRef(false);
+  useEffect(() => {
+    const isActive = navPhase === "active";
+    const wasActive = navWasActiveRef.current;
+    navWasActiveRef.current = isActive;
+    if (isActive && !wasActive) {
+      const st = useNavStore.getState();
+      const route = st.routes.find((r) => r.id === st.selectedRouteId) ?? st.routes[0];
+      if (route) {
+        void setMyRoute(
+          {
+            geometry: route.geometry,
+            segments: route.segments.map((s) => ({ surface: s.surface, coordinates: s.coordinates })),
+            distanceMeters: route.distanceMeters,
+            durationMs: route.durationMs,
+            etaIso: new Date(Date.now() + route.durationMs).toISOString(),
+            incidentId: st.destinationIncidentId,
+          },
+          st.destination ? { lat: st.destination.lat, lng: st.destination.lng, label: st.destination.label } : null,
+        ).catch(() => {});
+      }
+    } else if (!isActive && wasActive) {
+      void setMyRoute(null).catch(() => {});
+    }
+  }, [navPhase]);
+
+  // Medics currently responding to an open incident — drives the flashing blue
+  // lights on their marker for everyone (works for app dispatch + simulator).
+  const respondingMedicIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of markers) {
+      if (m.type === "incident" && !isClosedIncidentStatus(m.status)) {
+        for (const id of m.respondingParamedicIds ?? []) ids.add(id);
+      }
+    }
+    return ids;
+  }, [markers]);
 
   const toggleLayer = (key: keyof LayerVisibility) => {
     setLayerVisibility((state) => ({
       ...state,
       [key]: !state[key],
+    }));
+  };
+
+  // Participants are a single 3-state control (Off / Individual / Heatmap) backed
+  // by the two underlying booleans.
+  const participantsMode: ParticipantsMode = layerVisibility.participantsHeatmap
+    ? "heatmap"
+    : layerVisibility.participants
+      ? "individual"
+      : "off";
+  const setParticipantsMode = (mode: ParticipantsMode) => {
+    setLayerVisibility((state) => ({
+      ...state,
+      participants: mode === "individual",
+      participantsHeatmap: mode === "heatmap",
     }));
   };
 
@@ -2290,6 +2474,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     cameraRef.current?.easeTo({
       center: [location.coords.longitude, location.coords.latitude],
       zoom: USER_FOCUS_ZOOM,
+      padding: { top: 0, bottom: 0, left: 0, right: 0 }, // clear any focus offset
       duration: 420,
     });
   };
@@ -2304,6 +2489,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       center: viewState.center,
       zoom: viewState.zoom,
       bearing: 0,
+      pitch: 0, // flatten any 3D tilt along with the heading reset
       duration: 340,
     });
   };
@@ -2334,15 +2520,36 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         logo={false}
         attribution={false}
         compass={false}
+        onRegionDidChange={(event: any) => {
+          const z = event?.properties?.zoom ?? event?.nativeEvent?.zoom;
+          if (typeof z === "number" && Number.isFinite(z)) setMapZoom(z);
+        }}
         onLongPress={(event: any) => {
           // PressEvent: { nativeEvent: { lngLat: [lng, lat], point: [x, y] } }.
           const lngLat = event?.nativeEvent?.lngLat ?? event?.geometry?.coordinates;
+          const point = event?.nativeEvent?.point;
           if (Array.isArray(lngLat) && lngLat.length >= 2) {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             setMenuOpen(false);
             setLayersOpen(false);
             closeSelection();
-            setPendingPoi({ lat: lngLat[1], lng: lngLat[0] });
+            // Open the contextual radial menu at the pressed point. "Navigate
+            // here" is the primary action; "Add point" still opens the POI sheet.
+            setRadialAnchor({
+              x: Array.isArray(point) ? point[0] : SCREEN_WIDTH / 2,
+              y: Array.isArray(point) ? point[1] : SCREEN_HEIGHT / 2,
+              lat: lngLat[1],
+              lng: lngLat[0],
+            });
+          }
+        }}
+        onPress={(event: any) => {
+          // During route editing, a tap places the pending inserted waypoint.
+          if (navPhase !== "editing" || navPendingInsert === null) return;
+          const lngLat = event?.nativeEvent?.lngLat;
+          if (Array.isArray(lngLat) && lngLat.length >= 2) {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            void useNavStore.getState().placePoint({ lat: lngLat[1], lng: lngLat[0] });
           }
         }}
       >
@@ -2352,11 +2559,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             center: [FALLBACK_LNG, FALLBACK_LAT],
             zoom: FALLBACK_ZOOM,
           }}
-          trackUserLocation="default"
+          trackUserLocation={navPhase === "active" ? undefined : "default"}
         />
-        <UserLocation />
+        {navPhase !== "active" ? <UserLocation /> : null}
 
-        <RasterSource id="base-raster-source" tiles={[baseTilesTemplateUrl]} maxzoom={19} tileSize={baseRasterTileSize}>
+        <NavigationMapLayers />
+        <MedicRoutesLayer zoom={mapZoom} dimmed={assignedToIncident} />
+
+        <RasterSource
+          key={`base-${baseLayer}`}
+          id="base-raster-source"
+          tiles={[baseTilesTemplateUrl]}
+          maxzoom={baseRasterMaxZoom}
+          tileSize={baseRasterTileSize}
+        >
           <Layer
             id="base-raster-layer"
             type="raster"
@@ -2387,7 +2603,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 }}
               />
             </GeoJSONSource>
-            {layerVisibility.trackGradient ? (
+            {trackGradientEnabled ? (
               <>
                 <GeoJSONSource
                   id={`${track.id}-gradient-base-source`}
@@ -2629,48 +2845,23 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
-        {respondingParamedics.map((paramedic, index) => {
-          const incident = paramedic.respondingIncidentId ? markerById.get(paramedic.respondingIncidentId) : undefined;
-          if (!incident || incident.type !== "incident") {
-            return null;
-          }
+        {/* Curved, flowing "Assigned" lines from responding medics to incidents
+            (replaced by the coloured route once they start navigating). */}
+        <AssignedRoutesLayer />
 
-          const progress = ((tick * 0.11 + index * 0.19) % 1 + 1) % 1;
-          const arrowLat = paramedic.lat + (incident.lat - paramedic.lat) * progress;
-          const arrowLng = paramedic.lng + (incident.lng - paramedic.lng) * progress;
-          const angleDeg = (Math.atan2(incident.lng - paramedic.lng, incident.lat - paramedic.lat) * 180) / Math.PI;
-
-          return (
-            <React.Fragment key={`response-${paramedic.id}`}>
-              <GeoJSONSource
-                id={`response-line-source-${paramedic.id}`}
-                data={lineFeatureFromCoordinates([
-                  { latitude: paramedic.lat, longitude: paramedic.lng },
-                  { latitude: incident.lat, longitude: incident.lng },
-                ])}
-              >
-                <Layer
-                  id={`response-line-layer-${paramedic.id}`}
-                  type="line"
-                  paint={{
-                    "line-color": "rgba(91, 221, 117, 0.9)",
-                    "line-width": 4,
-                    "line-dasharray": [2, 2.8],
-                  }}
-                />
-              </GeoJSONSource>
-              <Marker lngLat={[arrowLng, arrowLat]}>
-                <View style={[styles.responseArrow, { transform: [{ rotate: `${angleDeg}deg` }] }]}>
-                  <Text style={styles.responseArrowText}>{">"}</Text>
-                </View>
-              </Marker>
-            </React.Fragment>
-          );
-        })}
-
-        {/* "Going to" lines — everyone sees where each medic is heading */}
+        {/* "Going to" lines — straight dashed line to the destination. Suppressed
+            when the medic has a real navigation path (the coloured route is shown
+            instead, so we don't draw a misleading straight line over it). */}
         {markers
-          .filter((m) => m.type === "paramedic" && m.destination)
+          .filter(
+            (m) =>
+              m.type === "paramedic" &&
+              m.destination &&
+              !m.route &&
+              !respondingMedicIds.has(m.id) &&
+              isFiniteCoord(m.destination.lng, m.destination.lat) &&
+              isFiniteCoord(m.lng, m.lat),
+          )
           .map((medic) => {
             const dest = medic.destination!;
             return (
@@ -2686,7 +2877,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     id={`dest-line-layer-${medic.id}`}
                     type="line"
                     paint={{
-                      "line-color": "rgba(245, 158, 11, 0.85)",
+                      "line-color":
+                        assignedToIncident && medic.id !== sessionUserId
+                          ? "rgba(245, 158, 11, 0.45)"
+                          : "rgba(245, 158, 11, 0.85)",
                       "line-width": 3,
                       "line-dasharray": [1.5, 1.8],
                     }}
@@ -2719,26 +2913,34 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
-        {orderedVisibleMarkers.map((marker) => (
+        {orderedVisibleMarkers.filter((marker) => isFiniteCoord(marker.lng, marker.lat)).map((marker) => (
           <Marker
             key={marker.id}
             lngLat={[marker.lng, marker.lat]}
             onPress={() => {
               setSelectedMarkerId(marker.id);
-              if (marker.type === "incident") {
-                setIncidentTab("details");
-              }
+              // Bring the tapped marker into the upper half — the detail sheet
+              // opens over the bottom ~42% of the screen.
+              cameraRef.current?.easeTo({
+                center: [marker.lng, marker.lat],
+                zoom: Math.max(mapZoom, 13.5),
+                padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.42), left: 0, right: 0 },
+                duration: 480,
+              });
             }}
           >
             <View>
               {marker.type === "incident" ? (() => {
                 const closed = isClosedIncidentStatus(marker.status);
+                const isSelected = marker.id === selectedMarkerId;
                 return (
-                  <View style={[styles.incidentDot, closed && styles.incidentDotClosed]}>
-                    <Text style={[styles.incidentDotText, closed && styles.incidentDotTextClosed]}>
-                      {closed ? "✓" : "!"}
-                    </Text>
-                  </View>
+                  <SelectionPulse active={isSelected} size={26} color={closed ? "#94a3b8" : "#ef4444"}>
+                    <View style={[styles.incidentDot, closed && styles.incidentDotClosed, isSelected && styles.incidentDotSelected]}>
+                      <Text style={[styles.incidentDotText, closed && styles.incidentDotTextClosed]}>
+                        {closed ? "✓" : "!"}
+                      </Text>
+                    </View>
+                  </SelectionPulse>
                 );
               })() : null}
 
@@ -2749,19 +2951,28 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 // Fresher = greener (0–20m), yellow (20–40m), grey (>40m).
                 const freshColor = freshnessColor(ageMs);
                 const isGrey = freshnessBucket(ageMs) === "stale";
-                // Resting medics show a mellow purple badge (matches the status text).
                 const isResting = marker.status === "rest";
+                const isStationary = marker.status === "stationary";
+                // Responding to an incident → whole dot flashes red/blue for everyone.
+                const isResponding = respondingMedicIds.has(marker.id) || Boolean(marker.route?.incidentId);
+                // Heading to a (non-incident) point → a "moving" badge.
+                const isGoingToPoint = !isResponding && (Boolean(marker.route) || Boolean(marker.destination)) && marker.status === "going_to";
                 const dotColor = isResting ? "#a78bfa" : freshColor;
                 return (
-                  <View style={[styles.paramedicDot, { backgroundColor: dotColor }, isGrey && styles.paramedicDotStale]}>
-                    <Text
-                      style={[styles.paramedicDotText, isGrey && styles.paramedicDotTextStale]}
-                      numberOfLines={1}
-                      allowFontScaling={false}
-                    >
-                      {markerInitials(marker.label)}
-                    </Text>
-                  </View>
+                  <SelectionPulse active={marker.id === selectedMarkerId} size={30} color={isGrey ? "#94a3b8" : dotColor}>
+                    <MedicDot
+                      initials={markerInitials(marker.label)}
+                      dotColor={dotColor}
+                      isGrey={isGrey}
+                      isResponding={isResponding}
+                      isStationary={isStationary}
+                      isGoingToPoint={isGoingToPoint}
+                      selected={false}
+                      // I'm on an incident → fade everyone but me so my own path
+                      // stays the visual focus.
+                      dimmed={assignedToIncident && marker.id !== sessionUserId}
+                    />
+                  </SelectionPulse>
                 );
               })() : null}
 
@@ -2847,7 +3058,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         <Text style={styles.missionStripText}>ACADEMY FIRST AID</Text>
       </View> */}
 
-      <View style={styles.topHeader}>
+      {/* box-none: the header container is as tall as the action-button column and
+          spans the full width — without it, it swallows touches over the map
+          (e.g. the radial menu's buttons rendered underneath at zIndex 0). */}
+      <View style={styles.topHeader} pointerEvents="box-none">
         <Pressable
           style={styles.menuButton}
           onPress={() => {
@@ -2871,7 +3085,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </Pressable>
 
         {!selectedMarker ? (
-          <View style={styles.headerActions}>
+          <View style={styles.headerActions} pointerEvents="box-none">
             <Pressable
               style={[styles.headerActionButton, layersOpen && styles.headerActionButtonActive]}
               onPress={() => {
@@ -2882,12 +3096,43 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               <Feather name="layers" size={20} color={layersOpen ? "#34d399" : "#ecf4ff"} />
             </Pressable>
 
-            <Pressable style={styles.headerActionButton} onPress={centerOnCurrentPosition}>
+            <Pressable
+              style={styles.headerActionButton}
+              onPress={centerOnCurrentPosition}
+              onLongPress={() => {
+                if (!trackingHealth.ok) setActiveTab("location");
+              }}
+            >
               <Feather name="crosshair" size={20} color="#ecf4ff" />
+              {!trackingHealth.ok ? (
+                <View style={styles.healthBadge}>
+                  <Text style={styles.healthBadgeText}>!</Text>
+                </View>
+              ) : null}
             </Pressable>
 
-            <Pressable style={styles.headerActionButton} onPress={resetMapNorth}>
-              <Feather name="compass" size={20} color="#ecf4ff" />
+            <Pressable
+              style={[styles.headerActionButton, navPhase === "active" && navCameraMode === "north" && styles.headerActionButtonActive]}
+              onPress={() => {
+                if (navPhase === "active") {
+                  void Haptics.selectionAsync();
+                  useNavStore.getState().toggleNavCamera();
+                } else {
+                  void resetMapNorth();
+                }
+              }}
+            >
+              {navPhase === "active" ? (
+                navCameraMode === "north" ? (
+                  // North-up while navigating: show an "N" compass marker.
+                  <Feather name="compass" size={20} color="#34d399" />
+                ) : (
+                  // Follow (look-ahead): show the heading arrow.
+                  <Feather name="navigation" size={19} color="#ecf4ff" />
+                )
+              ) : (
+                <Feather name="compass" size={20} color="#ecf4ff" />
+              )}
             </Pressable>
 
             <OfflineControlButton
@@ -2911,8 +3156,22 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           >
             <Feather name="map-pin" size={18} color="#7dd3fc" style={styles.menuPageIcon} />
             <View style={styles.menuPageTextWrap}>
-              <Text style={styles.menuPageTitle}>Location & Tracking</Text>
+              <Text style={styles.menuPageTitle}>Location diagnostics</Text>
               <Text style={styles.menuPageSubtitle}>GPS status, accuracy, history</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
+              setActiveTab("guide");
+              setMenuOpen(false);
+            }}
+          >
+            <Feather name="book-open" size={18} color="#fbbf24" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Field Guide</Text>
+              <Text style={styles.menuPageSubtitle}>Symptom search & action reminders</Text>
             </View>
             <Feather name="chevron-right" size={16} color="#475569" />
           </Pressable>
@@ -2962,16 +3221,29 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ) : null}
 
       {layersOpen ? (
-        <View style={styles.layersPopup}>
-          <Text style={styles.menuPopupTitle}>Layers</Text>
-          <Pressable style={styles.layerRow} onPress={() => toggleLayer("participants")}>
-            <Text style={styles.layerLabel}>Participants (individual)</Text>
-            <View style={[styles.switchTrack, layerVisibility.participants ? styles.switchTrackOn : null]}>
-              <View style={[styles.switchKnob, layerVisibility.participants ? styles.switchKnobOn : null]} />
-            </View>
-          </Pressable>
+        <ScrollView style={styles.layersPopup} contentContainerStyle={styles.layersPopupContent}>
+          {/* Base map selector */}
+          <Text style={styles.layerSectionLabel}>BASE MAP</Text>
+          <View style={styles.segmentRow}>
+            {(Object.keys(BASE_LAYERS) as BaseLayer[]).map((key) => {
+              const active = baseLayer === key;
+              return (
+                <Pressable
+                  key={key}
+                  style={[styles.segmentItem, active && styles.segmentItemActive]}
+                  onPress={() => setBaseLayer(key)}
+                >
+                  <Feather name={BASE_LAYERS[key].icon} size={14} color={active ? "#04121f" : "#9fb3cc"} />
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{BASE_LAYERS[key].label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Overlays */}
+          <Text style={styles.layerSectionLabel}>OVERLAYS</Text>
           <Pressable style={styles.layerRow} onPress={() => toggleLayer("paramedics")}>
-            <Text style={styles.layerLabel}>Paramedics</Text>
+            <Text style={styles.layerLabel}>Medics</Text>
             <View style={[styles.switchTrack, layerVisibility.paramedics ? styles.switchTrackOn : null]}>
               <View style={[styles.switchKnob, layerVisibility.paramedics ? styles.switchKnobOn : null]} />
             </View>
@@ -2984,18 +3256,25 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             </View>
           </Pressable>
 
-          <Pressable style={styles.layerRow} onPress={() => toggleLayer("participantsHeatmap")}>
-            <Text style={styles.layerLabel}>Participants heatmap</Text>
-            <View style={[styles.switchTrack, layerVisibility.participantsHeatmap ? styles.switchTrackOn : null]}>
-              <View style={[styles.switchKnob, layerVisibility.participantsHeatmap ? styles.switchKnobOn : null]} />
+          {/* Participants — compact 3-state, inline under overlays. */}
+          <View style={styles.layerRow}>
+            <Text style={styles.layerLabel}>Participants</Text>
+            <View style={styles.miniSegmentRow}>
+              {(["off", "individual", "heatmap"] as ParticipantsMode[]).map((mode) => {
+                const active = participantsMode === mode;
+                const label = mode === "off" ? "Off" : mode === "individual" ? "Dots" : "Heat";
+                return (
+                  <Pressable
+                    key={mode}
+                    style={[styles.miniSegmentItem, active && styles.segmentItemActive]}
+                    onPress={() => setParticipantsMode(mode)}
+                  >
+                    <Text style={[styles.miniSegmentText, active && styles.segmentTextActive]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
-          </Pressable>
-          <Pressable style={styles.layerRow} onPress={() => toggleLayer("trackGradient")}>
-            <Text style={styles.layerLabel}>Track gradient</Text>
-            <View style={[styles.switchTrack, layerVisibility.trackGradient ? styles.switchTrackOn : null]}>
-              <View style={[styles.switchKnob, layerVisibility.trackGradient ? styles.switchKnobOn : null]} />
-            </View>
-          </Pressable>
+          </View>
 
           <View style={styles.tracksHeaderRow}>
             <Text style={styles.tracksHeaderText}>Tracks</Text>
@@ -3015,7 +3294,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </View>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
       ) : null}
 
       <BottomSheet
@@ -3245,7 +3524,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         {/* Plain View (not BottomSheetView) so the inner BottomSheetScrollView
             keeps a bounded flex height and actually scrolls long content. */}
         <View style={styles.markerSheetContent}>
-        {selectedMarker ? (
+        {selectedMarker && selectedIncident ? (
+          <IncidentSheet
+            incident={selectedIncident}
+            distanceKm={incidentDistance}
+            markerById={markerById}
+            onClose={closeSelection}
+            onOpenPhoto={(url) => setPhotoViewerUrl(url)}
+          />
+        ) : selectedMarker ? (
           <>
             <View style={styles.sheetHeader}>
               <View
@@ -3307,83 +3594,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </Pressable>
             </View>
 
-            {selectedIncident ? (
-              <View style={styles.sheetTabs}>
-                <Pressable style={styles.sheetTabButton} onPress={() => setIncidentTab("details")}>
-                  <Text style={[styles.sheetTabText, incidentTab === "details" ? styles.sheetTabTextActive : null]}>DETAILS</Text>
-                  {incidentTab === "details" ? <View style={styles.sheetTabUnderline} /> : null}
-                </Pressable>
-                <Pressable style={styles.sheetTabButton} onPress={() => setIncidentTab("responders")}>
-                  <Text style={[styles.sheetTabText, incidentTab === "responders" ? styles.sheetTabTextActive : null]}>
-                    RESPONDERS ({(selectedIncident.respondingParamedicIds ?? []).length})
-                  </Text>
-                  {incidentTab === "responders" ? <View style={styles.sheetTabUnderline} /> : null}
-                </Pressable>
-              </View>
-            ) : null}
-
             <BottomSheetScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
-              {selectedIncident ? (
-                <>
-                  {incidentTab === "details" ? (
-                    <>
-                      <View style={styles.sheetInfoRow}>
-                        <Text style={styles.sheetInfoLabel}>Category</Text>
-                        <Text style={styles.sheetInfoValue}>{incidentTypeLabel(selectedIncident.incidentType)}</Text>
-                      </View>
-                      <View style={styles.sheetInfoRow}>
-                        <Text style={styles.sheetInfoLabel}>Status</Text>
-                        <Text style={styles.sheetInfoValue}>{incidentStatusLabel(selectedIncident.status)}</Text>
-                      </View>
-                      <View style={styles.sheetInfoRow}>
-                        <Text style={styles.sheetInfoLabel}>Reported by</Text>
-                        <Text style={styles.sheetInfoValue}>{selectedIncident.reportedBy ?? "Unknown"}</Text>
-                      </View>
-                      <View style={styles.sheetInfoRow}>
-                        <Text style={styles.sheetInfoLabel}>Incident notes</Text>
-                        <Text style={styles.sheetInfoValue}>{selectedIncident.description ?? "No notes yet."}</Text>
-                      </View>
-                      {selectedIncident.photoUrl ? (
-                        <Pressable
-                          style={styles.incidentPhotoBtn}
-                          onPress={() => setPhotoViewerUrl(resolveMediaUrl(selectedIncident.photoUrl) ?? null)}
-                        >
-                          <Image
-                            source={{ uri: resolveMediaUrl(selectedIncident.photoUrl) }}
-                            style={styles.incidentPhotoThumb}
-                          />
-                          <View style={styles.incidentPhotoMeta}>
-                            <Text style={styles.incidentPhotoTitle}>Photo attached</Text>
-                            <Text style={styles.incidentPhotoHint}>Tap to view full size</Text>
-                          </View>
-                          <Feather name="maximize-2" size={18} color="#93c5fd" />
-                        </Pressable>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      {(selectedIncident.respondingParamedicIds ?? []).length > 0 ? (
-                        (selectedIncident.respondingParamedicIds ?? []).map((paramedicId: string) => {
-                          const responder = markerById.get(paramedicId);
-                          return (
-                            <View key={paramedicId} style={styles.responderRow}>
-                              <View>
-                                <Text style={styles.responderName}>{responder?.name ?? responder?.label ?? paramedicId}</Text>
-                                <Text style={styles.responderMeta}>{responder?.vehicle ?? "Medical Unit"}</Text>
-                              </View>
-                              <Pressable style={styles.messageButton}>
-                                <Text style={styles.messageButtonText}>Message</Text>
-                              </Pressable>
-                            </View>
-                          );
-                        })
-                      ) : (
-                        <Text style={styles.sheetInfoValue}>No responders assigned yet.</Text>
-                      )}
-                    </>
-                  )}
-                </>
-              ) : selectedMarker.type === "infrastructure" ? (
+              {selectedMarker.type === "infrastructure" ? (
                 <>
                   {selectedMarker.poiDescription ? (
                     <View style={styles.sheetInfoRow}>
@@ -3432,7 +3644,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                             {rosterEntry?.type === "coordinator"
                               ? "Coordinator"
                               : selectedMarker.type === "paramedic"
-                                ? "Paramedic"
+                                ? "Medic"
                                 : "Participant"}
                           </Text>
                         </View>
@@ -3474,28 +3686,81 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                       <Text style={styles.sheetInfoValue}>{Math.round(selectedMarker.battery * 100)}%</Text>
                     </View>
                   ) : null}
+                  {selectedMarker.type === "paramedic" && (selectedMarker.destination || selectedMarker.route) ? (
+                    <>
+                      {selectedMarker.destination?.label ? (
+                        <View style={styles.sheetInfoRow}>
+                          <Text style={styles.sheetInfoLabel}>Heading to</Text>
+                          <Text style={styles.sheetInfoValue} numberOfLines={1}>{selectedMarker.destination.label}</Text>
+                        </View>
+                      ) : null}
+                      <Pressable
+                        style={styles.clearDestBtn}
+                        onPress={() => {
+                          const medicId = selectedMarker.id;
+                          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                          // Optimistic: drop the destination/route locally; the
+                          // server broadcast confirms it for everyone else.
+                          const existing = useMapStore.getState().markers;
+                          setMarkers(
+                            existing.map((m) =>
+                              m.id === medicId ? { ...m, destination: null, route: null, status: "available" } : m,
+                            ),
+                          );
+                          void assignDestination(null, medicId).catch((err) =>
+                            debugLog("api", "error", "clear destination failed", String(err)),
+                          );
+                        }}
+                      >
+                        <Feather name="x-circle" size={15} color="#fca5a5" />
+                        <Text style={styles.clearDestBtnText}>Clear destination</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
                 </>
               )}
 
-            {selectedIncident ? (
-              <IncidentActions
-                incidentId={selectedIncident.id}
-                lat={selectedIncident.lat}
-                lng={selectedIncident.lng}
-                label={selectedIncident.name ?? selectedIncident.label}
-                currentType={selectedIncident.incidentType}
-                onClosed={closeSelection}
-              />
-            ) : null}
             </BottomSheetScrollView>
           </>
         ) : null}
         </View>
       </BottomSheet>
 
-      {activeTab === "map" && !selectedMarker ? <MedicStatusControl /> : null}
-      {!selectedMarker ? <IncidentFAB /> : null}
+      {/* Hidden while assigned to an incident — the assigned banner takes over
+          that slot (status can't be changed while responding anyway). */}
+      {activeTab === "map" && !selectedMarker && navPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
+      {!selectedMarker && navPhase === "idle" ? <IncidentFAB /> : null}
       <ReportIncidentSheet />
+
+      {/* Navigation feature: radial menu + transport/variants/editing/active overlays. */}
+      <NavRadialMenu
+        anchor={radialAnchor}
+        onNavigate={() => {
+          if (!radialAnchor) return;
+          useNavStore.getState().openTransport({
+            lat: radialAnchor.lat,
+            lng: radialAnchor.lng,
+            label: "Dropped pin",
+          });
+          setRadialAnchor(null);
+        }}
+        onMarkIncident={() => {
+          const at = radialAnchor ? { lat: radialAnchor.lat, lng: radialAnchor.lng } : undefined;
+          setRadialAnchor(null);
+          void startIncidentReport(at);
+        }}
+        onAddPoint={() => {
+          if (radialAnchor) setPendingPoi({ lat: radialAnchor.lat, lng: radialAnchor.lng });
+          setRadialAnchor(null);
+        }}
+        onCancel={() => setRadialAnchor(null)}
+      />
+      {activeTab === "map" && !selectedMarker ? <AssignedIncidentBanner /> : null}
+      <TransportSheet />
+      <RouteVariantsOverlay />
+      <RouteEditHelperBanner />
+      <RouteEditingSheet />
+      <ActiveNavOverlay />
 
       <NewPoiSheet
         pending={pendingPoi}
@@ -3539,23 +3804,34 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <SettingsScreen onClose={() => setActiveTab("map")} />
         </View>
       ) : null}
+      {activeTab === "guide" ? (
+        <View style={styles.tabOverlay}>
+          <FieldGuideScreen onClose={() => setActiveTab("map")} />
+        </View>
+      ) : null}
 
       <PendingIncidentsSheet visible={pendingSheetOpen} onClose={() => setPendingSheetOpen(false)} />
 
-      {/* Bottom navigation bar */}
-      <View style={styles.bottomMenu}>
-        {(["map", "tracks"] as const).map((tab) => (
-          <Pressable
-            key={tab}
-            style={styles.bottomMenuItem}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.bottomMenuText, activeTab === tab && styles.bottomMenuTextActive]}>
-              {tab.toUpperCase()}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* Bottom navigation bar — hidden during active navigation, and while a
+          marker detail sheet is open (the sheet covers it and Tracks isn't a
+          useful destination from there). */}
+      {navPhase !== "active" && !selectedMarker ? (
+        <View style={styles.bottomMenu}>
+          {([
+            { tab: "map", label: "Map", icon: "map" },
+            { tab: "tracks", label: "Tracks", icon: "git-merge" },
+          ] as const).map(({ tab, label, icon }) => {
+            const active = activeTab === tab;
+            return (
+              <Pressable key={tab} style={styles.bottomMenuItem} onPress={() => setActiveTab(tab)}>
+                <View style={[styles.bottomMenuAccent, active && styles.bottomMenuAccentActive]} />
+                <Feather name={icon} size={20} color={active ? "#34d399" : "#5b6b80"} />
+                <Text style={[styles.bottomMenuText, active && styles.bottomMenuTextActive]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
     </View>
   );
@@ -3581,7 +3857,7 @@ const styles = StyleSheet.create({
   },
   menuBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 18,
+    zIndex: 40,
     backgroundColor: "rgba(0, 0, 0, 0.12)",
   },
   missionStrip: {
@@ -3680,10 +3956,38 @@ const styles = StyleSheet.create({
   headerActions: {
     gap: 9,
   },
+  clearDestBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginTop: 10,
+    paddingVertical: 11,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.35)",
+    backgroundColor: "rgba(239,68,68,0.08)",
+  },
+  clearDestBtnText: { color: "#fca5a5", fontSize: 13, fontWeight: "800" },
   headerActionButtonActive: {
     borderColor: "rgba(52, 211, 153, 0.55)",
     backgroundColor: "rgba(6, 24, 20, 0.95)",
   },
+  healthBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#f59e0b",
+    borderWidth: 1.5,
+    borderColor: "#0a1322",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  healthBadgeText: { color: "#1a1206", fontSize: 11, fontWeight: "900", lineHeight: 13 },
   headerActionButton: {
     width: 46,
     height: 46,
@@ -3747,23 +4051,59 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.28)",
     backgroundColor: "rgba(8, 15, 28, 0.96)",
-    zIndex: 24,
+    zIndex: 44,
     padding: 12,
     gap: 10,
   },
   layersPopup: {
     position: "absolute",
-    top: 94,
+    top: 84,
     right: 12,
-    width: 258,
-    borderRadius: 14,
+    width: 266,
+    maxHeight: SCREEN_HEIGHT * 0.66,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.28)",
-    backgroundColor: "rgba(8, 15, 28, 0.96)",
-    zIndex: 24,
-    padding: 12,
-    gap: 10,
+    backgroundColor: "rgba(8, 15, 28, 0.97)",
+    zIndex: 44,
   },
+  layersPopupContent: { padding: 12, gap: 9 },
+  layerSectionLabel: {
+    color: "#4A5F7A",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.1,
+    marginTop: 4,
+    marginBottom: 1,
+  },
+  segmentRow: {
+    flexDirection: "row",
+    gap: 5,
+    backgroundColor: "rgba(13, 24, 42, 0.7)",
+    borderRadius: 11,
+    padding: 4,
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  segmentItemActive: { backgroundColor: "#34d399" },
+  segmentText: { color: "#9fb3cc", fontSize: 11.5, fontWeight: "800" },
+  segmentTextActive: { color: "#04121f" },
+  miniSegmentRow: {
+    flexDirection: "row",
+    gap: 3,
+    backgroundColor: "rgba(13, 24, 42, 0.7)",
+    borderRadius: 8,
+    padding: 3,
+  },
+  miniSegmentItem: { paddingVertical: 4, paddingHorizontal: 9, borderRadius: 6 },
+  miniSegmentText: { color: "#9fb3cc", fontSize: 10.5, fontWeight: "800" },
   menuPopupTitle: {
     color: "#f1f7ff",
     fontSize: 14,
@@ -3999,6 +4339,22 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     textAlign: "center",
   },
+  // Selected marker: bright halo ring so the active selection is unmistakable.
+  selectedHalo: {
+    padding: 5,
+    borderRadius: 999,
+    borderWidth: 2.5,
+    borderColor: "rgba(255,255,255,0.95)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#fff",
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  incidentDotSelected: {
+    borderWidth: 2.5,
+    transform: [{ scale: 1.12 }],
+  },
   incidentDotClosed: {
     backgroundColor: "#64748b",
     borderColor: "rgba(255,255,255,0.5)",
@@ -4007,6 +4363,42 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.85)",
     fontSize: 12,
   },
+  medicMarkerWrap: { alignItems: "center", justifyContent: "center" },
+  medicLight: {
+    position: "absolute",
+    top: -3,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.85)",
+    zIndex: 3,
+  },
+  medicLightLeft: { left: -2 },
+  medicLightRight: { right: -2 },
+  medicLightOn: {
+    backgroundColor: "#3b82f6",
+    shadowColor: "#3b82f6",
+    shadowOpacity: 0.95,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  medicLightOff: { backgroundColor: "rgba(59,130,246,0.28)" },
+  medicCornerBadge: {
+    position: "absolute",
+    bottom: -3,
+    right: -3,
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#04121f",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 3,
+  },
+  medicStationaryBadge: { backgroundColor: "#34d399" },
+  medicMovingBadge: { backgroundColor: "#fbbf24" },
   paramedicDot: {
     width: 30,
     height: 30,
@@ -4319,6 +4711,18 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(177, 199, 224, 0.16)",
     paddingBottom: 10,
   },
+  incidentChipsRow: { flexDirection: "row", gap: 7 },
+  incidentChip: {
+    flex: 1,
+    backgroundColor: "rgba(15, 29, 48, 0.74)",
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.14)",
+    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+  },
+  incidentChipLabel: { color: "#6b829c", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.6 },
+  incidentChipValue: { color: "#e4edf8", fontSize: 12.5, fontWeight: "800", marginTop: 2 },
   sheetInfoLabel: {
     color: "#96adc7",
     fontSize: 12,
@@ -4676,14 +5080,24 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    gap: 2,
   },
+  bottomMenuAccent: {
+    position: "absolute",
+    top: 0,
+    width: 26,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "transparent",
+  },
+  bottomMenuAccentActive: { backgroundColor: "#34d399" },
   bottomMenuText: {
-    color: "#8ea5bf",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
+    color: "#5b6b80",
+    fontSize: 10.5,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   bottomMenuTextActive: {
-    color: "#61df7d",
+    color: "#34d399",
   },
 });

@@ -10,7 +10,7 @@ import {
   startLocationLoop,
 } from "../location/location-tracker";
 import * as TaskManager from "expo-task-manager";
-import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "../location/battery-optimization";
+import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization, openAppDetailsSettings } from "../location/battery-optimization";
 import { resolveLocalhostUrl } from "../ui/runtime-host";
 import { useLocationStatus } from "./location-status";
 import { freshnessLabel } from "../map/freshness";
@@ -163,7 +163,16 @@ export function LocationScreen() {
             await refreshDiagnostics();
           }}
         >
-          <Text style={styles.btnText}>Open battery optimization settings</Text>
+          <Text style={styles.btnText}>Disable battery optimization (prompt)</Text>
+        </Pressable>
+        <Pressable
+          style={styles.btn}
+          onPress={async () => {
+            await openAppDetailsSettings(ANDROID_PACKAGE);
+            await refreshDiagnostics();
+          }}
+        >
+          <Text style={styles.btnText}>App settings → Battery (fix “Restricted”)</Text>
         </Pressable>
         <Pressable
           style={styles.btn}

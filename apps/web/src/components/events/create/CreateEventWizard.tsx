@@ -13,7 +13,7 @@ import ReviewPublishStep from './steps/ReviewPublishStep'
 import type { EventFormData, Discipline, DisciplineType, POIType, VehicleType } from '@/lib/types'
 import { useCreateEvent } from '@/hooks/useEvents'
 import { fetchEventById, updateEvent } from '@/api/events'
-import { fetchGpxCoordinates } from '@/lib/gpx'
+import { fetchGpxTrack } from '@/lib/gpx'
 import { generateMapSnapshot } from '@/lib/mapSnapshot'
 
 function makeToday() {
@@ -77,7 +77,7 @@ export default function CreateEventWizard({
             id: `day-${dayIdx + 1}`,
             date: (() => { const d = new Date(day.date); d.setHours(0, 0, 0, 0); return d })(),
             disciplines: await Promise.all((day.disciplines ?? []).map(async (disc, discIdx): Promise<Discipline> => {
-              const gpxCoords = disc.gpxUrl ? await fetchGpxCoordinates(disc.gpxUrl) : []
+              const gpx = disc.gpxUrl ? await fetchGpxTrack(disc.gpxUrl) : { coordinates: [], elevationProfile: [] }
               return {
                 id: `disc-${dayIdx}-${discIdx}`,
                 name: disc.name,
@@ -88,7 +88,8 @@ export default function CreateEventWizard({
                 gpxFile: undefined,
                 gpxUrl: disc.gpxUrl,
                 gpxUploaded: !!disc.gpxUrl,
-                gpxCoordinates: gpxCoords.length > 0 ? gpxCoords : undefined,
+                gpxCoordinates: gpx.coordinates.length > 0 ? gpx.coordinates : undefined,
+                elevationProfile: gpx.elevationProfile.length > 0 ? gpx.elevationProfile : undefined,
               }
             })),
             pois: (day.pois ?? []).map((poi, poiIdx) => ({
@@ -96,6 +97,8 @@ export default function CreateEventWizard({
               type: poi.type as POIType,
               coordinates: [poi.lng, poi.lat] as [number, number],
               name: poi.name,
+              description: poi.description,
+              icon: poi.icon,
             })),
             assignments: (day.assignments ?? []).map(a => ({
               userId: a.userId,

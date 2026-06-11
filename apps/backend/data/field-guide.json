@@ -1,0 +1,554 @@
+[
+  {
+    "title": "Cardiac arrest",
+    "category": "cardiac",
+    "keywords": [
+      "unresponsive",
+      "no breathing",
+      "no pulse",
+      "collapse",
+      "CPR",
+      "AED"
+    ],
+    "summary": "Unresponsive, not breathing normally — start CPR immediately.",
+    "signs": [
+      "No response to voice/pain",
+      "No or agonal (gasping) breathing",
+      "No pulse within 10s"
+    ],
+    "actions": [
+      "Call for backup + AED immediately",
+      "Start compressions: 100–120/min, 5–6 cm deep, full recoil",
+      "30:2 with ventilations, minimize pauses",
+      "Attach AED as soon as it arrives — follow prompts",
+      "Rotate compressors every 2 min"
+    ],
+    "redFlags": [
+      "Any delay to compressions reduces survival ~10% per minute"
+    ],
+    "id": "9cb1ca9f-d803-49bf-840c-45adc600d6c0",
+    "updatedAt": "2026-06-11T07:22:05.338Z"
+  },
+  {
+    "title": "Heart attack (MI)",
+    "category": "cardiac",
+    "keywords": [
+      "chest pain",
+      "pressure",
+      "arm pain",
+      "jaw pain",
+      "sweating",
+      "nausea",
+      "infarct"
+    ],
+    "summary": "Crushing chest pain/pressure, often with sweating and nausea.",
+    "signs": [
+      "Central chest pressure >15 min",
+      "Radiates to arm/jaw/back",
+      "Pale, sweaty, anxious",
+      "Shortness of breath"
+    ],
+    "actions": [
+      "Stop all exertion, sit patient down (W-position)",
+      "Call ambulance for transport — this is time-critical",
+      "Aspirin 300 mg chewed (if no allergy/bleeding)",
+      "Monitor closely — be ready for arrest (AED nearby)"
+    ],
+    "redFlags": [
+      "Loss of consciousness",
+      "Irregular/absent pulse",
+      "BP drop"
+    ],
+    "id": "06126eb1-1b3f-4e4b-82f1-39cfc51557be",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Stroke",
+    "category": "neuro",
+    "keywords": [
+      "face droop",
+      "arm weakness",
+      "speech",
+      "FAST",
+      "confusion",
+      "sudden headache"
+    ],
+    "summary": "FAST: Face droop, Arm weakness, Speech trouble — Time to evacuate.",
+    "signs": [
+      "Facial droop on one side",
+      "One arm drifts down",
+      "Slurred/strange speech",
+      "Sudden severe headache or vision loss"
+    ],
+    "actions": [
+      "Note exact time of symptom onset — critical for thrombolysis",
+      "Immediate ambulance transport, no delays on scene",
+      "Nothing by mouth (swallowing may be impaired)",
+      "Position: slightly elevated head if conscious; recovery position if not"
+    ],
+    "redFlags": [
+      "Decreasing consciousness",
+      "Seizure",
+      "Onset time unknown"
+    ],
+    "id": "0d940d92-0430-4247-91fd-5fcccf832565",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Hypoglycemia",
+    "category": "metabolic",
+    "keywords": [
+      "diabetic",
+      "low sugar",
+      "shaky",
+      "sweaty",
+      "confused",
+      "glucose"
+    ],
+    "summary": "Diabetic or exhausted athlete: shaky, sweaty, confused — give sugar.",
+    "signs": [
+      "Trembling, cold sweat",
+      "Confusion, aggression, slurred speech",
+      "Pale skin",
+      "Known diabetic / long race effort"
+    ],
+    "actions": [
+      "Conscious & can swallow: 15–20 g fast sugar (gel, juice, cola)",
+      "Re-check in 10–15 min, repeat sugar if still symptomatic",
+      "Follow with slow carbs (bar, sandwich) once improving",
+      "Unconscious: recovery position, NOTHING by mouth, call ambulance (IM glucagon if available)"
+    ],
+    "redFlags": [
+      "Unconsciousness or seizure",
+      "No improvement after second dose"
+    ],
+    "id": "49860035-f5ca-4c4e-9ca3-a4a50c0858e6",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Heat stroke",
+    "category": "environmental",
+    "keywords": [
+      "hot",
+      "collapse",
+      "confusion",
+      "no sweating",
+      "core temperature",
+      "hyperthermia"
+    ],
+    "summary": "Hot + confused athlete = emergency. Cool first, transport second.",
+    "signs": [
+      "Altered mental state (confusion, aggression, collapse)",
+      "Core temp >40°C (rectal if possible)",
+      "Hot skin — sweating may continue in exertional heat stroke"
+    ],
+    "actions": [
+      "Move to shade, strip excess clothing",
+      "Aggressive cooling NOW: ice-water immersion if available, else ice packs to neck/armpits/groin + douse with water and fan",
+      "Cool first, transport second (target <39°C)",
+      "Monitor airway and consciousness throughout"
+    ],
+    "redFlags": [
+      "Seizures",
+      "Vomiting with reduced consciousness",
+      "No rapid temperature drop"
+    ],
+    "id": "d718aba5-06f9-4f9b-bc69-b7416081ec1b",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Heat exhaustion",
+    "category": "environmental",
+    "keywords": [
+      "dizzy",
+      "cramps",
+      "nausea",
+      "fatigue",
+      "dehydration",
+      "hot"
+    ],
+    "summary": "Dizzy, nauseous, heavy sweating but mentally intact — rest and cool.",
+    "signs": [
+      "Heavy sweating, pale",
+      "Dizziness, headache, nausea, cramps",
+      "Normal or mildly elevated mentation — answers correctly"
+    ],
+    "actions": [
+      "Stop activity, shade, lie down with legs elevated",
+      "Cool with water spray + fanning, cold packs",
+      "Oral rehydration with electrolytes if not vomiting",
+      "Reassess in 15–30 min before any return to course"
+    ],
+    "redFlags": [
+      "Any confusion → treat as heat stroke",
+      "Persistent vomiting",
+      "Symptoms not improving in 30 min"
+    ],
+    "id": "80e8ffeb-eb5d-4b2c-9d4e-0eec24f67f3a",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Anaphylaxis",
+    "category": "allergy",
+    "keywords": [
+      "allergic",
+      "swelling",
+      "hives",
+      "wheeze",
+      "bee sting",
+      "epipen"
+    ],
+    "summary": "Rapid allergic reaction with airway/breathing/circulation involvement — adrenaline first.",
+    "signs": [
+      "Hives + facial/lip swelling",
+      "Wheeze, hoarse voice, stridor",
+      "Hypotension, dizziness, collapse",
+      "Onset minutes after sting/food"
+    ],
+    "actions": [
+      "IM adrenaline 0.5 mg anterolateral thigh IMMEDIATELY (EpiPen)",
+      "Call ambulance — always transport after adrenaline",
+      "Lie flat, legs raised (sitting up only if breathing is hard)",
+      "Repeat adrenaline after 5 min if no improvement"
+    ],
+    "redFlags": [
+      "Stridor or silent chest",
+      "Collapse — never stand the patient up suddenly"
+    ],
+    "id": "82310ca9-8093-4b5f-8846-c04a68495149",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Asthma attack",
+    "category": "airway",
+    "keywords": [
+      "wheeze",
+      "inhaler",
+      "can't breathe",
+      "tight chest",
+      "salbutamol"
+    ],
+    "summary": "Wheezing, struggling to speak — assist with their inhaler, sit upright.",
+    "signs": [
+      "Wheeze, prolonged exhale",
+      "Speaking in short phrases/words",
+      "Using neck/shoulder muscles to breathe"
+    ],
+    "actions": [
+      "Sit upright, stay calm and coach slow breathing",
+      "4–10 puffs salbutamol via spacer, repeat every 10–15 min as needed",
+      "No improvement after 10 puffs → ambulance",
+      "Monitor for exhaustion — quieting wheeze can be deterioration"
+    ],
+    "redFlags": [
+      "Silent chest",
+      "Cyanosis (blue lips)",
+      "Exhaustion or confusion"
+    ],
+    "id": "4a4299cf-78dd-4520-9781-e9d4dc0b8058",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Seizure",
+    "category": "neuro",
+    "keywords": [
+      "convulsion",
+      "epilepsy",
+      "fitting",
+      "shaking",
+      "postictal"
+    ],
+    "summary": "Protect from injury, time the seizure, recovery position after.",
+    "signs": [
+      "Tonic-clonic shaking, unresponsive",
+      "Possible tongue biting / incontinence",
+      "Confused (postictal) afterwards"
+    ],
+    "actions": [
+      "Time it from the start; clear hard objects away, pad the head",
+      "Do NOT restrain, nothing in the mouth",
+      "When jerking stops: airway check + recovery position",
+      "Stay until fully reoriented; check glucose if possible"
+    ],
+    "redFlags": [
+      ">5 min or repeated seizures (status) → ambulance + escalate",
+      "First-ever seizure",
+      "Seizure after head injury or in water"
+    ],
+    "id": "f579c144-383b-4e5d-a60a-ba5393b90b96",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Severe bleeding",
+    "category": "trauma",
+    "keywords": [
+      "hemorrhage",
+      "bleeding",
+      "laceration",
+      "tourniquet",
+      "pressure"
+    ],
+    "summary": "Direct pressure first, tourniquet for limb bleeds that won't stop.",
+    "signs": [
+      "Visible heavy/spurting bleed",
+      "Soaked dressings",
+      "Pale, fast pulse → shock developing"
+    ],
+    "actions": [
+      "Gloves on; firm direct pressure with dressing",
+      "Bleeding through? Add a second dressing on top, press harder",
+      "Uncontrollable limb bleed: tourniquet 5–7 cm above the wound, note the time",
+      "Treat for shock: lie flat, keep warm; urgent transport"
+    ],
+    "redFlags": [
+      "Pulsatile/arterial bleeding",
+      "Signs of shock",
+      "Junctional bleeds (groin/axilla) — pack and hold"
+    ],
+    "id": "78b3f15a-08e9-4e07-a334-6cbaa7a43b50",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Fractured femur",
+    "category": "trauma",
+    "keywords": [
+      "thigh",
+      "leg fracture",
+      "deformity",
+      "traction",
+      "fall",
+      "crash"
+    ],
+    "summary": "Shortened, rotated, very painful thigh — splint, treat for shock, transport.",
+    "signs": [
+      "Severe thigh pain, unable to weight-bear",
+      "Leg shortened/rotated, thigh swelling",
+      "High-energy mechanism (bike crash, fall)"
+    ],
+    "actions": [
+      "Don't move until splinted; check pulse/sensation below injury",
+      "Traction splint if trained & available, else immobilize to the other leg with padding",
+      "Treat for shock — femur can lose 1–1.5 L blood internally",
+      "Analgesia per protocol; ambulance transport"
+    ],
+    "redFlags": [
+      "No distal pulse",
+      "Open fracture",
+      "Shock signs"
+    ],
+    "id": "2c61e179-82db-4933-a59c-af6a2f9c7527",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Ankle / lower limb injury",
+    "category": "trauma",
+    "keywords": [
+      "sprain",
+      "ankle",
+      "twist",
+      "swelling",
+      "RICE",
+      "ottawa"
+    ],
+    "summary": "Twisted ankle: RICE; suspect fracture if bony tenderness or can't walk 4 steps.",
+    "signs": [
+      "Swelling/bruising around the joint",
+      "Pain on bony landmarks (malleoli, 5th metatarsal)",
+      "Unable to take 4 steps"
+    ],
+    "actions": [
+      "Rest, Ice (max 20 min), Compression bandage, Elevation",
+      "Bony tenderness or can't weight-bear → immobilize, treat as fracture",
+      "Check pulse/sensation distal to the injury",
+      "Arrange transport off course — no hopping kilometres"
+    ],
+    "redFlags": [
+      "Obvious deformity",
+      "Numb/cold foot",
+      "Open wound over the joint"
+    ],
+    "id": "e1c5635f-3473-4859-9ba8-a0dc8dec4530",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Head injury / concussion",
+    "category": "trauma",
+    "keywords": [
+      "concussion",
+      "head",
+      "fall",
+      "confused",
+      "vomiting",
+      "LOC"
+    ],
+    "summary": "Any knocked head with confusion or LOC comes off the course — period.",
+    "signs": [
+      "Dazed, slow answers, repeats questions",
+      "Headache, nausea, balance problems",
+      "Brief loss of consciousness"
+    ],
+    "actions": [
+      "Remove from activity immediately — no same-day return",
+      "Assess responsiveness (AVPU) and reassess every few minutes",
+      "Suspect neck injury with high-energy mechanism — keep head still",
+      "Worsening symptoms → ambulance for CT"
+    ],
+    "redFlags": [
+      "Repeated vomiting",
+      "Worsening headache or drowsiness",
+      "Unequal pupils",
+      "Seizure",
+      "Blood/fluid from ears/nose"
+    ],
+    "id": "12c10061-c1d9-4ace-b892-790dad2f75c7",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Spinal injury (suspected)",
+    "category": "trauma",
+    "keywords": [
+      "neck",
+      "back",
+      "fall from height",
+      "numbness",
+      "tingling",
+      "immobilize"
+    ],
+    "summary": "High-energy mechanism + neck/back pain or neuro signs — don't move them.",
+    "signs": [
+      "Midline neck/back pain or tenderness",
+      "Numbness, tingling, weakness in limbs",
+      "High-risk mechanism (high-speed crash, fall)"
+    ],
+    "actions": [
+      "Tell the patient to keep still; hold head in neutral manual stabilization",
+      "Move only for airway problems or scene danger (log-roll with help)",
+      "Keep warm, monitor breathing",
+      "Ambulance with immobilization equipment"
+    ],
+    "redFlags": [
+      "Any neuro deficit",
+      "Altered consciousness — airway takes priority over the spine"
+    ],
+    "id": "2a49a529-c5ac-4c16-ba32-a06596e931f2",
+    "updatedAt": "2026-06-11T07:22:11.115Z"
+  },
+  {
+    "title": "Hyponatremia (overhydration)",
+    "category": "metabolic",
+    "keywords": [
+      "too much water",
+      "bloated",
+      "confusion",
+      "endurance",
+      "sodium",
+      "EAH"
+    ],
+    "summary": "Endurance athlete who drank lots of plain water: bloated, confused — do NOT give more fluids.",
+    "signs": [
+      "High plain-water intake during long events",
+      "Bloating, puffy hands/face, weight gain",
+      "Headache, nausea, confusion — can mimic dehydration"
+    ],
+    "actions": [
+      "STOP all hypotonic fluids — no water, no sports drink",
+      "Mild + alert: salty snacks, observe",
+      "Confusion/vomiting → urgent transport (needs hypertonic saline)",
+      "Document fluid intake history for hospital"
+    ],
+    "redFlags": [
+      "Confusion or seizure",
+      "Treating as dehydration and giving fluids makes it fatal"
+    ],
+    "id": "e384eff0-22f4-4a2a-967b-d54997fb0566",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Hypothermia",
+    "category": "environmental",
+    "keywords": [
+      "cold",
+      "shivering",
+      "wet",
+      "mountain",
+      "rewarming"
+    ],
+    "summary": "Cold, wet, slowing down: insulate from the ground, rewarm gently, handle gently.",
+    "signs": [
+      "Shivering (stops when severe)",
+      "Slow, clumsy, withdrawn, slurred",
+      "Cold exposure: wet clothing, wind, exhaustion"
+    ],
+    "actions": [
+      "Shelter from wind/rain; remove wet clothing",
+      "Insulate from ground; wrap including head (hypothermia wrap)",
+      "Conscious + shivering: warm sweet drinks, calorie intake",
+      "Severe (no shivering, drowsy): handle very gently, no standing/walking, urgent evacuation"
+    ],
+    "redFlags": [
+      "Stopped shivering",
+      "Decreased consciousness",
+      "Rough handling can trigger arrest"
+    ],
+    "id": "d564f47b-ace7-43d1-9e32-d727fe5a430b",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Shock",
+    "category": "cardiac",
+    "keywords": [
+      "pale",
+      "fast pulse",
+      "low blood pressure",
+      "clammy",
+      "bleeding"
+    ],
+    "summary": "Pale, clammy, fast weak pulse — find and treat the cause, lie flat, keep warm.",
+    "signs": [
+      "Pale/grey, cold, clammy skin",
+      "Fast weak pulse, fast breathing",
+      "Anxiety → drowsiness as it worsens"
+    ],
+    "actions": [
+      "Lie flat, elevate legs (unless breathing problems/chest injury)",
+      "Control any external bleeding",
+      "Keep warm, nothing by mouth",
+      "Urgent transport — monitor consciousness and pulse continuously"
+    ],
+    "redFlags": [
+      "Falling consciousness",
+      "Hidden bleeds: abdomen, pelvis, femur"
+    ],
+    "id": "f3f11641-9870-4a38-85cc-0a2157cdb200",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Choking",
+    "category": "airway",
+    "keywords": [
+      "airway",
+      "obstruction",
+      "can't speak",
+      "universal sign",
+      "heimlich"
+    ],
+    "summary": "Can't speak or cough: 5 back blows, 5 abdominal thrusts, repeat.",
+    "signs": [
+      "Clutching throat, unable to speak/cough",
+      "Silent attempts to cough, panic",
+      "Cyanosis developing"
+    ],
+    "actions": [
+      "Effective cough → encourage coughing, watch",
+      "Ineffective: 5 sharp back blows between shoulder blades",
+      "Then 5 abdominal thrusts; alternate 5-and-5",
+      "Unconscious → start CPR, look in mouth before breaths"
+    ],
+    "redFlags": [
+      "Loss of consciousness",
+      "Persistent obstruction after thrusts"
+    ],
+    "id": "e345f07d-7290-4084-bac2-33560b2ddb2c",
+    "updatedAt": "2026-06-11T06:36:40.293Z"
+  }
+]

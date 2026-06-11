@@ -10,6 +10,8 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
   const setLocationIntervalMs = useSettingsStore((s) => s.setLocationIntervalMs);
   const trackOffsetEnabled = useSettingsStore((s) => s.trackOffsetEnabled);
   const setTrackOffsetEnabled = useSettingsStore((s) => s.setTrackOffsetEnabled);
+  const trackGradientEnabled = useSettingsStore((s) => s.trackGradientEnabled);
+  const setTrackGradientEnabled = useSettingsStore((s) => s.setTrackGradientEnabled);
 
   const pickInterval = (ms: number) => {
     if (ms === locationIntervalMs) return;
@@ -44,6 +46,23 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
               value={trackOffsetEnabled}
               onValueChange={(v) => {
                 setTrackOffsetEnabled(v);
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              trackColor={{ false: "#1e293b", true: "#16a34a" }}
+              thumbColor="#f1f5f9"
+            />
+          </View>
+          <View style={[styles.row, styles.rowDivider]}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Track gradient shading</Text>
+              <Text style={styles.rowSub}>
+                Shade tracks by slope/elevation gradient instead of a flat colour.
+              </Text>
+            </View>
+            <Switch
+              value={trackGradientEnabled}
+              onValueChange={(v) => {
+                setTrackGradientEnabled(v);
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
               trackColor={{ false: "#1e293b", true: "#16a34a" }}
@@ -123,6 +142,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   row: { flexDirection: "row", alignItems: "center", gap: 14 },
+  rowDivider: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: "rgba(148,163,184,0.12)" },
   rowText: { flex: 1 },
   rowTitle: { color: "#e2e8f0", fontSize: 15, fontWeight: "800" },
   rowSub: { color: "#64748b", fontSize: 12.5, fontWeight: "500", marginTop: 3, lineHeight: 17 },

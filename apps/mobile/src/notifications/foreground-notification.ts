@@ -1,74 +1,29 @@
-import notifee, { AndroidImportance, AndroidVisibility, EventType } from "@notifee/react-native";
+import notifee, { EventType } from "@notifee/react-native";
 import { Platform } from "react-native";
 import { stopLocationLoop } from "../location/location-tracker";
 import { useIncidentStore } from "../incidents/incident-store";
 import { useNotificationFocus } from "./notification-focus";
 import { debugLog } from "../debug/debug-log";
 
-const CHANNEL_ID = "tracking";
+// The persistent tracking notification is owned by expo-location's foreground
+// service now (that service is what keeps updates alive after the app is
+// backgrounded/swiped away — a notifee-owned service could not). This module
+// keeps the notifee event handlers (incident alert taps + legacy actions) and
+// the shared group id.
 const NOTIFICATION_ID = "tracking-ongoing";
+
+/** All app notifications share this group so incident/broadcast alerts stack
+ *  together in the tray. */
+export const NOTIFICATION_GROUP_ID = "medic-event-app";
 
 export const NOTIF_ACTION_REPORT = "report-incident";
 export const NOTIF_ACTION_STOP = "stop-tracking";
 
-let channelEnsured = false;
-
-async function ensureChannel(): Promise<void> {
-  if (channelEnsured || Platform.OS !== "android") return;
-  await notifee.createChannel({
-    id: CHANNEL_ID,
-    name: "Location tracking",
-    importance: AndroidImportance.LOW, // quiet, persistent
-    visibility: AndroidVisibility.PUBLIC,
-  });
-  channelEnsured = true;
-}
-
-/**
- * Show a persistent ongoing notification with "Report incident" and "Stop
- * tracking" action buttons. Stays in the tray while the app collects location
- * in the background.
- */
-export async function showTrackingNotification(isMedic: boolean): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    await ensureChannel();
-    await notifee.requestPermission();
-    await notifee.displayNotification({
-      id: NOTIFICATION_ID,
-      title: "Paramedic Event App",
-      body: isMedic
-        ? "Sharing your location with the command centre"
-        : "Sharing location with event coordinators",
-      android: {
-        channelId: CHANNEL_ID,
-        ongoing: true,
-        autoCancel: false,
-        onlyAlertOnce: true,
-        color: "#00C37A",
-        smallIcon: "ic_launcher", // always present in an Expo Android build
-        pressAction: { id: "default", launchActivity: "default" },
-        actions: [
-          {
-            title: "Report incident",
-            pressAction: { id: NOTIF_ACTION_REPORT, launchActivity: "default" },
-          },
-          {
-            title: "Stop tracking",
-            pressAction: { id: NOTIF_ACTION_STOP },
-          },
-        ],
-      },
-    });
-    debugLog("app", "info", "tracking notification shown");
-  } catch (err) {
-    debugLog("app", "error", "failed to show tracking notification", String(err));
-  }
-}
-
+/** Remove the legacy notifee tracking notification (older builds showed one). */
 export async function hideTrackingNotification(): Promise<void> {
   if (Platform.OS !== "android") return;
   try {
+    await notifee.stopForegroundService();
     await notifee.cancelNotification(NOTIFICATION_ID);
   } catch {
     // ignore

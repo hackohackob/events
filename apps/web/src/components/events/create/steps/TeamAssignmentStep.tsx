@@ -234,7 +234,7 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(148,163,184,0.12)', color: '#94a3b8' }}
           >
             <option value="all">All Roles</option>
-            <option value="paramedic">Paramedic</option>
+            <option value="paramedic">Medic</option>
             <option value="emt">EMT</option>
             <option value="doctor">Doctor</option>
             <option value="coordinator">Coordinator</option>

@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { IncidentStatus, UserRole } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
@@ -18,6 +18,8 @@ export interface IncidentRecord {
   description: string;
   severity?: string;
   photoUrl?: string;
+  /** All photos attached to the incident, oldest first (includes photoUrl). */
+  photoUrls: string[];
   status: IncidentStatus;
   createdBy: string;
   reportedBy?: string;
@@ -40,6 +42,9 @@ export interface IncidentMessageRecord {
   authorName: string;
   text: string;
   photoUrl?: string;
+  /** Voice message attachment (server-relative URL). */
+  audioUrl?: string;
+  audioDurationMs?: number;
   createdAt: string;
 }
 
@@ -53,6 +58,7 @@ interface IncidentRow {
   description: string;
   severity: string | null;
   photo_url: string | null;
+  photo_urls: string[] | null;
   status: string;
   created_by: string;
   reporter_name: string | null;
@@ -71,6 +77,23 @@ function toIso(value: string | Date | null): string | undefined {
   return typeof value === "string" ? value : new Date(value).toISOString();
 }
 
+/** Photo list = legacy single photo_url (if any) + the photo_urls array, deduped. */
+function mergePhotoUrls(photoUrl: string | null, photoUrls: string[] | null): string[] {
+  const list = Array.isArray(photoUrls) ? photoUrls : [];
+  if (photoUrl && !list.includes(photoUrl)) return [photoUrl, ...list];
+  return list;
+}
+
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const r = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function rowToRecord(r: IncidentRow): IncidentRecord {
   return {
     id: r.id,
@@ -82,6 +105,7 @@ function rowToRecord(r: IncidentRow): IncidentRecord {
     description: r.description,
     severity: r.severity ?? undefined,
     photoUrl: r.photo_url ?? undefined,
+    photoUrls: mergePhotoUrls(r.photo_url, r.photo_urls),
     status: r.status as IncidentStatus,
     createdBy: r.created_by,
     reportedBy: r.reporter_name ?? undefined,
@@ -141,6 +165,7 @@ export class IncidentsService implements OnModuleInit {
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS transport  TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_by  TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_at  TIMESTAMPTZ`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'`,
     ];
     for (const sql of alterations) {
       await this.db.query(sql);
@@ -162,6 +187,8 @@ export class IncidentsService implements OnModuleInit {
       CREATE INDEX IF NOT EXISTS idx_incident_messages_incident
         ON incident_messages (incident_id, created_at ASC)
     `);
+    await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS audio_url TEXT`);
+    await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER`);
 
     // Legacy PostGIS `location` geometry column may exist with a NOT NULL
     // constraint from an older schema. No current code populates it, so relax
@@ -246,6 +273,38 @@ export class IncidentsService implements OnModuleInit {
     return "Dashboard";
   }
 
+  /**
+   * Insert a system "log" entry into the incident chat (reported / dispatched /
+   * arrived / …) and broadcast it like a normal message. Clients render
+   * author_id "system" as a timeline divider. Best-effort — never throws.
+   */
+  private async systemMessage(eventId: string, incidentId: string, text: string): Promise<void> {
+    try {
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      await this.db.query(
+        `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, created_at)
+         VALUES ($1, $2, $3, 'system', 'System', $4, $5)`,
+        [id, incidentId, eventId, text, now],
+      );
+      const message: IncidentMessageRecord = {
+        id,
+        incidentId,
+        eventId,
+        authorId: "system",
+        authorName: "System",
+        text,
+        createdAt: now,
+      };
+      await this.redisService.publish(`event:${eventId}:incidents`, {
+        type: "incident.message",
+        payload: message,
+      });
+    } catch {
+      // log entries are best-effort
+    }
+  }
+
   async create(eventId: string, userId: string, input: CreateIncidentDto): Promise<IncidentRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -288,6 +347,8 @@ export class IncidentsService implements OnModuleInit {
       payload: incident,
     });
 
+    void this.systemMessage(eventId, id, `🚨 Reported by ${reporterName}`);
+
     // Alarm: every device registered to the event (medics + dashboard) gets pinged.
     void this.notificationsService.sendToEvent(
       eventId,
@@ -296,6 +357,10 @@ export class IncidentsService implements OnModuleInit {
         ? `${incident.type} — ${incident.description}`
         : `${incident.type} reported`,
       { incidentId: incident.id, eventId, kind: "incident_alarm", sound: "alarm" },
+      // Notification-payload push: the OS renders it even if the app process
+      // can't be woken (data-only proved unreliable on Samsung when killed).
+      // The v3 channel carries the bundled siren sound + strong vibration.
+      { channelId: "incident-alarm-v3" },
     );
 
     return { ...incident, nearbyParamedics: [] };
@@ -362,6 +427,23 @@ export class IncidentsService implements OnModuleInit {
 
     const incident = rowToRecord(updated[0]);
 
+    // Timeline log entry for the chat.
+    void this.resolveReporterName(eventId, userId).then((actorName) => {
+      const logText =
+        action.action === "going"
+          ? `🚑 ${actorName} is responding`
+          : action.action === "arrived"
+            ? `📍 ${actorName} arrived on scene`
+            : action.action === "resolved"
+              ? `✅ ${actorName} marked the incident resolved`
+              : action.action === "stand_down"
+                ? `↩️ ${actorName} stood down`
+                : action.action === "need_backup"
+                  ? `🆘 ${actorName} requested backup`
+                  : null;
+      if (logText) void this.systemMessage(eventId, incidentId, logText);
+    });
+
     await this.redisService.publish(`event:${eventId}:ops`, {
       type: "incident.action",
       payload: { incidentId, userId, action: action.action, status: incident.status },
@@ -397,6 +479,10 @@ export class IncidentsService implements OnModuleInit {
        SET type        = COALESCE($1, type),
            description = COALESCE($2, description),
            photo_url   = COALESCE($3, photo_url),
+           photo_urls  = CASE
+             WHEN $3::text IS NULL OR photo_urls @> to_jsonb($3::text) THEN photo_urls
+             ELSE photo_urls || jsonb_build_array($3::text)
+           END,
            severity    = COALESCE($4, severity),
            status      = COALESCE($5, status),
            updated_at  = $6
@@ -454,7 +540,175 @@ export class IncidentsService implements OnModuleInit {
       type: "incident.assigned",
       payload: { incidentId, paramedicId, responders: incident.responders },
     });
+    // Alarm the assigned medic directly — works even when their app is closed.
+    void this.notificationsService.sendToUser(
+      paramedicId,
+      eventId,
+      `🚑 Assigned: ${incident.name}`,
+      incident.description?.trim() ? `${incident.type} — ${incident.description}` : `${incident.type} — respond now`,
+      { incidentId: incident.id, eventId, kind: "incident_assigned" },
+      { channelId: "incident-alarm-v3" },
+    );
+
+    void this.resolveReporterName(eventId, paramedicId).then((medicName) => {
+      void this.systemMessage(eventId, incidentId, `🚑 ${medicName} dispatched to the incident`);
+    });
     // Broadcast the full record so every client refreshes the responders list.
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.updated",
+      payload: { ...incident, nearbyParamedics: [] },
+    });
+
+    return incident;
+  }
+
+  async noteNearbyResponderArrivals(
+    eventId: string,
+    medicId: string,
+    lat: number,
+    lng: number,
+    radiusMeters = 80,
+  ): Promise<void> {
+    const { rows } = await this.db.query<IncidentRow>(
+      `SELECT *
+       FROM incidents
+       WHERE event_id = $1
+         AND responders @> $2::jsonb
+         AND status NOT IN ('resolved', 'closed', 'archived')`,
+      [eventId, JSON.stringify([medicId])],
+    );
+
+    for (const row of rows) {
+      const incident = rowToRecord(row);
+      if (haversineMeters(lat, lng, incident.lat, incident.lng) > radiusMeters) continue;
+
+      const medicName = await this.resolveReporterName(eventId, medicId);
+      const logText = `📍 ${medicName} arrived on scene`;
+      const existing = await this.db.query<{ id: string }>(
+        `SELECT id
+         FROM incident_messages
+         WHERE event_id = $1
+           AND incident_id = $2
+           AND author_id = 'system'
+           AND text = $3
+         LIMIT 1`,
+        [eventId, incident.id, logText],
+      );
+      if (existing.rows[0]) continue;
+
+      if (incident.status !== "in_progress") {
+        const now = new Date().toISOString();
+        const { rows: updated } = await this.db.query<IncidentRow>(
+          `UPDATE incidents
+           SET status = 'in_progress', updated_at = $1
+           WHERE id = $2 AND event_id = $3
+           RETURNING *`,
+          [now, incident.id, eventId],
+        );
+        const updatedIncident = rowToRecord(updated[0]);
+        await this.redisService.publish(`event:${eventId}:ops`, {
+          type: "incident.action",
+          payload: { incidentId: incident.id, userId: medicId, action: "arrived", status: updatedIncident.status },
+        });
+        await this.redisService.publish(`event:${eventId}:incidents`, {
+          type: "incident.updated",
+          payload: { ...updatedIncident, nearbyParamedics: [] },
+        });
+      }
+
+      await this.systemMessage(eventId, incident.id, logText);
+    }
+  }
+
+  /** Remove a specific medic from an incident's responders. Allowed for roster
+   *  coordinators (the mobile session role header says "medic" even for them,
+   *  so the check is against event_medics.type), dashboard coordinators, and
+   *  medics removing themselves. */
+  async unassign(
+    eventId: string,
+    incidentId: string,
+    paramedicId: string,
+    caller: { userId: string; role: UserRole },
+  ): Promise<IncidentRecord> {
+    if (caller.role !== "coordinator" && caller.userId !== paramedicId) {
+      const { rows: callerRows } = await this.db.query<{ type: string | null }>(
+        `SELECT type FROM event_medics WHERE id::text = $1 AND event_id = $2`,
+        [caller.userId, eventId],
+      );
+      if (callerRows[0]?.type !== "coordinator") {
+        throw new ForbiddenException("Only coordinators can unassign other medics");
+      }
+    }
+
+    const { rows: existing } = await this.db.query<IncidentRow>(
+      `SELECT * FROM incidents WHERE id = $1 AND event_id = $2`,
+      [incidentId, eventId],
+    );
+
+    if (!existing[0]) {
+      throw new NotFoundException("Incident not found");
+    }
+
+    const current = rowToRecord(existing[0]);
+    const newResponders = current.responders.filter((id) => id !== paramedicId);
+    // Mirror stand_down: an assigned incident with nobody left goes back to open.
+    const newStatus: IncidentStatus =
+      newResponders.length === 0 && current.status === "assigned" ? "open" : current.status;
+
+    const now = new Date().toISOString();
+    const { rows: updated } = await this.db.query<IncidentRow>(
+      `UPDATE incidents
+       SET status = $1, responders = $2::jsonb, updated_at = $3
+       WHERE id = $4 AND event_id = $5
+       RETURNING *`,
+      [newStatus, JSON.stringify(newResponders), now, incidentId, eventId],
+    );
+
+    const incident = rowToRecord(updated[0]);
+
+    await this.redisService.publish(`event:${eventId}:ops`, {
+      type: "incident.unassigned",
+      payload: { incidentId, paramedicId, responders: incident.responders },
+    });
+
+    void this.resolveReporterName(eventId, paramedicId).then((medicName) => {
+      void this.systemMessage(eventId, incidentId, `↩️ ${medicName} was unassigned`);
+    });
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.updated",
+      payload: { ...incident, nearbyParamedics: [] },
+    });
+
+    return incident;
+  }
+
+  /** Attach an uploaded photo to an incident (any medic, any time after report). */
+  async addPhoto(eventId: string, incidentId: string, url: string): Promise<IncidentRecord> {
+    const { rows: existing } = await this.db.query<IncidentRow>(
+      `SELECT * FROM incidents WHERE id = $1 AND event_id = $2`,
+      [incidentId, eventId],
+    );
+
+    if (!existing[0]) {
+      throw new NotFoundException("Incident not found");
+    }
+
+    const current = rowToRecord(existing[0]);
+    const photoUrls = current.photoUrls.includes(url) ? current.photoUrls : [...current.photoUrls, url];
+
+    const now = new Date().toISOString();
+    const { rows: updated } = await this.db.query<IncidentRow>(
+      `UPDATE incidents
+       SET photo_urls = $1::jsonb,
+           photo_url  = COALESCE(photo_url, $2),
+           updated_at = $3
+       WHERE id = $4 AND event_id = $5
+       RETURNING *`,
+      [JSON.stringify(photoUrls), url, now, incidentId, eventId],
+    );
+
+    const incident = rowToRecord(updated[0]);
+
     await this.redisService.publish(`event:${eventId}:incidents`, {
       type: "incident.updated",
       payload: { ...incident, nearbyParamedics: [] },
@@ -509,6 +763,10 @@ export class IncidentsService implements OnModuleInit {
       payload: { ...incident, nearbyParamedics: [] },
     });
 
+    void this.resolveReporterName(eventId, userId).then((actorName) => {
+      void this.systemMessage(eventId, incidentId, `🏁 Closed with handover by ${actorName}`);
+    });
+
     return incident;
   }
 
@@ -523,6 +781,8 @@ export class IncidentsService implements OnModuleInit {
       author_name: string;
       text: string;
       photo_url: string | null;
+      audio_url: string | null;
+      audio_duration_ms: number | null;
       created_at: string;
     }>(
       `SELECT * FROM incident_messages WHERE incident_id = $1 AND event_id = $2 ORDER BY created_at ASC`,
@@ -536,6 +796,8 @@ export class IncidentsService implements OnModuleInit {
       authorName: r.author_name,
       text: r.text,
       photoUrl: r.photo_url ?? undefined,
+      audioUrl: r.audio_url ?? undefined,
+      audioDurationMs: r.audio_duration_ms ?? undefined,
       createdAt: toIso(r.created_at) ?? new Date().toISOString(),
     }));
   }
@@ -544,7 +806,7 @@ export class IncidentsService implements OnModuleInit {
     eventId: string,
     incidentId: string,
     authorId: string,
-    input: { text: string; photoUrl?: string },
+    input: { text: string; photoUrl?: string; audioUrl?: string; audioDurationMs?: number },
   ): Promise<IncidentMessageRecord> {
     const { rows: incidentRows } = await this.db.query<{ id: string }>(
       `SELECT id FROM incidents WHERE id = $1 AND event_id = $2`,
@@ -565,9 +827,9 @@ export class IncidentsService implements OnModuleInit {
     const id = randomUUID();
     const now = new Date().toISOString();
     await this.db.query(
-      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, now],
+      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, audio_url, audio_duration_ms, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, input.audioUrl ?? null, input.audioDurationMs ?? null, now],
     );
 
     const message: IncidentMessageRecord = {
@@ -578,6 +840,8 @@ export class IncidentsService implements OnModuleInit {
       authorName,
       text: input.text,
       photoUrl: input.photoUrl,
+      audioUrl: input.audioUrl,
+      audioDurationMs: input.audioDurationMs,
       createdAt: now,
     };
 

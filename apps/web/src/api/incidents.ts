@@ -35,12 +35,26 @@ export async function assignIncident(incidentId: string, paramedicId: string) {
 }
 
 export async function assignMedicToIncident(
-  _eventId: string,
+  eventId: string,
   incidentId: string,
   paramedicId: string,
 ): Promise<void> {
-  // eventId is carried by the auth interceptor via x-event-id header
-  await client.patch(`/incidents/${incidentId}/assign/${paramedicId}`);
+  // The dashboard has no per-event session token, so the event scope must be
+  // sent explicitly — without it the backend resolves the wrong event and the
+  // incident lookup 404s.
+  await client.patch(`/incidents/${incidentId}/assign/${paramedicId}`, undefined, {
+    headers: eventHeaders(eventId),
+  });
+}
+
+/** Partial details update (notes/category/severity) scoped to an event. */
+export async function updateIncidentDetails(
+  incidentId: string,
+  payload: { description?: string; type?: string; severity?: string },
+  eventId?: string,
+) {
+  const res = await client.patch(`/incidents/${incidentId}`, payload, { headers: eventHeaders(eventId) });
+  return res.data;
 }
 
 export async function closeIncident(incidentId: string, payload: CloseIncidentRequest, eventId?: string) {

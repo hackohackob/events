@@ -1,10 +1,16 @@
 import { Injectable, Logger } from "@nestjs/common";
 import Redis from "ioredis";
 
+/** This project's redis from docker-compose (REDIS_PORT, default 8501) — NOT
+ *  6379, which silently piggybacked on whatever other project had redis up. */
+export function resolveRedisUrl(): string {
+  return process.env.REDIS_URL ?? `redis://localhost:${process.env.REDIS_PORT ?? "8501"}`;
+}
+
 @Injectable()
 export class RedisService {
   private readonly logger = new Logger(RedisService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+  private readonly redis = new Redis(resolveRedisUrl(), {
     retryStrategy: (attempt) => Math.min(1000 * attempt, 5000),
   });
 

@@ -4,6 +4,7 @@ import * as Haptics from "expo-haptics";
 import { useSessionStore } from "../security/session-store";
 import { useRosterStore } from "../security/roster-store";
 import { useMapStore } from "./map-store";
+import { useNavStore } from "../navigation/nav-store";
 import {
   assignDestination,
   assignIncidentResponder,
@@ -108,6 +109,20 @@ export function AssignDestinationBar({
   // Online other medics a coordinator can dispatch.
   const others = roster.filter((m) => m.id !== myId);
 
+  const navigateTo = () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Navigating to an incident also registers me as responding (→ red/blue flash
+    // for the whole team), and tags the broadcast route with the incident id.
+    if (incidentId) {
+      setIncidentResponder(myId ?? "", true);
+      void respondToIncident(incidentId).catch(() => setIncidentResponder(myId ?? "", false));
+    }
+    useNavStore.getState().openTransport(
+      { lat: destination.lat, lng: destination.lng, label: destination.label },
+      incidentId ?? null,
+    );
+  };
+
   return (
     <View style={styles.wrap}>
       {goingHere ? (
@@ -115,8 +130,8 @@ export function AssignDestinationBar({
           <Text style={styles.clearBtnText}>✓ You're going here — Stop</Text>
         </Pressable>
       ) : (
-        <Pressable style={[styles.btn, styles.goBtn]} onPress={() => dispatch(myId ?? "")} disabled={busyId === myId}>
-          <Text style={styles.goBtnText}>🚑 Go here</Text>
+        <Pressable style={[styles.btn, styles.goBtn]} onPress={navigateTo}>
+          <Text style={styles.goBtnText}>🧭 Navigate</Text>
         </Pressable>
       )}
 

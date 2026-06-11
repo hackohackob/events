@@ -195,6 +195,81 @@ export async function assignMedicDestination(
   }
 }
 
+export interface SimRouteSegment { surface: 'road' | 'offroad' | 'path'; coordinates: [number, number][] }
+export interface SimMedicRoute {
+  geometry: [number, number][]
+  segments: SimRouteSegment[]
+  distanceMeters: number
+  durationMs: number
+  etaIso?: string
+  incidentId?: string | null
+}
+
+/**
+ * Fetch a real road route between two points from the backend GraphHopper proxy,
+ * so a simulated medic navigates legitimately (follows roads) instead of flying
+ * in a straight line. Returns the full route (geometry + colour segments + ETA),
+ * or null on failure (caller should fall back to a straight line).
+ */
+export async function fetchMedicRoute(
+  eventId: string,
+  entity: SimEntity,
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  profile: 'car' | 'foot' | 'mtb' | 'rescue_4x4',
+  log: LogFn,
+): Promise<SimMedicRoute | null> {
+  try {
+    const res = await fetch(`${apiBase}/api/routing/route`, {
+      method: 'POST',
+      headers: medicHeaders(eventId, entity),
+      body: JSON.stringify({
+        profile,
+        points: [[from.lng, from.lat], [to.lng, to.lat]],
+        alternatives: 1,
+      }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = (await res.json()) as {
+      routes?: Array<{ geometry: [number, number][]; segments: SimRouteSegment[]; distanceMeters: number; durationMs: number }>
+    }
+    const r = data.routes?.[0]
+    if (!r || !r.geometry || r.geometry.length < 2) return null
+    log({ type: 'info', message: `[M] ${entity.name} routed (${r.geometry.length} pts, ${profile})` })
+    return {
+      geometry: r.geometry,
+      segments: r.segments ?? [],
+      distanceMeters: r.distanceMeters,
+      durationMs: r.durationMs,
+      etaIso: new Date(Date.now() + r.durationMs).toISOString(),
+    }
+  } catch (err) {
+    log({ type: 'error', message: `[M] ${entity.name} route failed: ${(err as Error).message}` })
+    return null
+  }
+}
+
+/** Broadcast (or clear) a medic's active navigation path to the whole team + dashboard. */
+export async function setMedicRoute(
+  eventId: string,
+  entity: SimEntity,
+  route: SimMedicRoute | null,
+  destination: { lat: number; lng: number; label: string } | null,
+  log: LogFn,
+) {
+  if (!entity.medicId) return
+  try {
+    const res = await fetch(`${apiBase}/api/events/${eventId}/medics/${entity.medicId}/route`, {
+      method: 'PATCH',
+      headers: medicHeaders(eventId, entity),
+      body: JSON.stringify({ route, destination }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  } catch (err) {
+    log({ type: 'error', message: `[M] ${entity.name} set route failed: ${(err as Error).message}` })
+  }
+}
+
 /** Set a medic's status (available | rest | going_to). */
 export async function setMedicStatus(eventId: string, entity: SimEntity, status: MedicStatus, log: LogFn) {
   if (!entity.medicId) return

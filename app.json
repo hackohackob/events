@@ -1,8 +1,0 @@
-{
-  "android": {
-    "package": "com.a.atanasov.paramediceventapp"
-  },
-  "ios": {
-    "bundleIdentifier": "com.a.atanasov.paramediceventapp"
-  }
-}

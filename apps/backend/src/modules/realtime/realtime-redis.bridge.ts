@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import Redis from "ioredis";
+import { resolveRedisUrl } from "../infra/redis.service";
 import { RealtimeGateway } from "./realtime.gateway";
 
 interface RedisEvent {
@@ -10,7 +11,7 @@ interface RedisEvent {
 @Injectable()
 export class RealtimeRedisBridge implements OnModuleInit {
   private readonly logger = new Logger(RealtimeRedisBridge.name);
-  private readonly subscriber = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+  private readonly subscriber = new Redis(resolveRedisUrl());
 
   constructor(private readonly realtimeGateway: RealtimeGateway) {
     this.subscriber.on("error", (error) => {

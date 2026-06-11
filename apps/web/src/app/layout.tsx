@@ -4,7 +4,7 @@ import Sidebar from '@/components/layout/Sidebar'
 import Providers from './providers'
 
 export const metadata: Metadata = {
-  title: 'Paramedic Event App',
+  title: 'Medic Event App',
   description: 'Event management for medical response teams',
   icons: { icon: '/logo.png' },
 }

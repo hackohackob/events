@@ -32,6 +32,8 @@ export interface StoredPoi {
   lat: number;
   name?: string;
   description?: string;
+  /** Custom glyph for custom points; overrides the default type icon on the map. */
+  icon?: string;
   /** Archived POIs are hidden from the map for everyone. */
   archived?: boolean;
 }

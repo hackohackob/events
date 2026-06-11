@@ -15,10 +15,30 @@ export interface Destination {
 }
 
 /** Set my own status (Available / Rest). "Going to X" is set via assignDestination. */
-export async function setMyStatus(status: "available" | "rest") {
+export async function setMyStatus(status: "available" | "stationary" | "rest") {
   return apiFetch(`/events/${eventId()}/medics/${myId()}/status`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
+  });
+}
+
+export interface SharedRoute {
+  geometry: Array<[number, number]>;
+  segments: Array<{ surface: "road" | "offroad" | "path"; coordinates: Array<[number, number]> }>;
+  distanceMeters: number;
+  durationMs: number;
+  etaIso?: string;
+  incidentId?: string | null;
+}
+
+/**
+ * Publish (or clear) my active navigation path so the whole team + dashboard can
+ * see the coloured route + ETA I'm following. Pass null to clear.
+ */
+export async function setMyRoute(route: SharedRoute | null, destination: Destination | null = null) {
+  return apiFetch(`/events/${eventId()}/medics/${myId()}/route`, {
+    method: "PATCH",
+    body: JSON.stringify({ route, destination }),
   });
 }
 
@@ -36,6 +56,9 @@ export interface IncidentMessageDto {
   authorId: string;
   authorName: string;
   text: string;
+  /** Voice note attachment (server-relative URL) and its length. */
+  audioUrl?: string;
+  audioDurationMs?: number;
   createdAt: string;
 }
 
@@ -95,6 +118,11 @@ export async function standDownIncident(incidentId: string) {
 /** Coordinator: assign another medic as a responder to an incident. */
 export async function assignIncidentResponder(incidentId: string, paramedicId: string) {
   return apiFetch(`/incidents/${incidentId}/assign/${paramedicId}`, { method: "PATCH" });
+}
+
+/** Coordinator: remove a specific medic from an incident's responders. */
+export async function unassignIncidentResponder(incidentId: string, paramedicId: string) {
+  return apiFetch(`/incidents/${incidentId}/assign/${paramedicId}`, { method: "DELETE" });
 }
 
 export interface PoiDto {

@@ -6,12 +6,17 @@ import { AddMedicDto } from "./dto/add-medic.dto";
 import { AssignDestinationDto } from "./dto/assign-destination.dto";
 import { BroadcastDto } from "./dto/broadcast.dto";
 import { UpdateMedicStatusDto } from "./dto/update-medic-status.dto";
+import { SetMedicRouteDto } from "./dto/set-medic-route.dto";
 import { MedicsService } from "./medics.service";
+import { IncidentsService } from "../incidents/incidents.service";
 
 @Controller("events/:eventId")
 @UseGuards(AuthGuard)
 export class MedicsController {
-  constructor(private readonly medicsService: MedicsService) {}
+  constructor(
+    private readonly medicsService: MedicsService,
+    private readonly incidentsService: IncidentsService,
+  ) {}
 
   @Get("medics")
   getRoster(@Param("eventId") eventId: string) {
@@ -51,6 +56,7 @@ export class MedicsController {
       heading: body.heading,
       battery: body.battery,
     });
+    await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, body.lat, body.lng);
   }
 
   @Patch("medics/:medicId/assign")
@@ -67,6 +73,15 @@ export class MedicsController {
       user.userId,
       user.role === "coordinator",
     );
+  }
+
+  @Patch("medics/:medicId/route")
+  setRoute(
+    @Param("eventId") eventId: string,
+    @Param("medicId") medicId: string,
+    @Body() body: SetMedicRouteDto,
+  ) {
+    return this.medicsService.setMedicRoute(eventId, medicId, body.route ?? null, body.destination ?? null);
   }
 
   @Patch("medics/:medicId/status")

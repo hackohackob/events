@@ -13,7 +13,7 @@ export interface ApiEventSummary {
   days?: Array<{
     date: string;
     disciplines: Array<{ name: string; type: string; distanceKm: number; ascentMeters: number; color: string; gpxUrl?: string }>;
-    pois: Array<{ id?: string; type: string; lng: number; lat: number; name?: string; description?: string }>;
+    pois: Array<{ id?: string; type: string; lng: number; lat: number; name?: string; description?: string; icon?: string }>;
     assignments: Array<{ userId: string; position?: string; vehicle?: string; description?: string }>;
   }>;
 }
@@ -67,6 +67,7 @@ export async function createEvent(data: EventFormData) {
         lat: poi.coordinates[1],
         name: poi.name,
         description: poi.description,
+        icon: poi.icon,
       })),
       assignments: day.assignments.map((a) => ({
         userId: a.userId,
@@ -111,7 +112,7 @@ export async function updateEvent(id: string, data: EventFormData) {
         gpxFile: disc.gpxFile,
         gpxUrl: disc.gpxUrl,
       })),
-      pois: day.pois.map((poi) => ({ id: poi.id, type: poi.type, lng: poi.coordinates[0], lat: poi.coordinates[1], name: poi.name, description: poi.description })),
+      pois: day.pois.map((poi) => ({ id: poi.id, type: poi.type, lng: poi.coordinates[0], lat: poi.coordinates[1], name: poi.name, description: poi.description, icon: poi.icon })),
       assignments: day.assignments.map((a) => ({ userId: a.userId, position: a.position, vehicle: a.vehicle, description: a.description })),
     })),
   };

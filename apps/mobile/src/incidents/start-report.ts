@@ -10,8 +10,11 @@ import { debugLog } from "../debug/debug-log";
  * the server (or queue it offline), and drive the report sheet through its phases.
  * Shared by the on-screen FAB and the persistent-notification "Report incident"
  * action so both paths behave identically.
+ *
+ * Pass `at` to report a specific map point (e.g. a long-pressed location);
+ * without it the reporter's current GPS position is used.
  */
-export async function startIncidentReport(): Promise<void> {
+export async function startIncidentReport(at?: { lat: number; lng: number }): Promise<void> {
   const store = useIncidentStore.getState();
   if (store.phase !== "idle") return; // a report is already in progress
 
@@ -23,8 +26,14 @@ export async function startIncidentReport(): Promise<void> {
   debugLog("incident", "info", "incident report started");
 
   try {
-    const location = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.High });
-    const { latitude: lat, longitude: lng } = location.coords;
+    let lat: number;
+    let lng: number;
+    if (at) {
+      ({ lat, lng } = at);
+    } else {
+      const location = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.High });
+      ({ latitude: lat, longitude: lng } = location.coords);
+    }
     store.setLocation(lat, lng);
 
     const payload = { lat, lng, timestamp: new Date().toISOString() };

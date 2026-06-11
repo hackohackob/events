@@ -5,6 +5,9 @@ import "react-native-gesture-handler";
 // Background task definitions must be imported before registerRootComponent
 // so the native side can find handlers when waking a killed app.
 import "./src/location/location-tracker";
+// Data-only push handler — raises the looping incident alarm when the app is
+// backgrounded/killed.
+import "./src/notifications/background-push";
 
 // Notification action handlers (Report incident / Stop tracking) must be
 // registered at module load so taps work even when the app was killed.

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -68,6 +69,21 @@ export class IncidentsController {
     return this.incidentsService.assign(user.eventId, incidentId, paramedicId);
   }
 
+  @Delete(":incidentId/assign/:paramedicId")
+  // Roster coordinators carry x-role "medic" from the app session, so the
+  // role gate is broad here; the service enforces coordinator-or-self.
+  @Roles("coordinator", "medic", "paramedic")
+  unassign(
+    @CurrentUser() user: RequestUser,
+    @Param("incidentId") incidentId: string,
+    @Param("paramedicId") paramedicId: string,
+  ) {
+    return this.incidentsService.unassign(user.eventId, incidentId, paramedicId, {
+      userId: user.userId,
+      role: user.role,
+    });
+  }
+
   @Patch(":incidentId/close")
   @Roles("paramedic", "coordinator", "medic")
   close(
@@ -117,10 +133,45 @@ export class IncidentsController {
       limits: { fileSize: 20 * 1024 * 1024 },
     }),
   )
-  uploadPhoto(
-    @Param("incidentId") _incidentId: string,
+  async uploadPhoto(
+    @CurrentUser() user: RequestUser,
+    @Param("incidentId") incidentId: string,
     @UploadedFile() file: { filename: string; path: string; mimetype: string },
   ) {
-    return { url: `/uploads/incidents/${file.filename}` };
+    const url = `/uploads/incidents/${file.filename}`;
+    // Attach immediately so photos added after the report show up for everyone.
+    const incident = await this.incidentsService.addPhoto(user.eventId, incidentId, url);
+    return { url, photoUrls: incident.photoUrls };
+  }
+
+  @Post(":incidentId/voice")
+  @Roles("paramedic", "coordinator", "medic")
+  @UseInterceptors(
+    FileInterceptor("audio", {
+      storage: diskStorage({
+        destination: UPLOADS_DIR,
+        filename: (_req: any, file: any, cb: (err: null, name: string) => void) => {
+          const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+          cb(null, `voice-${unique}${extname(file.originalname as string) || ".m4a"}`);
+        },
+      }),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  async uploadVoice(
+    @CurrentUser() user: RequestUser,
+    @Param("incidentId") incidentId: string,
+    @UploadedFile() file: { filename: string; path: string; mimetype: string },
+    @Body("durationMs") durationMs?: string,
+  ) {
+    const url = `/uploads/incidents/${file.filename}`;
+    const parsedDuration = Number(durationMs);
+    // A voice note is just a chat message with an audio attachment — it lands
+    // in the incident chat and is broadcast like any other message.
+    return this.incidentsService.addMessage(user.eventId, incidentId, user.userId, {
+      text: "",
+      audioUrl: url,
+      audioDurationMs: Number.isFinite(parsedDuration) && parsedDuration > 0 ? Math.round(parsedDuration) : undefined,
+    });
   }
 }

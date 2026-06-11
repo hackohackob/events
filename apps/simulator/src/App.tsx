@@ -13,7 +13,7 @@ import {
   joinAsParticipant, joinAsMedic, sendMedicLocation,
   sendParticipantLocation, fetchMedicRoster, addMedicToRoster,
   createIncident, fetchTracks, fetchIncidents,
-  assignMedicDestination, setMedicStatus, respondToIncident,
+  assignMedicDestination, setMedicStatus, respondToIncident, fetchMedicRoute, setMedicRoute,
   sendIncidentMessage, createIncidentAsMedic,
   type LogEntry, type Track, type SimIncident,
 } from './api'
@@ -476,15 +476,19 @@ export default function App() {
     void setMedicStatus(eventId, e, status, log)
   }, [eventId, getEntity, log, patchEntity])
 
-  const sendMedicHere = useCallback((id: string, lat: number, lng: number, label = 'map point') => {
+  const sendMedicHere = useCallback(async (id: string, lat: number, lng: number, label = 'map point') => {
     const e = getEntity(id); if (!e) return
-    patchEntity(id, {
-      routePoints: [{ lat: e.lat, lng: e.lng }, { lat, lng }],
-      routeIndex: 0, routeMode: 'once', routeDir: 1, routeLabel: label,
-      status: 'going_to', paused: false,
-    })
+    const from = { lat: e.lat, lng: e.lng }
+    // Mark intent immediately; the medic holds position until the route is ready.
+    patchEntity(id, { status: 'going_to', routeLabel: label, paused: false })
     void assignMedicDestination(eventId, e, { lat, lng, label }, log)
     void setMedicStatus(eventId, e, 'going_to', log)
+    // Legit navigation: follow real roads (GraphHopper), straight-line fallback.
+    const route = await fetchMedicRoute(eventId, e, from, { lat, lng }, 'car', log)
+    const routePoints = route ? route.geometry.map(([lng2, lat2]) => ({ lat: lat2, lng: lng2 })) : [from, { lat, lng }]
+    patchEntity(id, { routePoints, routeIndex: 0, routeMode: 'once', routeDir: 1 })
+    // Broadcast the path so it shows on all devices + the dashboard.
+    void setMedicRoute(eventId, e, route, { lat, lng, label }, log)
   }, [eventId, getEntity, log, patchEntity])
 
   const addWaypoint = useCallback((id: string, lat: number, lng: number) => {
@@ -520,17 +524,20 @@ export default function App() {
     log({ type: 'info', message: `[M] ${e.name} following ${track.label} (${mode})` })
   }, [getEntity, log, patchEntity, tracks])
 
-  const sendToIncident = useCallback((id: string, incident: SimIncident) => {
+  const sendToIncident = useCallback(async (id: string, incident: SimIncident) => {
     const e = getEntity(id); if (!e) return
     const label = incident.name ?? 'incident'
-    patchEntity(id, {
-      routePoints: [{ lat: e.lat, lng: e.lng }, { lat: incident.lat, lng: incident.lng }],
-      routeIndex: 0, routeMode: 'once', routeDir: 1, routeLabel: label,
-      status: 'going_to', assignedIncidentId: incident.id, paused: false,
-    })
+    const from = { lat: e.lat, lng: e.lng }
+    patchEntity(id, { status: 'going_to', assignedIncidentId: incident.id, routeLabel: label, paused: false })
     void assignMedicDestination(eventId, e, { lat: incident.lat, lng: incident.lng, label }, log)
     void respondToIncident(eventId, incident.id, e, log)
     void setMedicStatus(eventId, e, 'going_to', log)
+    // Legit navigation along real roads to the incident.
+    const route = await fetchMedicRoute(eventId, e, from, { lat: incident.lat, lng: incident.lng }, 'car', log)
+    const routePoints = route ? route.geometry.map(([lng2, lat2]) => ({ lat: lat2, lng: lng2 })) : [from, { lat: incident.lat, lng: incident.lng }]
+    patchEntity(id, { routePoints, routeIndex: 0, routeMode: 'once', routeDir: 1 })
+    // Broadcast the path (tagged to the incident) so all devices + dashboard see it.
+    void setMedicRoute(eventId, e, route ? { ...route, incidentId: incident.id } : null, { lat: incident.lat, lng: incident.lng, label }, log)
   }, [eventId, getEntity, log, patchEntity])
 
   const reportIncident = useCallback(async (id: string, at?: { lat: number; lng: number }, details?: { type?: string; severity?: string; description?: string }) => {
@@ -553,7 +560,7 @@ export default function App() {
   onMapModeClickRef.current = (lat: number, lng: number) => {
     const mode = mapModeRef.current
     if (!mode) return
-    if (mode.kind === 'sendHere') sendMedicHere(mode.id, lat, lng)
+    if (mode.kind === 'sendHere') void sendMedicHere(mode.id, lat, lng)
     else if (mode.kind === 'addWaypoint') { addWaypoint(mode.id, lat, lng); return /* keep mode for multi-add */ }
     else if (mode.kind === 'report') void reportIncident(mode.id, { lat, lng })
     setMapMode(null)

@@ -39,6 +39,8 @@ export interface PointOfInterest {
   name?: string
   /** Optional short free-text note about the point. */
   description?: string
+  /** Custom glyph (emoji) overriding the type's default icon — used by custom points. */
+  icon?: string
 }
 
 export interface Discipline {

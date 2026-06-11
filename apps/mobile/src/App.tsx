@@ -9,9 +9,9 @@ import { incidentQueue } from "./incidents/persistent-incident-queue";
 import { flushIncidentQueue } from "./incidents/flush-incidents";
 import { startIncidentReport } from "./incidents/start-report";
 import { useIncidentStore } from "./incidents/incident-store";
-import { startLocationLoop, sendCurrentLocationNow } from "./location/location-tracker";
-import { showTrackingNotification, hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
-import { registerPushToken } from "./notifications/push-registration";
+import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive } from "./location/location-tracker";
+import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
+import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
 import { useSettingsStore } from "./settings/settings-store";
@@ -76,15 +76,21 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
 
-    void startLocationLoop().then((started) => {
-      if (started) {
-        void showTrackingNotification(role === "medic" || role === "paramedic");
-      } else {
-        void hideTrackingNotification();
-      }
-    });
+    // Location permissions first, then tracking. expo-location runs its own
+    // sticky foreground service (the persistent notification) — that service
+    // is what keeps updates flowing after the app is backgrounded or swiped
+    // away, so no separate notifee tracking notification is shown any more.
+    void (async () => {
+      const granted = await requestAlwaysLocationPermission();
+      // Clear any stale notifee tracking notification from older builds.
+      await hideTrackingNotification();
+      if (!granted) return;
+      await startLocationLoop();
+    })();
     // Register for push so the backend can alert this device when the app is closed.
     void registerPushToken();
+    // Tapping a remote push (incident alarm) focuses the incident on the map.
+    const unregisterPushTap = registerPushTapHandler();
     // If the app was launched by tapping an incident notification, focus it.
     void consumeInitialNotification();
     void incidentQueue.hydrate().then(() => {
@@ -97,18 +103,32 @@ export default function App() {
       if (online && !incidentQueue.isEmpty) void flushIncidentQueue();
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unregisterPushTap();
+    };
   }, [token, role]);
 
   // Send a fresh location every time the app is opened/brought to the foreground,
   // so a medic immediately appears at their position without waiting for the
   // background timer (or having to press "Send location" in the Debug tab).
+  // Also run the tracking watchdog: on every foreground AND once a minute while
+  // the app is alive, verify the background updates (and their foreground
+  // service notification) are still running and restart them if the OS killed
+  // them.
   useEffect(() => {
     if (!token) return;
     const sub = AppState.addEventListener("change", (next) => {
-      if (next === "active") void sendCurrentLocationNow();
+      if (next === "active") {
+        void sendCurrentLocationNow();
+        void ensureTrackingAlive();
+      }
     });
-    return () => sub.remove();
+    const watchdog = setInterval(() => void ensureTrackingAlive(), 60_000);
+    return () => {
+      sub.remove();
+      clearInterval(watchdog);
+    };
   }, [token]);
 
   // "Report incident" pressed from the persistent notification.

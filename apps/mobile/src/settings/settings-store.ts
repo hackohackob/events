@@ -18,24 +18,29 @@ interface SettingsState {
   locationIntervalMs: number;
   /** When true, overlapping route lines are drawn offset/parallel ("side by side"). */
   trackOffsetEnabled: boolean;
+  /** When true, tracks are shaded by gradient/slope rather than flat colour. */
+  trackGradientEnabled: boolean;
   hydrated: boolean;
 
   setLocationIntervalMs: (ms: number) => void;
   setTrackOffsetEnabled: (enabled: boolean) => void;
+  setTrackGradientEnabled: (enabled: boolean) => void;
   hydrate: () => Promise<void>;
 }
 
 const DEFAULTS = {
   locationIntervalMs: 60_000,
   trackOffsetEnabled: true,
+  trackGradientEnabled: true,
 };
 
-function persist(state: Pick<SettingsState, "locationIntervalMs" | "trackOffsetEnabled">) {
+function persist(state: Pick<SettingsState, "locationIntervalMs" | "trackOffsetEnabled" | "trackGradientEnabled">) {
   void AsyncStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
       locationIntervalMs: state.locationIntervalMs,
       trackOffsetEnabled: state.trackOffsetEnabled,
+      trackGradientEnabled: state.trackGradientEnabled,
     }),
   );
 }
@@ -43,6 +48,7 @@ function persist(state: Pick<SettingsState, "locationIntervalMs" | "trackOffsetE
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   locationIntervalMs: DEFAULTS.locationIntervalMs,
   trackOffsetEnabled: DEFAULTS.trackOffsetEnabled,
+  trackGradientEnabled: DEFAULTS.trackGradientEnabled,
   hydrated: false,
 
   setLocationIntervalMs: (locationIntervalMs) => {
@@ -52,6 +58,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTrackOffsetEnabled: (trackOffsetEnabled) => {
     set({ trackOffsetEnabled });
     persist({ ...get(), trackOffsetEnabled });
+  },
+  setTrackGradientEnabled: (trackGradientEnabled) => {
+    set({ trackGradientEnabled });
+    persist({ ...get(), trackGradientEnabled });
   },
 
   hydrate: async () => {
@@ -64,6 +74,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             typeof parsed.locationIntervalMs === "number" ? parsed.locationIntervalMs : DEFAULTS.locationIntervalMs,
           trackOffsetEnabled:
             typeof parsed.trackOffsetEnabled === "boolean" ? parsed.trackOffsetEnabled : DEFAULTS.trackOffsetEnabled,
+          trackGradientEnabled:
+            typeof parsed.trackGradientEnabled === "boolean" ? parsed.trackGradientEnabled : DEFAULTS.trackGradientEnabled,
         });
       }
     } catch {

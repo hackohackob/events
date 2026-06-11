@@ -3,6 +3,7 @@ import { Socket } from "socket.io";
 import { SessionPayload, WsMedicLocation } from "@events/contracts";
 import { MedicsService } from "./medics.service";
 import { RedisService } from "../infra/redis.service";
+import { IncidentsService } from "../incidents/incidents.service";
 
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
@@ -22,6 +23,7 @@ export class MedicsGateway {
   constructor(
     private readonly medicsService: MedicsService,
     private readonly redis: RedisService,
+    private readonly incidentsService: IncidentsService,
   ) {}
 
   @SubscribeMessage("medic_location")
@@ -46,6 +48,8 @@ export class MedicsGateway {
       accuracy: data.accuracy,
       battery: data.battery,
     });
+
+    await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, data.lat, data.lng);
 
     const state = await this.medicsService.getMedicState(eventId, medicId);
     if (state && state.status === "going_to" && state.destination) {

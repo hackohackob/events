@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin } from 'lucide-react'
+import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check } from 'lucide-react'
 import type { IncidentMessage } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
 import { apiUrl } from '@/env'
@@ -28,12 +28,21 @@ interface Props {
   onCloseIncident: (id: string, payload: { vitals?: string; treatment?: string; transport?: string }) => Promise<void>
   onSendMessage: (id: string, text: string) => Promise<void>
   loadMessages: (id: string) => Promise<void>
+  /** Medics available to dispatch to this incident. */
+  availableMedics?: Array<{ medicId: string; name: string }>
+  onAssignResponder?: (incidentId: string, medicId: string) => void
+  /** medicId → display name, for showing current responders. */
+  medicNameById?: Record<string, string>
+  /** Save edited incident notes (description). */
+  onUpdateNotes?: (incidentId: string, description: string) => Promise<void>
 }
 
 export default function IncidentDrawer({
   incident, messages, onClose, onResolve, onCloseIncident, onSendMessage, loadMessages,
+  availableMedics = [], onAssignResponder, medicNameById = {}, onUpdateNotes,
 }: Props) {
   const [tab, setTab] = useState<'details' | 'chat'>('details')
+  const [showAssign, setShowAssign] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [showClose, setShowClose] = useState(false)
@@ -41,13 +50,33 @@ export default function IncidentDrawer({
   const [treatment, setTreatment] = useState('')
   const [transport, setTransport] = useState('')
   const [busy, setBusy] = useState(false)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [notesDraft, setNotesDraft] = useState('')
+  const [savingNotes, setSavingNotes] = useState(false)
+  const chatScrollRef = useRef<HTMLDivElement>(null)
+
+  async function saveNotes() {
+    if (!onUpdateNotes || savingNotes) return
+    setSavingNotes(true)
+    try {
+      await onUpdateNotes(incident.id, notesDraft.trim())
+      setEditingNotes(false)
+    } finally {
+      setSavingNotes(false)
+    }
+  }
 
   const st = STATUS_STYLE[incident.status] ?? STATUS_STYLE.open
   const isClosed = incident.status === 'closed'
 
   useEffect(() => { void loadMessages(incident.id) }, [incident.id, loadMessages])
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length, tab])
+  // Scroll only the drawer body — scrollIntoView() here used to scroll every
+  // scrollable ancestor too, sending the page (and the map under it) flying.
+  useEffect(() => {
+    if (tab !== 'chat') return
+    const el = chatScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages.length, tab])
 
   async function handleSend() {
     const text = draft.trim()
@@ -117,15 +146,58 @@ export default function IncidentDrawer({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 pb-4">
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-5 pb-4">
           {tab === 'details' ? (
             <div className="space-y-4">
-              {incident.description && (
-                <div>
-                  <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: '#475569' }}>DESCRIPTION</div>
-                  <div className="text-sm text-slate-300">{incident.description}</div>
+              {/* Notes — always visible, editable by the dashboard. */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[10px] font-bold tracking-widest" style={{ color: '#475569' }}>NOTES</div>
+                  {onUpdateNotes && !editingNotes && (
+                    <button
+                      onClick={() => { setNotesDraft(incident.description ?? ''); setEditingNotes(true) }}
+                      className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ color: '#34d399', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(52,211,153,0.35)' }}
+                    >
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                  )}
                 </div>
-              )}
+                {editingNotes ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={notesDraft}
+                      onChange={e => setNotesDraft(e.target.value)}
+                      rows={4}
+                      autoFocus
+                      placeholder="What's happening on scene, access notes, hazards…"
+                      className="w-full rounded-xl px-3 py-2.5 text-sm outline-none resize-y placeholder:text-slate-600"
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(148,163,184,0.2)', color: '#e2e8f0' }}
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => void saveNotes()}
+                        disabled={savingNotes}
+                        className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)' }}
+                      >
+                        <Check className="w-3.5 h-3.5" /> {savingNotes ? 'Saving…' : 'Save notes'}
+                      </button>
+                      <button
+                        onClick={() => setEditingNotes(false)}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+                        style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm" style={{ color: incident.description ? '#cbd5e1' : '#475569' }}>
+                    {incident.description || 'No notes yet.'}
+                  </div>
+                )}
+              </div>
 
               {incident.photoUrl && (
                 <img src={photoSrc(incident.photoUrl)} alt="incident" className="w-full rounded-xl" style={{ maxHeight: 220, objectFit: 'cover' }} />
@@ -143,6 +215,55 @@ export default function IncidentDrawer({
                 <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: '#475569' }}>REPORTED BY</div>
                 <div className="text-sm text-slate-300">{incident.reportedBy ?? 'Unknown'}</div>
               </div>
+
+              {/* Responders + assign */}
+              {!isClosed && onAssignResponder && (
+                <div>
+                  <div className="text-[10px] font-bold tracking-widest mb-1.5" style={{ color: '#475569' }}>RESPONDERS</div>
+                  {(incident.responders ?? []).length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {(incident.responders ?? []).map(id => (
+                        <span key={id} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>
+                          {medicNameById[id] ?? id.slice(0, 6)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs mb-2" style={{ color: '#64748b' }}>No responders yet.</div>
+                  )}
+                  {!showAssign ? (
+                    <button
+                      onClick={() => setShowAssign(true)}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
+                      style={{ background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa' }}
+                    >
+                      + Assign medic
+                    </button>
+                  ) : (
+                    <div className="rounded-xl p-2 space-y-1" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.12)' }}>
+                      {availableMedics.length === 0 ? (
+                        <div className="text-xs px-2 py-1.5" style={{ color: '#64748b' }}>No medics online.</div>
+                      ) : (
+                        availableMedics.map(m => {
+                          const already = (incident.responders ?? []).includes(m.medicId)
+                          return (
+                            <button
+                              key={m.medicId}
+                              disabled={already}
+                              onClick={() => { onAssignResponder(incident.id, m.medicId); setShowAssign(false) }}
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all"
+                              style={{ background: already ? 'transparent' : 'rgba(255,255,255,0.04)', color: already ? '#475569' : '#e2e8f0', cursor: already ? 'default' : 'pointer' }}
+                            >
+                              <span>{m.name}</span>
+                              <span style={{ color: already ? '#22c55e' : '#60a5fa', fontWeight: 700 }}>{already ? '✓ assigned' : 'Send →'}</span>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Casualty handover (when closed) */}
               {(incident.vitals || incident.treatment || incident.transport) && (
@@ -199,17 +320,39 @@ export default function IncidentDrawer({
               {messages.length === 0 ? (
                 <div className="text-center text-xs py-10" style={{ color: '#475569' }}>No messages yet. Start the conversation.</div>
               ) : (
-                messages.map(m => (
+                messages.map(m => m.authorId === 'system' ? (
+                  // Timeline log entry (reported / dispatched / arrived / …)
+                  <div key={m.id} className="flex items-center gap-2 py-0.5">
+                    <div className="flex-1 h-px" style={{ background: 'rgba(148,163,184,0.14)' }} />
+                    <div className="text-[11px] font-semibold text-center" style={{ color: '#7d8ea4', maxWidth: '78%' }}>
+                      {m.text}{' '}
+                      <span style={{ color: '#48586c', fontSize: 10 }}>
+                        {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="flex-1 h-px" style={{ background: 'rgba(148,163,184,0.14)' }} />
+                  </div>
+                ) : (
                   <div key={m.id} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.07)' }}>
                     <div className="flex items-center justify-between gap-2 mb-0.5">
                       <span className="text-xs font-bold text-slate-200">{m.authorName}</span>
                       <span className="text-[10px]" style={{ color: '#475569' }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
-                    <div className="text-sm text-slate-300">{m.text}</div>
+                    {m.audioUrl ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <audio controls preload="none" src={photoSrc(m.audioUrl)} className="w-full" style={{ height: 34 }} />
+                        {m.audioDurationMs ? (
+                          <span className="text-[10px] flex-shrink-0" style={{ color: '#64748b' }}>
+                            {Math.round(m.audioDurationMs / 1000)}s
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-300">{m.text}</div>
+                    )}
                   </div>
                 ))
               )}
-              <div ref={chatEndRef} />
             </div>
           )}
         </div>

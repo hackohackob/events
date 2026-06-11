@@ -9,7 +9,7 @@ export type VehicleType =
   | "suv"
   | "ambulance";
 
-export type MedicStatus = "available" | "rest" | "going_to";
+export type MedicStatus = "available" | "stationary" | "rest" | "going_to";
 
 /** Roster-level classification of a medic. */
 export type MedicType = "coordinator" | "paramedic" | "medic";
@@ -60,7 +60,7 @@ export interface AddMedicRequest {
 }
 
 export interface UpdateMedicStatusRequest {
-  status: Extract<MedicStatus, "available" | "rest">;
+  status: Extract<MedicStatus, "available" | "stationary" | "rest">;
 }
 
 /** Dashboard → all medics broadcast alert */
@@ -77,6 +77,33 @@ export interface MedicDestination {
   label: string;
 }
 
+/** Surface class for a stretch of a navigation route. */
+export type RouteSurface = "road" | "offroad" | "path";
+
+/** One colour-classified run of a navigation route, `[lng, lat]` coordinates. */
+export interface MedicRouteSegment {
+  surface: RouteSurface;
+  coordinates: [number, number][];
+}
+
+/**
+ * The active navigation path a medic is following, broadcast to every device +
+ * the dashboard so the route is visible to the whole team (with surface colours
+ * and an ETA), exactly as the navigating medic sees it.
+ */
+export interface MedicRoute {
+  /** Full geometry, `[lng, lat]`. */
+  geometry: [number, number][];
+  /** Colour-classified runs covering the geometry. */
+  segments: MedicRouteSegment[];
+  distanceMeters: number;
+  durationMs: number;
+  /** ISO ETA computed when the route was set. */
+  etaIso?: string;
+  /** Whether this route leads to an incident (vs a plain point). */
+  incidentId?: string | null;
+}
+
 /** Persisted + broadcast state for a single medic */
 export interface MedicState {
   medicId: string;
@@ -91,6 +118,8 @@ export interface MedicState {
   battery?: number;
   status: MedicStatus;
   destination?: MedicDestination | null;
+  /** Active navigation path (set while navigating), or null. */
+  route?: MedicRoute | null;
   recordedAt: string;
   lastSeenAt: string;
 }
@@ -178,6 +207,9 @@ export interface IncidentMessage {
   authorName: string;
   text: string;
   photoUrl?: string;
+  /** Voice note attachment (server-relative URL) and its length. */
+  audioUrl?: string;
+  audioDurationMs?: number;
   createdAt: string;
 }
 

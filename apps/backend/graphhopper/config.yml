@@ -1,0 +1,91 @@
+# GraphHopper config for the rescue navigation feature (GraphHopper 12.x,
+# israelhikingmap/graphhopper image). The app profiles map 1:1 to RouteProfile:
+# foot, mtb, car, rescue_4x4.
+#
+# Profiles reuse GraphHopper's built-in custom models (bundled in the jar):
+#   car      -> car.json
+#   foot     -> foot.json (+ elevation)
+#   mtb      -> mtb.json  (+ elevation)
+#   rescue_4x4 -> car4wd.json (allows grade4/5 tracks) + inline rescue tweaks
+#
+# Routing runs in flexible mode (no CH/LM prep) — fast import, low memory, and
+# plenty fast for event-scale distances. The backend sends `ch.disable=true`.
+graphhopper:
+  # datareader.file + graph.location are injected by graphhopper.sh via -i / -o.
+  datareader.file: ""
+  graph.location: graph-cache
+
+  profiles:
+    - name: car
+      custom_model_files: [car.json]
+    - name: foot
+      custom_model_files: [foot.json, foot_elevation.json]
+    - name: mtb
+      custom_model_files: [mtb.json, bike_elevation.json]
+    - name: rescue_4x4
+      # Inline (can't mix custom_model_files + custom_model). Mirrors the built-in
+      # car4wd model — allows grade4/5 tracks at low speed — plus rescue rules:
+      # block private/forbidden + foot-only ways, discourage destination-only.
+      custom_model:
+        distance_influence: 1
+        priority:
+          - if: "road_access == PRIVATE || road_access == NO"
+            multiply_by: "0"
+          - if: "road_class == FOOTWAY || road_class == PATH || road_class == STEPS || road_class == PEDESTRIAN || road_class == BRIDLEWAY"
+            multiply_by: "0"
+          - if: "track_type != GRADE4 && track_type != GRADE5 && car_access == false"
+            multiply_by: "0"
+          - if: "road_access == DESTINATION"
+            multiply_by: "0.6"
+        speed:
+          - if: "track_type == GRADE4 || track_type == GRADE5"
+            limit_to: "5"
+          - else_if: "road_environment == FERRY"
+            limit_to: "ferry_speed"
+          - else: ""
+            limit_to: "car_average_speed"
+          - if: "true"
+            limit_to: "max_speed * 0.9"
+
+  # Flexible routing only (no contraction hierarchies / landmarks).
+  profiles_ch: []
+  profiles_lm: []
+
+  # Encoded values needed by the custom models above AND by the backend's
+  # surface classification (road_class, surface, track_type, road_environment).
+  graph.encoded_values: |
+    car_access, car_average_speed,
+    foot_access, foot_priority, foot_average_speed, foot_road_access,
+    mtb_access, mtb_priority, mtb_average_speed, mtb_rating, mtb_network,
+    bike_network, bike_road_access,
+    hike_rating, average_slope,
+    road_class, road_environment, road_access, surface, track_type,
+    max_speed, roundabout, country, ferry_speed
+
+  # Elevation → ascent/descent + average_slope (downloads SRTM tiles on import).
+  graph.elevation.provider: srtm
+  graph.elevation.cache_dir: /gh/data/elevation-cache
+
+  prepare.min_network_size: 200
+  routing.non_ch.max_waypoint_distance: 1000000
+  graph.dataaccess.default_type: RAM_STORE
+  # Keep all highway types (we route foot + mtb on paths/tracks).
+  import.osm.ignored_highways: ''
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+      max_request_header_size: 50k
+  admin_connectors:
+    - type: http
+      port: 8990
+  request_log:
+    appenders: []
+
+logging:
+  appenders:
+    - type: console
+      time_zone: UTC
+      log_format: "%d{HH:mm:ss} %-5level %logger{0} - %msg%n"

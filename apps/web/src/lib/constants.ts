@@ -12,6 +12,25 @@ export const POI_CONFIGS: POIConfig[] = [
   { type: 'custom', label: 'Custom Point', color: '#94a3b8', bg: '#1e293b', category: 'other' },
 ]
 
+/**
+ * Glyphs selectable for a custom point of interest. The first is the default.
+ * "Danger" (⚠️) marks a dangerous place, as requested for hazard marking.
+ */
+export const CUSTOM_POI_ICONS: { icon: string; label: string }[] = [
+  { icon: '⚠️', label: 'Danger' },
+  { icon: '⭐', label: 'Star' },
+  { icon: '🚩', label: 'Flag' },
+  { icon: '📍', label: 'Pin' },
+  { icon: '🏁', label: 'Finish' },
+  { icon: '⛺', label: 'Camp' },
+  { icon: '📷', label: 'Viewpoint' },
+  { icon: '🚧', label: 'Obstacle' },
+  { icon: '☎️', label: 'Contact' },
+  { icon: '🔦', label: 'Search point' },
+  { icon: '🪨', label: 'Rockfall' },
+  { icon: '💧', label: 'Water' },
+]
+
 export const VEHICLE_CONFIGS: VehicleConfig[] = [
   { value: 'bike', label: 'Bike', icon: '🚲' },
   { value: 'e-bike', label: 'E-Bike', icon: '⚡🚲' },

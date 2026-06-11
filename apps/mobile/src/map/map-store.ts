@@ -1,5 +1,14 @@
 import { create } from "zustand";
 
+export interface MedicMarkerRoute {
+  geometry: Array<[number, number]>;
+  segments: Array<{ surface: "road" | "offroad" | "path"; coordinates: Array<[number, number]> }>;
+  distanceMeters: number;
+  durationMs: number;
+  etaIso?: string;
+  incidentId?: string | null;
+}
+
 interface Marker {
   id: string;
   type: "runner" | "paramedic" | "incident" | "infrastructure";
@@ -22,15 +31,23 @@ interface Marker {
   status?: string;
   /** Where a medic is currently heading (for the "going to" line + label). */
   destination?: { lat: number; lng: number; label: string } | null;
+  /** Active navigation path the medic is following (shared to the whole team). */
+  route?: MedicMarkerRoute | null;
   /** POI free-text description (shown in the marker detail sheet). */
   poiDescription?: string;
   /** Incident category (medical | cardiac | trauma | …). */
   incidentType?: string;
   /** Server-relative photo path attached to an incident, if any. */
   photoUrl?: string;
+  /** All photos attached to an incident, oldest first. */
+  photoUrls?: string[];
   /** Display name of whoever reported the incident. */
   reportedBy?: string;
+  /** ISO timestamp of when an incident was reported. */
+  createdAt?: string;
 }
+
+export type MapMarker = Marker;
 
 export interface RaceTrack {
   id: string;

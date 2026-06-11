@@ -3,10 +3,33 @@ import { DbService } from "../infra/db.service";
 
 interface PushMessage {
   to: string;
-  title: string;
-  body: string;
+  /** Omitted for data-only messages (the app renders its own alarm). */
+  title?: string;
+  body?: string;
   data?: Record<string, unknown>;
   sound?: string;
+  /** Expo: "high" wakes the device for time-critical alerts. */
+  priority?: "default" | "normal" | "high";
+  /** Android notification channel the push is delivered on. */
+  channelId?: string;
+}
+
+interface PushOptions {
+  channelId?: string;
+  /**
+   * Send as a data-only message: no system-rendered notification. The app's
+   * background push task receives it (even killed) and raises a full notifee
+   * alarm — looping sound, strong vibration — which the OS can't do for a
+   * plain notification push.
+   */
+  dataOnly?: boolean;
+}
+
+function buildMessage(token: string, title: string, body: string, data: Record<string, unknown> | undefined, opts?: PushOptions): PushMessage {
+  if (opts?.dataOnly) {
+    return { to: token, data: { ...data, title, body }, priority: "high" };
+  }
+  return { to: token, title, body, data, sound: "default", priority: "high", channelId: opts?.channelId };
 }
 
 @Injectable()
@@ -58,13 +81,14 @@ export class NotificationsService implements OnModuleInit {
     title: string,
     body: string,
     data?: Record<string, unknown>,
+    opts?: PushOptions,
   ): Promise<void> {
     const { rows } = await this.db.query<{ token: string }>(
       `SELECT token FROM push_tokens WHERE user_id = $1 AND event_id = $2`,
       [userId, eventId],
     );
     if (rows.length === 0) return;
-    await this.sendMessages(rows.map((r) => ({ to: r.token, title, body, data, sound: "default" })));
+    await this.sendMessages(rows.map((r) => buildMessage(r.token, title, body, data, opts)));
   }
 
   async sendToEvent(
@@ -72,13 +96,14 @@ export class NotificationsService implements OnModuleInit {
     title: string,
     body: string,
     data?: Record<string, unknown>,
+    opts?: PushOptions,
   ): Promise<void> {
     const { rows } = await this.db.query<{ token: string }>(
       `SELECT DISTINCT token FROM push_tokens WHERE event_id = $1`,
       [eventId],
     );
     if (rows.length === 0) return;
-    await this.sendMessages(rows.map((r) => ({ to: r.token, title, body, data, sound: "default" })));
+    await this.sendMessages(rows.map((r) => buildMessage(r.token, title, body, data, opts)));
   }
 
   private async sendMessages(messages: PushMessage[]): Promise<void> {

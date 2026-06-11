@@ -9,10 +9,14 @@ services:
       PORT: 8500
       DATABASE_URL: "postgresql://${POSTGRES_USER:-events}:${POSTGRES_PASSWORD:-events}@postgres:5432/${POSTGRES_DB:-events}"
       REDIS_URL: "redis://redis:6379"
+      GRAPHHOPPER_URL: "http://graphhopper:8989"
+      GRAPHHOPPER_NATIVE_RESCUE: "true"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      graphhopper:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8500/api/health/live"]
@@ -34,6 +38,38 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Self-hosted, offline OSM routing for the navigation feature.
+  # Drop a region .osm.pbf into apps/backend/graphhopper/data/ before first boot.
+  # See apps/backend/graphhopper/README.md.
+  graphhopper:
+    image: israelhikingmap/graphhopper:latest
+    # The image entrypoint is `./graphhopper.sh -c config-example.yml`; these args
+    # append to it (our -c overrides). Don't mount over /graphhopper — that holds
+    # the jar. We mount our config + data under /gh and persist the graph cache.
+    command:
+      - "-i"
+      - "/gh/data/region-latest.osm.pbf"
+      - "-c"
+      - "/gh/config.yml"
+      - "-o"
+      - "/gh/data/graph-cache"
+      - "--host"
+      - "0.0.0.0"
+    environment:
+      JAVA_OPTS: "-Xmx4g -Xms1g"
+    volumes:
+      - ./apps/backend/graphhopper:/gh
+    ports:
+      - "${GRAPHHOPPER_PORT:-8989}:8989"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8989/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      # First boot imports the OSM extract + builds the graph (minutes); don't
+      # mark unhealthy meanwhile. Cached graph makes later boots quick.
+      start_period: 900s
 
   postgres:
     image: postgis/postgis:16-3.4

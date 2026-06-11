@@ -17,14 +17,22 @@ let openedBackgroundLocationSettings = false;
 
 // ─── Accuracy gating ─────────────────────────────────────────────────────────
 // Drop fixes that are too imprecise to be useful so the map/server never get a
-// position that's off by hundreds of metres.
+// position that's off by hundreds of metres. BUT: never starve the server —
+// indoors/on a charger every fix can be WiFi/cell-grade (>200m) for long
+// stretches, and silently dropping all of them makes the medic vanish from the
+// dashboard, which is far worse than an imprecise dot (the accuracy radius is
+// shown anyway). If nothing has been sent for STALENESS_OVERRIDE_MS, the next
+// fix goes through regardless of accuracy.
 const MAX_ACCURACY_M = 200;
 const RELATIVE_RECENCY_MS = 10 * 60_000;
+const STALENESS_OVERRIDE_MS = 90_000;
 let lastAcceptedAccuracy: number | null = null;
 let lastAcceptedAt: number | null = null;
 
 /** Returns a reason string if the fix should be dropped, otherwise null. */
 function accuracyRejectReason(accuracy?: number): string | null {
+  // Nothing sent for a while → send whatever we have, tagged with its accuracy.
+  if (lastAcceptedAt != null && Date.now() - lastAcceptedAt > STALENESS_OVERRIDE_MS) return null;
   if (accuracy == null) return null; // no accuracy reported → can't judge, allow
   if (accuracy > MAX_ACCURACY_M) return `accuracy ${Math.round(accuracy)}m > ${MAX_ACCURACY_M}m`;
   // Much broader than a recent good fix → likely a bad sample; keep the good one.
@@ -215,15 +223,31 @@ export async function startLocationLoop(): Promise<boolean> {
       await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
     }
 
-    // 4. Start continuous background updates. Android treats timeInterval as
-    // best-effort, but distanceInterval 0 avoids suppressing stationary users.
+    // 4. Start continuous background updates.
+    //
+    // On Android this drives FusedLocationProviderClient. BestForNavigation /
+    // High map to Priority.PRIORITY_HIGH_ACCURACY, which keeps the GPS radio
+    // active instead of degrading to ~1km cell/wifi fixes when the screen is
+    // off. The interval comes from Settings; deferredUpdates* = 0 disables
+    // location batching so every fix is delivered immediately rather than
+    // buffered and flushed later. distanceInterval 0 avoids suppressing
+    // stationary users.
+    //
+    // The foregroundService block is NOT optional: expo-location only keeps
+    // delivering updates after the app is backgrounded/swiped away through its
+    // own sticky foreground service. (A notifee-owned foreground service was
+    // tried instead to get action buttons on the notification — tracking died
+    // the moment the app left the foreground.)
     const intervalMs = useSettingsStore.getState().locationIntervalMs;
     await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: isMedic ? ExpoLocation.Accuracy.Balanced : ExpoLocation.Accuracy.Low,
+      accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
       timeInterval: intervalMs,
       distanceInterval: 0,
+      deferredUpdatesInterval: 0,
+      deferredUpdatesDistance: 0,
+      mayShowUserSettingsDialog: true,
       foregroundService: {
-        notificationTitle: "Paramedic Event App",
+        notificationTitle: "Medic Event App — live tracking",
         notificationBody: isMedic
           ? "Sharing your location with the event command centre"
           : "Sharing location with event coordinators",
@@ -248,6 +272,38 @@ export async function startLocationLoop(): Promise<boolean> {
   // 5. Fire an immediate one-shot send so the map shows a position right away.
   void sendCurrentLocationNow();
   return true;
+}
+
+let lastWatchdogRestartAt = 0;
+const WATCHDOG_RESTART_COOLDOWN_MS = 120_000;
+
+/**
+ * Watchdog: verify the background updates task is still registered, and restart
+ * it if the OS killed it. Safe to call often — a no-op when healthy.
+ *
+ * NOTE: it intentionally does NOT consult hasStartedLocationUpdatesAsync(): in
+ * this expo-location version that call frequently returns false even while
+ * updates are streaming, which sent the watchdog into a restart loop. Task
+ * registration is the reliable signal, backed by a cooldown so a genuinely
+ * dead service is only re-kicked at most once every couple of minutes.
+ */
+export async function ensureTrackingAlive(): Promise<void> {
+  try {
+    const session = useSessionStore.getState();
+    if (!session.token) return;
+    const permission = await ExpoLocation.getForegroundPermissionsAsync();
+    if (permission.status !== "granted") return;
+
+    const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    if (registered) return;
+
+    if (Date.now() - lastWatchdogRestartAt < WATCHDOG_RESTART_COOLDOWN_MS) return;
+    lastWatchdogRestartAt = Date.now();
+    debugLog("location", "warn", "tracking watchdog: task not registered — restarting");
+    await startLocationLoop();
+  } catch (err) {
+    debugLog("location", "error", "tracking watchdog failed", String(err));
+  }
 }
 
 export async function stopLocationLoop(): Promise<void> {

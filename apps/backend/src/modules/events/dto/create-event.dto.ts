@@ -85,6 +85,11 @@ export class CreateEventPoiDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  /** Custom glyph for custom points; overrides the default type icon on the map. */
+  @IsString()
+  @IsOptional()
+  icon?: string;
 }
 
 export class CreateEventLocationDto {

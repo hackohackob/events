@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useCallback, useEffect, useState, useMemo } from 'react'
+import { useRef, useCallback, useEffect, useState, useMemo, Fragment } from 'react'
 import MapGL, { Marker, Source, Layer, NavigationControl, Popup } from 'react-map-gl/maplibre'
 import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -60,6 +60,10 @@ interface MapClientProps {
   availablePois?: PointOfInterest[]
   /** Callback for right-click to add a POI */
   onAddPoi?: (coords: [number, number]) => void
+  /** Clicking an incident → open its detail drawer (map focuses automatically). */
+  onIncidentClick?: (incidentId: string) => void
+  /** Clicking a medic → open its detail drawer (map focuses automatically). */
+  onMedicClick?: (medicId: string) => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -155,7 +159,7 @@ function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string
         }}
         title={poi.name || poi.type}
       >
-        {getIconContent(poi.type)}
+        {poi.icon || getIconContent(poi.type)}
       </div>
     </Marker>
   )
@@ -261,7 +265,7 @@ function GoToModal({ medic, pois, incidents, onAssign, onClose }: GoToModalProps
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {pois.map((poi, i) => {
                   const cfg = POI_CONFIGS.find(c => c.type === poi.type)
-                  const icon = getIconContent(poi.type as POIType)
+                  const icon = poi.icon || getIconContent(poi.type as POIType)
                   const label = poi.name || cfg?.label || poi.type
                   return (
                     <button
@@ -361,22 +365,44 @@ interface LiveMedicDotProps {
   onAssign?: (medicId: string, destination: { lat: number; lng: number; label: string } | null) => void
   availablePois?: PointOfInterest[]
   openIncidents?: LiveIncident[]
+  /** When set, clicking the dot opens the medic detail drawer instead of a popup. */
+  onSelect?: () => void
 }
 
-function LiveMedicDot({ medic, onAssign, availablePois, openIncidents }: LiveMedicDotProps) {
+function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect }: LiveMedicDotProps) {
   const [showPopup, setShowPopup] = useState(false)
   const [showGoTo, setShowGoTo] = useState(false)
+  const [flashBlue, setFlashBlue] = useState(false)
   const ageMs = Date.now() - new Date(medic.lastSeenAt).getTime()
   const bucket = freshnessBucket(ageMs)
   // "online" for the dot visuals = anything not yet stale (>40 min).
   const online = bucket !== 'stale'
+  // Status visuals matched to the mobile app.
+  const isResting = medic.status === 'rest'
+  const isStationary = medic.status === 'stationary'
+  // Responding to an open incident → flashing blue lights (everyone sees it).
+  const isResponding =
+    (openIncidents ?? []).some((i) => (i.responders ?? []).includes(medic.medicId)) || Boolean(medic.route?.incidentId)
   const isGoingTo = medic.status === 'going_to'
+  const isGoingToPoint = !isResponding && isGoingTo
+  const flashing = isResponding && online
 
-  const dotColor = isGoingTo ? '#f59e0b' : freshnessColor(ageMs)
+  // Responding → the whole dot pulses red/blue (emergency lights).
+  useEffect(() => {
+    if (!flashing) return
+    const t = setInterval(() => setFlashBlue(v => !v), 460)
+    return () => clearInterval(t)
+  }, [flashing])
 
-  const ringColor = bucket === 'fresh'
-    ? isGoingTo ? 'rgba(245,158,11,0.25)' : 'rgba(34,197,94,0.22)'
-    : 'transparent'
+  const dotColor = flashing
+    ? (flashBlue ? '#2563eb' : '#ef4444')
+    : isResting ? '#a78bfa' : freshnessColor(ageMs)
+
+  const ringColor = flashing
+    ? (flashBlue ? 'rgba(37,99,235,0.3)' : 'rgba(239,68,68,0.3)')
+    : bucket === 'fresh'
+      ? isResting ? 'rgba(167,139,250,0.22)' : 'rgba(34,197,94,0.22)'
+      : 'transparent'
 
   return (
     <>
@@ -384,7 +410,7 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents }: LiveMed
         <div
           className="relative flex items-center justify-center"
           style={{ cursor: 'pointer' }}
-          onClick={() => setShowPopup(v => !v)}
+          onClick={() => (onSelect ? onSelect() : setShowPopup(v => !v))}
           onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setShowPopup(true) }}
         >
           {/* Pulse ring — only when online */}
@@ -415,6 +441,13 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents }: LiveMed
           >
             {getInitials(medic.name)}
           </div>
+          {/* Stationary (anchored) / heading-to-point badges */}
+          {isStationary && online && (
+            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -3, right: -3, width: 15, height: 15, background: '#34d399', border: '1.5px solid #04121f', zIndex: 4, fontSize: 8 }}>⚓</div>
+          )}
+          {isGoingToPoint && online && (
+            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -3, right: -3, width: 15, height: 15, background: '#fbbf24', border: '1.5px solid #04121f', zIndex: 4, fontSize: 9, color: '#04121f', fontWeight: 900 }}>›</div>
+          )}
           {/* Last-seen badge when offline */}
           {!online && (
             <div
@@ -522,9 +555,14 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents }: LiveMed
   )
 }
 
+/** True only for a usable, finite [lng, lat] pair (guards against NaN/null coords). */
+function isFiniteLngLat(lng: unknown, lat: unknown): boolean {
+  return typeof lng === 'number' && typeof lat === 'number' && Number.isFinite(lng) && Number.isFinite(lat)
+}
+
 // Going-to destination pin
 function DestinationPin({ medic }: { medic: MedicState }) {
-  if (!medic.destination) return null
+  if (!medic.destination || !isFiniteLngLat(medic.destination.lng, medic.destination.lat)) return null
   return (
     <Marker longitude={medic.destination.lng} latitude={medic.destination.lat}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
@@ -561,9 +599,11 @@ interface IncidentMarkerProps {
   incident: LiveIncident
   onAssignIncident?: (incidentId: string, medicId: string) => void
   availableMedics?: Array<{ medicId: string; name: string }>
+  /** When set, clicking the marker opens the incident drawer instead of a popup. */
+  onSelect?: () => void
 }
 
-function IncidentMarker({ incident, onAssignIncident, availableMedics = [] }: IncidentMarkerProps) {
+function IncidentMarker({ incident, onAssignIncident, availableMedics = [], onSelect }: IncidentMarkerProps) {
   const [showPopup, setShowPopup] = useState(false)
   const [showAssign, setShowAssign] = useState(false)
 
@@ -587,7 +627,7 @@ function IncidentMarker({ incident, onAssignIncident, availableMedics = [] }: In
         <div
           className="relative flex items-center justify-center"
           style={{ cursor: 'pointer' }}
-          onClick={() => setShowPopup(v => !v)}
+          onClick={() => (onSelect ? onSelect() : setShowPopup(v => !v))}
         >
           {/* Pulse ring for open incidents */}
           {incident.status === 'open' && (
@@ -730,6 +770,206 @@ function IncidentMarker({ incident, onAssignIncident, availableMedics = [] }: In
   )
 }
 
+// ─── Medic navigation routes (shared on the dashboard) ────────────────────────
+
+const ROUTE_SURFACE_COLORS: Record<'road' | 'offroad' | 'path', string> = {
+  road: '#3B82F6',
+  offroad: '#F4B740',
+  path: '#FB5B5B',
+}
+
+const DASH_SEQUENCE: number[][] = [
+  [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
+  [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5],
+]
+
+/** Below this zoom the per-path ETA blocks are dropped to reduce clutter. */
+const ETA_MIN_ZOOM = 12.5
+
+function fmtKm(m: number): string {
+  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`
+}
+
+function fmtMins(ms: number): string {
+  const min = Math.max(0, Math.round(ms / 60000))
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')}`
+}
+
+function haversineM(a: [number, number], b: [number, number]): number {
+  const R = 6371000
+  const dLat = ((b[1] - a[1]) * Math.PI) / 180
+  const dLng = ((b[0] - a[0]) * Math.PI) / 180
+  const lat1 = (a[1] * Math.PI) / 180
+  const lat2 = (b[1] * Math.PI) / 180
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+interface ClippedRoute {
+  geometry: [number, number][]
+  segments: { surface: 'road' | 'offroad' | 'path'; coordinates: [number, number][] }[]
+  remainingMeters: number
+  fraction: number
+}
+
+/** Clip a route to the part still ahead of [lng, lat], hiding the covered part. */
+function clipRouteAhead(
+  geometry: [number, number][],
+  segments: { surface: 'road' | 'offroad' | 'path'; coordinates: [number, number][] }[],
+  pos: [number, number],
+): ClippedRoute {
+  let total = 0
+  for (let i = 1; i < geometry.length; i++) total += haversineM(geometry[i - 1], geometry[i])
+  // Snap: nearest vertex + along-distance (good enough at navigation scale).
+  let best = { idx: 0, along: 0, dist: Infinity, point: geometry[0] }
+  let acc = 0
+  for (let i = 0; i < geometry.length; i++) {
+    if (i > 0) acc += haversineM(geometry[i - 1], geometry[i])
+    const d = haversineM(geometry[i], pos)
+    if (d < best.dist) best = { idx: i, along: acc, dist: d, point: geometry[i] }
+  }
+  const remainingMeters = Math.max(0, total - best.along)
+  const fraction = total > 0 ? remainingMeters / total : 0
+  const ahead: [number, number][] = geometry.slice(best.idx)
+  let segAcc = 0
+  const clipped: ClippedRoute['segments'] = []
+  for (const seg of segments) {
+    const kept: [number, number][] = []
+    for (let i = 0; i < seg.coordinates.length; i++) {
+      if (i > 0) segAcc += haversineM(seg.coordinates[i - 1], seg.coordinates[i])
+      if (segAcc >= best.along) kept.push(seg.coordinates[i])
+    }
+    if (kept.length >= 2) clipped.push({ surface: seg.surface, coordinates: kept })
+  }
+  return {
+    geometry: ahead.length >= 2 ? ahead : geometry,
+    segments: clipped.length > 0 ? clipped : segments,
+    remainingMeters,
+    fraction,
+  }
+}
+
+/** Draws every navigating medic's colour-coded route + flowing dash + ETA block. */
+function MedicRoutes({ liveMedics, zoom }: { liveMedics: MedicState[]; zoom: number }) {
+  const [dash, setDash] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setDash(d => (d + 1) % DASH_SEQUENCE.length), 130)
+    return () => clearInterval(t)
+  }, [])
+
+  const routed = liveMedics.filter(
+    m => m.route && m.route.geometry.length >= 2 && isOnline(m.lastSeenAt) && m.route.geometry.every(c => isFiniteLngLat(c[0], c[1])),
+  )
+  if (routed.length === 0) return null
+  const showEta = zoom >= ETA_MIN_ZOOM
+
+  return (
+    <>
+      {routed.map(m => {
+        const route = m.route!
+        // Hide the already-covered part + recompute remaining time/ETA from the
+        // medic's live position, so the block stays current on every device.
+        const clip = clipRouteAhead(route.geometry, route.segments, [m.lng, m.lat])
+        const remainingMs = route.durationMs * clip.fraction
+        const eta = new Date(Date.now() + remainingMs)
+        const etaClock = `${String(eta.getHours()).padStart(2, '0')}:${String(eta.getMinutes()).padStart(2, '0')}`
+        const mid = clip.geometry[Math.floor(clip.geometry.length / 2)] ?? clip.geometry[0]
+        return (
+          <Fragment key={`mr-${m.medicId}`}>
+            <Source id={`mr-out-${m.medicId}`} type="geojson" data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: clip.geometry } }}>
+              <Layer id={`mr-out-l-${m.medicId}`} type="line" layout={{ 'line-join': 'round', 'line-cap': 'round' }} paint={{ 'line-color': 'rgba(8,15,28,0.85)', 'line-width': 6 }} />
+            </Source>
+            {clip.segments.map((seg, i) => (
+              <Source key={`mr-seg-${m.medicId}-${i}`} id={`mr-seg-${m.medicId}-${i}`} type="geojson" data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: seg.coordinates } }}>
+                <Layer id={`mr-seg-l-${m.medicId}-${i}`} type="line" layout={{ 'line-join': 'round', 'line-cap': 'round' }} paint={{ 'line-color': ROUTE_SURFACE_COLORS[seg.surface], 'line-width': 4, 'line-opacity': 0.92 }} />
+              </Source>
+            ))}
+            <Source id={`mr-flow-${m.medicId}`} type="geojson" data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: clip.geometry } }}>
+              <Layer id={`mr-flow-l-${m.medicId}`} type="line" layout={{ 'line-join': 'round', 'line-cap': 'round' }} paint={{ 'line-color': 'rgba(255,255,255,0.9)', 'line-width': 2, 'line-dasharray': DASH_SEQUENCE[dash] }} />
+            </Source>
+            {showEta && (
+              <Marker longitude={mid[0]} latitude={mid[1]}>
+                <div style={{ background: 'rgba(9,14,24,0.96)', border: '1px solid rgba(96,165,250,0.6)', borderRadius: 11, padding: '5px 10px', textAlign: 'center', boxShadow: '0 2px 9px rgba(0,0,0,0.5)' }}>
+                  <div style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.05 }}>{fmtMins(remainingMs)}</div>
+                  <div style={{ color: '#93c5fd', fontSize: 10.5, fontWeight: 800 }}>ETA {etaClock}</div>
+                  <div style={{ color: '#7d8ea4', fontSize: 9, fontWeight: 700 }}>{fmtKm(clip.remainingMeters)}</div>
+                </div>
+              </Marker>
+            )}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+/** Gently curved arc between two points (airport-style), as [lng,lat] points. */
+function arcPoints(a: [number, number], b: [number, number], segments = 28, curvature = 0.18): [number, number][] {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const len = Math.hypot(dx, dy) || 1e-9
+  const cx = (a[0] + b[0]) / 2 + (-dy / len) * len * curvature
+  const cy = (a[1] + b[1]) / 2 + (dx / len) * len * curvature
+  const pts: [number, number][] = []
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments
+    pts.push([
+      (1 - t) ** 2 * a[0] + 2 * (1 - t) * t * cx + t ** 2 * b[0],
+      (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * cy + t ** 2 * b[1],
+    ])
+  }
+  return pts
+}
+
+/**
+ * Curved, flowing "Assigned" lines from responding medics to their incident —
+ * shown before they start navigating (no route yet). Replaced by the coloured
+ * route once navigation begins.
+ */
+function AssignedRoutes({ liveMedics, liveIncidents }: { liveMedics: MedicState[]; liveIncidents: LiveIncident[] }) {
+  const [dash, setDash] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setDash(d => (d + 1) % DASH_SEQUENCE.length), 130)
+    return () => clearInterval(t)
+  }, [])
+
+  const medicById = new Map(liveMedics.map(m => [m.medicId, m]))
+  const links: { key: string; arc: [number, number][]; mid: [number, number] }[] = []
+  for (const inc of liveIncidents) {
+    if (inc.status === 'resolved' || inc.status === 'closed' || !isFiniteLngLat(inc.lng, inc.lat)) continue
+    for (const medicId of inc.responders ?? []) {
+      const m = medicById.get(medicId)
+      if (!m || m.route || !isFiniteLngLat(m.lng, m.lat) || !isOnline(m.lastSeenAt)) continue
+      const arc = arcPoints([m.lng, m.lat], [inc.lng, inc.lat])
+      links.push({ key: `${inc.id}-${medicId}`, arc, mid: arc[Math.floor(arc.length / 2)] })
+    }
+  }
+  if (links.length === 0) return null
+
+  return (
+    <>
+      {links.map(link => (
+        <Fragment key={`as-${link.key}`}>
+          <Source id={`as-glow-${link.key}`} type="geojson" data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: link.arc } }}>
+            <Layer id={`as-glow-l-${link.key}`} type="line" layout={{ 'line-join': 'round', 'line-cap': 'round' }} paint={{ 'line-color': 'rgba(239,68,68,0.45)', 'line-width': 7, 'line-blur': 4 }} />
+          </Source>
+          <Source id={`as-base-${link.key}`} type="geojson" data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: link.arc } }}>
+            <Layer id={`as-base-l-${link.key}`} type="line" layout={{ 'line-join': 'round', 'line-cap': 'round' }} paint={{ 'line-color': 'rgba(220,38,38,0.85)', 'line-width': 3.5 }} />
+          </Source>
+          <Source id={`as-flow-${link.key}`} type="geojson" data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: link.arc } }}>
+            <Layer id={`as-flow-l-${link.key}`} type="line" layout={{ 'line-join': 'round', 'line-cap': 'round' }} paint={{ 'line-color': '#fecaca', 'line-width': 2.2, 'line-dasharray': DASH_SEQUENCE[dash] }} />
+          </Source>
+          <Marker longitude={link.mid[0]} latitude={link.mid[1]}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#dc2626', border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: 999, padding: '3px 10px', color: '#fff', fontSize: 10.5, fontWeight: 900, letterSpacing: 0.4, boxShadow: '0 0 8px rgba(239,68,68,0.7)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />Assigned
+            </div>
+          </Marker>
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 // ─── Heatmap constants ────────────────────────────────────────────────────────
@@ -761,8 +1001,23 @@ export default function MapClient({
   availableMedics = [],
   availablePois = [],
   onAddPoi,
+  onIncidentClick,
+  onMedicClick,
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
+  const [liveZoom, setLiveZoom] = useState(zoom)
+  // Focusing a marker opens its detail drawer (440px, slides in from the right
+  // on desktop) — pad the camera right so the point centres in the area that
+  // stays visible instead of landing behind the drawer.
+  const focusOn = (lng: number, lat: number) => {
+    const drawerPad = typeof window !== 'undefined' && window.innerWidth >= 1024 ? 440 : 0
+    mapRef.current?.flyTo({
+      center: [lng, lat],
+      zoom: Math.max(liveZoom, 15.5),
+      duration: 650,
+      padding: { top: 0, bottom: 0, left: 0, right: drawerPad },
+    })
+  }
   const boundsKey = fitBounds ? JSON.stringify(fitBounds) : null
 
   // Aggregate runner locations into ~100m grid cells for absolute-scale heatmap
@@ -806,8 +1061,22 @@ export default function MapClient({
     : tracks
 
   // Build GeoJSON lines for "going_to" medics
+  // Medics assigned/responding to an open incident — they get the curved
+  // "Assigned" line, so suppress the straight going-to dashed line for them.
+  const responderIds = new Set(
+    liveIncidents.flatMap(i => (i.status === 'resolved' || i.status === 'closed' ? [] : i.responders ?? [])),
+  )
   const goingToLines = liveMedics
-    .filter(m => m.status === 'going_to' && m.destination && isOnline(m.lastSeenAt))
+    .filter(
+      m =>
+        m.status === 'going_to' &&
+        m.destination &&
+        !m.route &&
+        !responderIds.has(m.medicId) &&
+        isOnline(m.lastSeenAt) &&
+        isFiniteLngLat(m.lng, m.lat) &&
+        isFiniteLngLat(m.destination.lng, m.destination.lat),
+    )
     .map(m => ({
       medicId: m.medicId,
       coordinates: [[m.lng, m.lat], [m.destination!.lng, m.destination!.lat]] as [number, number][],
@@ -822,6 +1091,7 @@ export default function MapClient({
       cursor={interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
       onClick={handleClick}
       onLoad={handleLoad}
+      onMoveEnd={(e) => setLiveZoom(e.viewState.zoom)}
       attributionControl={false}
       onContextMenu={(e: MapLayerMouseEvent) => {
         e.preventDefault?.()
@@ -870,6 +1140,10 @@ export default function MapClient({
         </Source>
       ))}
 
+      {/* Shared medic navigation routes (colour-coded + flowing + ETA) */}
+      <AssignedRoutes liveMedics={liveMedics} liveIncidents={liveIncidents} />
+      <MedicRoutes liveMedics={liveMedics} zoom={liveZoom} />
+
       {/* POI markers */}
       {pois.map(poi => (
         <POIMarker key={poi.id} poi={poi} onMove={onPOIMove} />
@@ -881,19 +1155,20 @@ export default function MapClient({
       ))}
 
       {/* Live medic dots */}
-      {liveMedics.map(m => (
+      {liveMedics.filter(m => isFiniteLngLat(m.lng, m.lat)).map(m => (
         <LiveMedicDot
           key={m.medicId}
           medic={m}
           onAssign={onMedicAssign}
           availablePois={availablePois}
           openIncidents={liveIncidents.filter(i => i.status !== 'resolved')}
+          onSelect={onMedicClick ? () => { focusOn(m.lng, m.lat); onMedicClick(m.medicId) } : undefined}
         />
       ))}
 
-      {/* Going-to destination pins */}
+      {/* Going-to destination pins — suppressed when a route or assigned line shows. */}
       {liveMedics
-        .filter(m => m.status === 'going_to' && m.destination && isOnline(m.lastSeenAt))
+        .filter(m => m.status === 'going_to' && m.destination && !m.route && !responderIds.has(m.medicId) && isOnline(m.lastSeenAt))
         .map(m => <DestinationPin key={`dest-${m.medicId}`} medic={m} />)
       }
 
@@ -940,6 +1215,7 @@ export default function MapClient({
           incident={inc}
           onAssignIncident={onAssignIncident}
           availableMedics={availableMedics}
+          onSelect={onIncidentClick ? () => { focusOn(inc.lng, inc.lat); onIncidentClick(inc.id) } : undefined}
         />
       ))}
 

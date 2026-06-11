@@ -18,7 +18,9 @@ client.interceptors.request.use((config) => {
       config.headers.Authorization = `Bearer ${token}`;
       const session = JSON.parse(atob(token));
       config.headers["x-user-id"] = session.userId;
-      config.headers["x-event-id"] = session.eventId;
+      // A per-request x-event-id (dashboard calls scoped to a specific event)
+      // takes precedence over the session's event.
+      config.headers["x-event-id"] = config.headers["x-event-id"] ?? session.eventId;
       config.headers["x-role"] = session.role;
     }
   } catch (e) {

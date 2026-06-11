@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
-import { MedicDestination, MedicState, MedicStatus, MedicType } from "@events/contracts";
+import { MedicDestination, MedicRoute, MedicState, MedicStatus, MedicType } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -57,6 +57,7 @@ export class MedicsService implements OnModuleInit {
     // Idempotent column additions — safe to run on every boot
     const alterations = [
       `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
+      `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS nav_route JSONB`,
       `ALTER TABLE participant_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
       `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS type TEXT`,
       `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'`,
@@ -65,6 +66,16 @@ export class MedicsService implements OnModuleInit {
     for (const sql of alterations) {
       await this.db.query(sql).catch((err) => this.logger.warn(`battery column migration skipped: ${String(err)}`));
     }
+  }
+
+  /** Drop malformed destinations (e.g. `{}` or missing coords) so clients never
+   *  receive a `[NaN, NaN]` marker that crashes the native map. */
+  private sanitizeDestination(value: unknown): MedicDestination | null {
+    if (!value || typeof value !== "object") return null;
+    const d = value as Record<string, unknown>;
+    return Number.isFinite(d.lat) && Number.isFinite(d.lng)
+      ? { lat: d.lat as number, lng: d.lng as number, label: typeof d.label === "string" ? d.label : "" }
+      : null;
   }
 
   // ─── Roster ──────────────────────────────────────────────────────────────
@@ -144,14 +155,15 @@ export class MedicsService implements OnModuleInit {
       battery: params.battery,
       status: existing?.status ?? "available",
       destination: existing?.destination ?? null,
+      route: existing?.route ?? null,
       recordedAt: now,
       lastSeenAt: now,
     };
 
     await this.db.query(
       `INSERT INTO medic_last_location
-         (medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, status, destination, recorded_at, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         (medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, status, destination, nav_route, recorded_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (event_id, medic_id) DO UPDATE SET
          name        = EXCLUDED.name,
          lat         = EXCLUDED.lat,
@@ -167,6 +179,7 @@ export class MedicsService implements OnModuleInit {
         params.lat, params.lng, params.heading ?? null,
         params.speed ?? null, params.accuracy ?? null, params.battery ?? null,
         state.status, state.destination ? JSON.stringify(state.destination) : null,
+        state.route ? JSON.stringify(state.route) : null,
         now, now,
       ],
     );
@@ -208,17 +221,21 @@ export class MedicsService implements OnModuleInit {
       throw new NotFoundException(`Medic ${medicId} has no location recorded for event ${eventId}`);
     }
 
+    // Drop malformed destinations (e.g. `{}` from undefined coords) before storing.
+    destination = this.sanitizeDestination(destination);
     const status: MedicStatus = destination ? "going_to" : "available";
     const now = new Date().toISOString();
 
+    // A plain destination assignment clears any standing nav path (the path is
+    // only attached via setMedicRoute when the medic actually navigates).
     await this.db.query(
       `UPDATE medic_last_location
-       SET status = $1, destination = $2, last_seen_at = $3
+       SET status = $1, destination = $2, nav_route = NULL, last_seen_at = $3
        WHERE event_id = $4 AND medic_id = $5`,
       [status, destination ? JSON.stringify(destination) : null, now, eventId, medicId],
     );
 
-    const updated: MedicState = { ...existing, status, destination: destination ?? null, lastSeenAt: now };
+    const updated: MedicState = { ...existing, status, destination: destination ?? null, route: null, lastSeenAt: now };
 
     await this.redis.publish(`event:${eventId}:map`, {
       type: "medic_location",
@@ -239,11 +256,53 @@ export class MedicsService implements OnModuleInit {
     return updated;
   }
 
-  /** Manually set a medic's status (Available / Rest). "going_to" is set via assignDestination. */
+  /**
+   * Attach (or clear) the active navigation path a medic is following, so the
+   * whole team + dashboard can see the coloured route + ETA. Setting a route
+   * also marks the medic "going_to" with the route's destination.
+   */
+  async setMedicRoute(
+    eventId: string,
+    medicId: string,
+    route: MedicRoute | null,
+    destination: MedicDestination | null,
+  ): Promise<MedicState> {
+    const existing = await this.getMedicLastLocation(eventId, medicId);
+    if (!existing) {
+      throw new NotFoundException(`Medic ${medicId} has no location recorded for event ${eventId}`);
+    }
+    const now = new Date().toISOString();
+    const status: MedicStatus = route ? "going_to" : (existing.status === "going_to" ? "available" : existing.status);
+    const nextDestination = route ? (this.sanitizeDestination(destination) ?? existing.destination ?? null) : null;
+
+    await this.db.query(
+      `UPDATE medic_last_location
+       SET status = $1, destination = $2, nav_route = $3, last_seen_at = $4
+       WHERE event_id = $5 AND medic_id = $6`,
+      [
+        status,
+        nextDestination ? JSON.stringify(nextDestination) : null,
+        route ? JSON.stringify(route) : null,
+        now, eventId, medicId,
+      ],
+    );
+
+    const updated: MedicState = {
+      ...existing,
+      status,
+      destination: nextDestination,
+      route: route ?? null,
+      lastSeenAt: now,
+    };
+    await this.redis.publish(`event:${eventId}:map`, { type: "medic_location", payload: updated });
+    return updated;
+  }
+
+  /** Manually set a medic's status (Available / Stationary / Rest). "going_to" is set via assignDestination. */
   async updateStatus(
     eventId: string,
     medicId: string,
-    status: Extract<MedicStatus, "available" | "rest">,
+    status: Extract<MedicStatus, "available" | "stationary" | "rest">,
   ): Promise<MedicState> {
     const existing = await this.getMedicLastLocation(eventId, medicId);
     if (!existing) {
@@ -251,15 +310,15 @@ export class MedicsService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    // Switching to a manual status always clears any standing destination.
+    // Switching to a manual status always clears any standing destination + path.
     await this.db.query(
       `UPDATE medic_last_location
-       SET status = $1, destination = NULL, last_seen_at = $2
+       SET status = $1, destination = NULL, nav_route = NULL, last_seen_at = $2
        WHERE event_id = $3 AND medic_id = $4`,
       [status, now, eventId, medicId],
     );
 
-    const updated: MedicState = { ...existing, status, destination: null, lastSeenAt: now };
+    const updated: MedicState = { ...existing, status, destination: null, route: null, lastSeenAt: now };
 
     await this.redis.publish(`event:${eventId}:map`, {
       type: "medic_location",
@@ -295,11 +354,12 @@ export class MedicsService implements OnModuleInit {
       battery: number | null;
       status: string;
       destination: unknown;
+      nav_route: unknown;
       recorded_at: string;
       last_seen_at: string;
     }>(
       `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery,
-              status, destination, recorded_at, last_seen_at
+              status, destination, nav_route, recorded_at, last_seen_at
        FROM medic_last_location
        WHERE event_id = $1
        ORDER BY name`,
@@ -317,7 +377,8 @@ export class MedicsService implements OnModuleInit {
       accuracy: r.accuracy ?? undefined,
       battery: r.battery ?? undefined,
       status: r.status as MedicStatus,
-      destination: r.destination as MedicDestination | null,
+      destination: this.sanitizeDestination(r.destination),
+      route: (r.nav_route as MedicState["route"]) ?? null,
       recordedAt: r.recorded_at,
       lastSeenAt: r.last_seen_at,
     }));
@@ -336,11 +397,12 @@ export class MedicsService implements OnModuleInit {
       battery: number | null;
       status: string;
       destination: unknown;
+      nav_route: unknown;
       recorded_at: string;
       last_seen_at: string;
     }>(
       `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery,
-              status, destination, recorded_at, last_seen_at
+              status, destination, nav_route, recorded_at, last_seen_at
        FROM medic_last_location
        WHERE event_id = $1 AND medic_id = $2`,
       [eventId, medicId],
@@ -358,7 +420,8 @@ export class MedicsService implements OnModuleInit {
       accuracy: r.accuracy ?? undefined,
       battery: r.battery ?? undefined,
       status: r.status as MedicStatus,
-      destination: r.destination as MedicDestination | null,
+      destination: this.sanitizeDestination(r.destination),
+      route: (r.nav_route as MedicState["route"]) ?? null,
       recordedAt: r.recorded_at,
       lastSeenAt: r.last_seen_at,
     };

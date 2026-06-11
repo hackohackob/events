@@ -23,23 +23,30 @@
     "react-dom": "19.1.0"
   },
   "scripts": {
+    "dev": "npm run infra && concurrently -p \"[{name}]\" -n backend,web,mobile -c blue,green,magenta \"npm:dev:backend\" \"npm:dev:web\" \"npm:dev:mobile\"",
+    "dev:services": "npm run infra && concurrently -k -p \"[{name}]\" -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
     "build": "npm run build --workspaces",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "dev:backend": "PORT=8500 POSTGRES_PORT=8502 REDIS_URL=redis://localhost:8501 npm run start:dev -w @events/backend",
+    "dev:backend": "PORT=8500 POSTGRES_PORT=8502 REDIS_URL=redis://localhost:8501 GRAPHHOPPER_URL=http://localhost:8989 GRAPHHOPPER_NATIVE_RESCUE=true npm run start:dev -w @events/backend",
     "dev:web": "npm run dev -w @events/web",
     "build:web": "npm run build -w @events/web",
     "dev:simulator": "npm run dev -w @events/simulator",
-    "dev:mobile": "cd apps/mobile && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools npx expo start --dev-client",
+    "dev:mobile": "cd apps/mobile && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools npx expo start --dev-client --port 8505",
     "dev:mobile:android": "cd apps/mobile && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools npx expo run:android --device",
     "load:test": "node scripts/load-test.mjs",
-    "infra": "docker compose up postgres redis -d",
+    "infra": "docker compose up postgres redis graphhopper -d",
+    "infra:db": "docker compose up postgres redis -d",
+    "routing:logs": "docker compose logs -f graphhopper",
     "infra:down": "docker compose down",
     "docker:up": "docker compose up --build",
-    "reverse:proxy": "adb ${ANDROID_SERIAL:+-s $ANDROID_SERIAL} reverse tcp:8500 tcp:8500"
+    "reverse:proxy": "adb ${ANDROID_SERIAL:+-s $ANDROID_SERIAL} reverse tcp:8500 tcp:8500",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "devDependencies": {
-    "@types/react": "~19.1.10"
+    "@types/react": "~19.1.10",
+    "concurrently": "^10.0.3"
   },
   "packageManager": "npm@10.9.2"
 }

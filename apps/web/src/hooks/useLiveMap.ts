@@ -249,6 +249,16 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     [eventId, scheduleSync],
   )
 
+  const updateIncidentNotes = useCallback(
+    async (incidentId: string, description: string) => {
+      const { updateIncidentDetails } = await import('@/api/incidents')
+      const updated = await updateIncidentDetails(incidentId, { description }, eventId ?? undefined)
+      incidentsRef.current.set(incidentId, toLiveIncident(updated))
+      scheduleSync()
+    },
+    [eventId, scheduleSync],
+  )
+
   const loadMessages = useCallback(
     async (incidentId: string) => {
       const list = await listIncidentMessages(incidentId, eventId ?? undefined)
@@ -277,7 +287,8 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
   return {
     medics: Array.from(medics.values()),
     runners: Array.from(runners.values()),
-    incidents: Array.from(incidents.values()),
+    // Archived incidents are hidden everywhere (map + lists).
+    incidents: Array.from(incidents.values()).filter((i) => i.status !== 'archived'),
     incidentMessages,
     connected,
     alarmSignal,
@@ -288,6 +299,7 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     assignIncident,
     resolveIncident,
     closeIncident,
+    updateIncidentNotes,
     loadMessages,
     sendMessage,
   }

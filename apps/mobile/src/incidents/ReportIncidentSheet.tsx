@@ -21,6 +21,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { updateIncident, uploadIncidentPhoto } from "./incident-api";
+import { debugLog } from "../debug/debug-log";
 import {
   type IncidentSeverity,
   type IncidentType,
@@ -284,7 +285,11 @@ export function ReportIncidentSheet() {
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeAndReset();
-    } catch {
+    } catch (err) {
+      // Don't swallow this — a failed save silently loses the notes the
+      // reporter typed.
+      debugLog("incident", "error", "incident details save failed", String(err));
+      Alert.alert("Save failed", "Incident details could not be saved. Check your connection and try again.");
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       saving.current = false;

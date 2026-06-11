@@ -13,6 +13,7 @@ import { useLiveMap } from '@/hooks/useLiveMap'
 import MapWrapper from '@/components/map/MapWrapper'
 import BroadcastModal from '@/components/BroadcastModal'
 import IncidentDrawer from '@/components/IncidentDrawer'
+import MedicDrawer from '@/components/MedicDrawer'
 import { POI_CONFIGS } from '@/lib/constants'
 import { fetchGpxCoordinates } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
@@ -264,12 +265,13 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     medics, runners, incidents: liveIncidents, incidentMessages, connected,
     alarmSignal, broadcasts, dismissBroadcast,
     assignDestination, removeActiveMedic, assignIncident,
-    resolveIncident, closeIncident, loadMessages, sendMessage,
+    resolveIncident, closeIncident, updateIncidentNotes, loadMessages, sendMessage,
   } = useLiveMap({ eventId: id, enabled: isActive })
 
   const [showBroadcast, setShowBroadcast] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
+  const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
   const [roster, setRoster] = useState<EventMedic[]>([])
   const [alarmInc, setAlarmInc] = useState<{ name?: string; type: string } | null>(null)
 
@@ -310,6 +312,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   }, [alarmSignal.count])
 
   const selectedIncident = liveIncidents.find(i => i.id === selectedIncidentId) ?? null
+  const selectedMedic = medics.find(m => m.medicId === selectedMedicId) ?? null
 
   // Fetch GPX coordinates for each discipline that has a gpxUrl
   const [gpxCoords, setGpxCoords] = useState<Record<string, [number, number][]>>({})
@@ -419,7 +422,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const offlineMedics = medics.filter(m => !isOnline(m.lastSeenAt))
 
   return (
-    <div className="flex flex-col flex-1 min-h-screen">
+    // Fixed viewport height: with min-h the page grew whenever the side panel
+    // content (e.g. many POIs) exceeded the viewport, stretching the map.
+    <div className="flex flex-col flex-1 h-screen max-h-screen overflow-hidden">
       {/* Header */}
       <div
         className="flex items-center justify-between gap-2 flex-wrap px-4 lg:px-8 py-3 lg:py-4 flex-shrink-0"
@@ -968,6 +973,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             availableMedics={onlineMedics.map(m => ({ medicId: m.medicId, name: m.name }))}
             availablePois={mapPois}
             onAddPoi={setAddPoiCoords}
+            onIncidentClick={(id) => { setSelectedMedicId(null); setSelectedIncidentId(id) }}
+            onMedicClick={(id) => { setSelectedIncidentId(null); setSelectedMedicId(id) }}
           />
 
           {/* Layer toggles — top right */}
@@ -1108,6 +1115,20 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           onCloseIncident={closeIncident}
           onSendMessage={sendMessage}
           loadMessages={loadMessages}
+          availableMedics={onlineMedics.map(m => ({ medicId: m.medicId, name: m.name }))}
+          onAssignResponder={assignIncident}
+          medicNameById={Object.fromEntries(medics.map(m => [m.medicId, m.name]))}
+          onUpdateNotes={updateIncidentNotes}
+        />
+      )}
+
+      {selectedMedic && (
+        <MedicDrawer
+          medic={selectedMedic}
+          incidents={liveIncidents}
+          onClose={() => setSelectedMedicId(null)}
+          onAssignToIncident={(medicId, incidentId) => assignIncident(incidentId, medicId)}
+          onClearDestination={(medicId) => void assignDestination(medicId, null)}
         />
       )}
 
