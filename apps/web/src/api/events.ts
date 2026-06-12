@@ -154,6 +154,11 @@ export async function activateEvent(id: string): Promise<ApiEventSummary> {
   return res.data as ApiEventSummary;
 }
 
+export async function deactivateEvent(id: string): Promise<ApiEventSummary> {
+  const res = await client.patch(`/events/${id}/deactivate`);
+  return res.data as ApiEventSummary;
+}
+
 export async function uploadGPX(file: File): Promise<string> {
   const form = new FormData();
   form.append("file", file);

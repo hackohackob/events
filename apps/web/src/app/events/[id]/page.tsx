@@ -4,11 +4,11 @@ import { use, useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import {
   ChevronRight, Calendar, MapPin, Users, Activity,
-  Play, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
+  Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
   Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { useEvent, useActivateEvent } from '@/hooks/useEvents'
+import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
 import { useLiveMap } from '@/hooks/useLiveMap'
 import MapWrapper from '@/components/map/MapWrapper'
 import BroadcastModal from '@/components/BroadcastModal'
@@ -234,6 +234,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params)
   const { data: event, isLoading, isError } = useEvent(id)
   const activate = useActivateEvent()
+  const deactivate = useDeactivateEvent()
   const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents'>('info')
   const [showTracks, setShowTracks] = useState(true)
   const [showMedics, setShowMedics] = useState(true)
@@ -505,6 +506,17 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             >
               <Play className="w-4 h-4" />
               {activate.isPending ? 'Activating...' : 'Activate Event'}
+            </button>
+          )}
+          {event.status === 'active' && (
+            <button
+              onClick={() => deactivate.mutate(id)}
+              disabled={deactivate.isPending}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95 disabled:opacity-70"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(148,163,184,0.25)', color: '#cbd5e1' }}
+            >
+              <Pause className="w-4 h-4" />
+              {deactivate.isPending ? 'Deactivating...' : 'Deactivate Event'}
             </button>
           )}
         </div>

@@ -4,6 +4,7 @@ import {
   fetchEvents,
   fetchEventById,
   activateEvent,
+  deactivateEvent,
   fetchTracks,
 } from "../api/events";
 import type { EventFormData } from "@/lib/types";
@@ -45,6 +46,17 @@ export function useActivateEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => activateEvent(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["events"] });
+      qc.invalidateQueries({ queryKey: ["events", id] });
+    },
+  });
+}
+
+export function useDeactivateEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deactivateEvent(id),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ["events"] });
       qc.invalidateQueries({ queryKey: ["events", id] });

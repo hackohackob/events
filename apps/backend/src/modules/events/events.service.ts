@@ -286,6 +286,16 @@ export class EventsService implements OnModuleInit {
     return toSummary(event);
   }
 
+  /** Take a live event back offline (active → draft) so it can be edited and
+   *  re-activated. The inverse of activate(). */
+  async deactivate(id: string): Promise<EventSummary | null> {
+    const event = this.events.find((e) => e.id === id);
+    if (!event) return null;
+    event.status = "draft";
+    await this.persist();
+    return toSummary(event);
+  }
+
   async storeGPX(file: { buffer: Buffer; originalname: string }): Promise<string> {
     const filename = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const dir = join(process.cwd(), "uploads", "gpx");

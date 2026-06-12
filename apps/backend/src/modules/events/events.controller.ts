@@ -89,6 +89,13 @@ export class EventsController {
     return event;
   }
 
+  @Patch(":id/deactivate")
+  async deactivate(@Param("id") id: string) {
+    const event = await this.eventsService.deactivate(id);
+    if (!event) throw new NotFoundException(`Event ${id} not found`);
+    return event;
+  }
+
   @Delete(":id")
   async remove(@Param("id") id: string) {
     const deleted = await this.eventsService.remove(id);
