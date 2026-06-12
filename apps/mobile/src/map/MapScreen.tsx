@@ -56,6 +56,7 @@ import { useTrackingHealth } from "../location/tracking-health";
 import { archivePoi, assignDestination, setMyRoute, type PoiDto } from "../ui/event-actions";
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
+import { incidentNotificationBody } from "../notifications/incident-notification";
 import { useNotificationFocus } from "../notifications/notification-focus";
 import { useNavStore } from "../navigation/nav-store";
 import { useNavigationCamera } from "../navigation/useNavigationCamera";
@@ -1756,8 +1757,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       // Alarm: heads-up notification for everyone except the medic who reported it.
       const myId = useSessionStore.getState().userId;
       if (payload.createdBy !== myId) {
-        const detail = payload.description ? `${payload.type} — ${payload.description}` : `${payload.type} reported`;
-        void showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id }, true);
+        void incidentNotificationBody({ type: payload.type, lat: payload.lat, lng: payload.lng }).then((detail) =>
+          showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id }, true),
+        );
       }
     });
 
@@ -1781,8 +1783,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const wasResponder = (existingMarker?.respondingParamedicIds ?? []).includes(myUserId);
       const isResponder = (merged.respondingParamedicIds ?? []).includes(myUserId);
       if (!wasResponder && isResponder && !isClosedIncidentStatus(merged.status)) {
-        const detail = merged.description ? `${merged.incidentType} — ${merged.description}` : "Respond now";
-        void showBroadcastNotification(`🚑 Assigned: ${merged.name ?? merged.label}`, detail, { incidentId: merged.id }, true);
+        void incidentNotificationBody({ type: merged.incidentType, lat: merged.lat, lng: merged.lng }).then((detail) =>
+          showBroadcastNotification(`🚑 Assigned: ${merged.name ?? merged.label}`, detail, { incidentId: merged.id }, true),
+        );
       }
       setMarkers([...withoutIncident, merged].slice(-2200));
     };

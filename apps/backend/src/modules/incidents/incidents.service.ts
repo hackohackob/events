@@ -353,14 +353,24 @@ export class IncidentsService implements OnModuleInit {
     void this.notificationsService.sendToEvent(
       eventId,
       `🚨 ${incident.name}`,
-      incident.description?.trim()
-        ? `${incident.type} — ${incident.description}`
-        : `${incident.type} reported`,
-      { incidentId: incident.id, eventId, kind: "incident_alarm", sound: "alarm" },
+      incident.type,
+      // Structured fields so each device composes its own body (category +
+      // distance-from-me) rather than rendering a raw payload.
+      {
+        incidentId: incident.id,
+        eventId,
+        kind: "incident_alarm",
+        sound: "alarm",
+        incidentName: incident.name,
+        incidentType: incident.type,
+        lat: incident.lat,
+        lng: incident.lng,
+      },
       // Notification-payload push: the OS renders it even if the app process
       // can't be woken (data-only proved unreliable on Samsung when killed).
       // The v3 channel carries the bundled siren sound + strong vibration.
-      { channelId: "incident-alarm-v3" },
+      // Skip the reporter — they shouldn't be alarmed by their own report.
+      { channelId: "incident-alarm-v3", excludeUserId: userId },
     );
 
     return { ...incident, nearbyParamedics: [] };
@@ -545,8 +555,17 @@ export class IncidentsService implements OnModuleInit {
       paramedicId,
       eventId,
       `🚑 Assigned: ${incident.name}`,
-      incident.description?.trim() ? `${incident.type} — ${incident.description}` : `${incident.type} — respond now`,
-      { incidentId: incident.id, eventId, kind: "incident_assigned" },
+      incident.type,
+      // Structured fields so the device composes the body (category + distance).
+      {
+        incidentId: incident.id,
+        eventId,
+        kind: "incident_assigned",
+        incidentName: incident.name,
+        incidentType: incident.type,
+        lat: incident.lat,
+        lng: incident.lng,
+      },
       { channelId: "incident-alarm-v3" },
     );
 

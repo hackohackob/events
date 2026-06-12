@@ -77,6 +77,10 @@ export function MedicRoutesLayer({ zoom, dimmed = false }: { zoom: number; dimme
         const route = medic.route!;
         // Clip to the part still ahead of the medic + live remaining time/distance.
         const clip = clipRouteAhead(route.geometry, route.segments, { lat: medic.lat, lng: medic.lng });
+        // A degenerate clip (a single point or a non-finite coordinate) makes the
+        // native line source render nothing while the RN ETA marker still shows —
+        // an orphan ETA box. Skip the medic entirely so line + ETA stay together.
+        if (clip.geometry.length < 2 || !hasFiniteGeometry(clip.geometry)) return null;
         const remainingMs = route.durationMs * clip.fraction;
         const eta = new Date(Date.now() + remainingMs);
         const etaClock = `${String(eta.getHours()).padStart(2, "0")}:${String(eta.getMinutes()).padStart(2, "0")}`;

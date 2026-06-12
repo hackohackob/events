@@ -23,6 +23,11 @@ interface PushOptions {
    * plain notification push.
    */
   dataOnly?: boolean;
+  /**
+   * Skip this user's devices — so the medic who reported an incident isn't
+   * alarmed by their own report.
+   */
+  excludeUserId?: string;
 }
 
 function buildMessage(token: string, title: string, body: string, data: Record<string, unknown> | undefined, opts?: PushOptions): PushMessage {
@@ -99,8 +104,10 @@ export class NotificationsService implements OnModuleInit {
     opts?: PushOptions,
   ): Promise<void> {
     const { rows } = await this.db.query<{ token: string }>(
-      `SELECT DISTINCT token FROM push_tokens WHERE event_id = $1`,
-      [eventId],
+      opts?.excludeUserId
+        ? `SELECT DISTINCT token FROM push_tokens WHERE event_id = $1 AND user_id <> $2`
+        : `SELECT DISTINCT token FROM push_tokens WHERE event_id = $1`,
+      opts?.excludeUserId ? [eventId, opts.excludeUserId] : [eventId],
     );
     if (rows.length === 0) return;
     await this.sendMessages(rows.map((r) => buildMessage(r.token, title, body, data, opts)));

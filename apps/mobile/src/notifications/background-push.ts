@@ -1,6 +1,7 @@
 import * as TaskManager from "expo-task-manager";
 import * as Notifications from "expo-notifications";
 import { showBroadcastNotification } from "./broadcast-notification";
+import { incidentNotificationBody } from "./incident-notification";
 
 export const BACKGROUND_PUSH_TASK = "background-push-task";
 
@@ -38,8 +39,23 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
   if (error) return;
   const payload = extractPushData(data);
   if (!payload) return;
-  const title = payload.title ?? "🚨 Incident";
-  const body = payload.body ?? "";
+
+  // Compose the user-facing text from the structured fields the backend sends
+  // (incidentName/incidentType/lat/lng). We deliberately do NOT fall back to
+  // payload.body: on Android that arrives as the raw JSON-stringified data blob,
+  // which is what used to leak into the notification.
+  const name = payload.incidentName ? String(payload.incidentName) : undefined;
+  const assigned = payload.kind === "incident_assigned";
+  const title = name
+    ? `${assigned ? "🚑 Assigned: " : "🚨 "}${name}`
+    : assigned
+      ? "🚑 Incident assigned"
+      : "🚨 Incident";
+  const body = await incidentNotificationBody({
+    type: payload.incidentType,
+    lat: payload.lat,
+    lng: payload.lng,
+  });
   await showBroadcastNotification(
     title,
     body,

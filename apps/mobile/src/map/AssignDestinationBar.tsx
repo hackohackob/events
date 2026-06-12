@@ -9,7 +9,6 @@ import {
   assignDestination,
   assignIncidentResponder,
   respondToIncident,
-  standDownIncident,
   type Destination,
 } from "../ui/event-actions";
 import { debugLog } from "../debug/debug-log";
@@ -91,21 +90,6 @@ export function AssignDestinationBar({
     }
   };
 
-  const clearMine = async () => {
-    setBusyId(myId);
-    const current = useMapStore.getState().markers;
-    setMarkers(current.map((m) => (m.id === myId && m.type === "paramedic" ? { ...m, status: "available", destination: null } : m)));
-    setIncidentResponder(myId ?? "", false);
-    try {
-      await assignDestination(null);
-      if (incidentId) await standDownIncident(incidentId);
-    } catch (err) {
-      debugLog("api", "error", "clear failed", String(err));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   // Online other medics a coordinator can dispatch.
   const others = roster.filter((m) => m.id !== myId);
 
@@ -126,9 +110,11 @@ export function AssignDestinationBar({
   return (
     <View style={styles.wrap}>
       {goingHere ? (
-        <Pressable style={[styles.btn, styles.clearBtn]} onPress={clearMine}>
-          <Text style={styles.clearBtnText}>✓ You're going here — Stop</Text>
-        </Pressable>
+        // Clearing your own destination is hidden for now (a coordinator / the
+        // incident view still controls stand-down). Show status only.
+        <View style={[styles.btn, styles.clearBtn]}>
+          <Text style={styles.clearBtnText}>✓ You're going here</Text>
+        </View>
       ) : (
         <Pressable style={[styles.btn, styles.goBtn]} onPress={navigateTo}>
           <Text style={styles.goBtnText}>🧭 Navigate</Text>
