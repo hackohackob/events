@@ -9,11 +9,17 @@ services:
       DATABASE_URL: "postgresql://events:${POSTGRES_PASSWORD:-events}@postgres:5432/events"
       REDIS_URL: "redis://redis:6379"
       NODE_ENV: production
+      GRAPHHOPPER_URL: "http://graphhopper:8989"
+      GRAPHHOPPER_NATIVE_RESCUE: "true"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Started, not healthy: the first-boot graph build can take minutes and the
+      # API must come up regardless (routing just 503s until GraphHopper is ready).
+      graphhopper:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8500/api/health/live"]
       interval: 10s
@@ -53,6 +59,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Self-hosted offline OSM routing for the navigation feature. Config comes from
+  # the repo (deploy copies apps/backend/graphhopper/config.yml -> ./graphhopper/
+  # config.yml); the OSM extract + built graph cache live in ./graphhopper/data
+  # on the host (the extract is downloaded once by the deploy script). First boot
+  # imports the graph (minutes); later boots reuse data/graph-cache.
+  graphhopper:
+    image: israelhikingmap/graphhopper:latest
+    restart: unless-stopped
+    command:
+      - "-i"
+      - "/gh/data/region-latest.osm.pbf"
+      - "-c"
+      - "/gh/config.yml"
+      - "-o"
+      - "/gh/data/graph-cache"
+      - "--host"
+      - "0.0.0.0"
+    environment:
+      JAVA_OPTS: "-Xmx4g -Xms1g"
+    volumes:
+      - ./graphhopper:/gh
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8989/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      # First boot builds the graph (minutes); don't flap unhealthy meanwhile.
+      start_period: 900s
 
   postgres:
     image: postgis/postgis:16-3.4

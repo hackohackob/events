@@ -68,14 +68,14 @@ jobs:
           cache-from: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache,mode=max
 
-      - name: Copy docker-compose.prod.yml to server
+      - name: Copy deploy files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ env.DEPLOY_HOST }}
           username: ${{ env.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
-          source: "docker-compose.prod.yml"
+          source: "docker-compose.prod.yml,apps/backend/graphhopper/config.yml"
           target: ${{ env.DEPLOY_DIR }}
 
       - name: Deploy to server
@@ -89,6 +89,16 @@ jobs:
             cd ${{ env.DEPLOY_DIR }}
             cp docker-compose.prod.yml docker-compose.yml
             mkdir -p data uploads
+
+            # GraphHopper routing: config ships from the repo; the OSM extract is
+            # downloaded once (159 MB) and the graph cache persists across deploys.
+            mkdir -p graphhopper/data
+            cp apps/backend/graphhopper/config.yml graphhopper/config.yml
+            if [ ! -f graphhopper/data/region-latest.osm.pbf ]; then
+              echo "Downloading OSM extract for routing (one-time)..."
+              curl -fL -o graphhopper/data/region-latest.osm.pbf \
+                https://download.geofabrik.de/europe/bulgaria-latest.osm.pbf
+            fi
 
             # Free disk space before pulling new images
             docker system prune -f
