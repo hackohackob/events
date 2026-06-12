@@ -1,9 +1,10 @@
 import { randomUUID } from "crypto";
-import { ForbiddenException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, NotFoundException, OnModuleInit, forwardRef } from "@nestjs/common";
 import { IncidentStatus, UserRole } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { MedicsService } from "../medics/medics.service";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { IncidentActionDto } from "./dto/incident-action.dto";
 import { UpdateIncidentDetailsDto } from "./dto/update-incident-details.dto";
@@ -126,7 +127,27 @@ export class IncidentsService implements OnModuleInit {
     private readonly db: DbService,
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
+    // forwardRef: MedicsModule already imports IncidentsModule (its controller
+    // needs IncidentsService), so the two modules reference each other.
+    @Inject(forwardRef(() => MedicsService)) private readonly medicsService: MedicsService,
   ) {}
+
+  /**
+   * Stop a medic heading to an incident they're no longer assigned to: clear
+   * their destination/route and flip them back to "available". Without this the
+   * medic keeps the "going_to" badge + yellow dashed line after being unassigned
+   * or standing down. Routed through assignDestination(null) as a self-clear
+   * (requesterId === medicId bypasses the coordinator re-check) so it also
+   * publishes the medic_location update every client needs.
+   */
+  private async clearMedicDestination(eventId: string, medicId: string): Promise<void> {
+    try {
+      await this.medicsService.assignDestination(eventId, medicId, null, medicId, false);
+    } catch {
+      // Non-fatal: the responder change already succeeded; a stale destination
+      // line is preferable to failing the unassign.
+    }
+  }
 
   async onModuleInit() {
     await this.db.query(`
@@ -424,6 +445,9 @@ export class IncidentsService implements OnModuleInit {
       if (newResponders.length === 0 && newStatus === "assigned") {
         newStatus = "open";
       }
+      // Stepping away also clears their destination/route so the going_to badge
+      // and dashed line disappear.
+      await this.clearMedicDestination(eventId, userId);
     }
 
     const now = new Date().toISOString();
@@ -689,6 +713,10 @@ export class IncidentsService implements OnModuleInit {
     );
 
     const incident = rowToRecord(updated[0]);
+
+    // No longer assigned → stop routing them to it (clears the going_to badge +
+    // dashed line).
+    await this.clearMedicDestination(eventId, paramedicId);
 
     await this.redisService.publish(`event:${eventId}:ops`, {
       type: "incident.unassigned",
