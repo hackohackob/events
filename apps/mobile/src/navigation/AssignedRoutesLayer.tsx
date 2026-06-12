@@ -36,6 +36,30 @@ function isClosed(status?: string): boolean {
 }
 
 /**
+ * Animated "ant-march" overlay for an assigned arc, isolated so its 130ms dash
+ * tick re-renders ONLY this line — not the parent's glow/base lines and tags.
+ * Re-rendering the whole layer every tick made maplibre intermittently drop the
+ * static native line layers (leaving just the moving dashes on screen).
+ */
+function AssignedFlowLine({ linkKey, arc }: { linkKey: string; arc: LngLat[] }) {
+  const [dashIndex, setDashIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <GeoJSONSource id={`assigned-flow-${linkKey}`} data={lineFeature(arc)}>
+      <Layer
+        id={`assigned-flow-layer-${linkKey}`}
+        type="line"
+        layout={{ "line-join": "round", "line-cap": "round" }}
+        paint={{ "line-color": "#fecaca", "line-width": 2.6, "line-dasharray": DASH_SEQUENCE[dashIndex] }}
+      />
+    </GeoJSONSource>
+  );
+}
+
+/**
  * Curved, flowing "Assigned" lines from a responding medic to their incident —
  * shown once a medic is assigned/responding but *before* they start navigating
  * (no nav route yet). When they begin navigation the coloured route replaces
@@ -45,12 +69,6 @@ export function AssignedRoutesLayer() {
   const markers = useMapStore((s) => s.markers);
   const myId = useSessionStore((s) => s.userId);
   const navPhase = useNavStore((s) => s.phase);
-  const [dashIndex, setDashIndex] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
-    return () => clearInterval(timer);
-  }, []);
 
   const medicById = new Map(markers.filter((m) => m.type === "paramedic").map((m) => [m.id, m]));
   const links: Array<{ key: string; arc: LngLat[]; mid: LngLat; distanceM: number; dimmed: boolean }> = [];
@@ -112,16 +130,7 @@ export function AssignedRoutesLayer() {
               paint={{ "line-color": link.dimmed ? "rgba(220,38,38,0.45)" : "rgba(220,38,38,0.85)", "line-width": 4 }}
             />
           </GeoJSONSource>
-          {!link.dimmed ? (
-            <GeoJSONSource id={`assigned-flow-${link.key}`} data={lineFeature(link.arc)}>
-              <Layer
-                id={`assigned-flow-layer-${link.key}`}
-                type="line"
-                layout={{ "line-join": "round", "line-cap": "round" }}
-                paint={{ "line-color": "#fecaca", "line-width": 2.6, "line-dasharray": DASH_SEQUENCE[dashIndex] }}
-              />
-            </GeoJSONSource>
-          ) : null}
+          {!link.dimmed ? <AssignedFlowLine linkKey={link.key} arc={link.arc} /> : null}
           {/* No label on very short links (the arc itself reads clearly), a
               compact one on short links, full size otherwise. */}
           {link.distanceM >= TAG_MIN_DISTANCE_M && !link.dimmed ? (

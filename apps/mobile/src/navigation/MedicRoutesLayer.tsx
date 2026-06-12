@@ -28,6 +28,35 @@ const DASH_SEQUENCE: number[][] = [
 /** Below this zoom the per-path ETA blocks are dropped to reduce clutter. */
 const ETA_MIN_ZOOM = 12.5;
 
+/**
+ * The animated "ant-march" overlay, isolated into its own component so its
+ * 130ms dash tick re-renders ONLY this line — not the parent's outline, colour
+ * segments and ETA markers. When the tick re-rendered the whole layer, maplibre
+ * intermittently dropped the static native line layers (leaving just the moving
+ * white dashes on screen); keeping the high-frequency update local fixes that.
+ */
+function MedicFlowLine({ medicId, geometry }: { medicId: string; geometry: LngLat[] }) {
+  const [dashIndex, setDashIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <GeoJSONSource id={`mflow-${medicId}`} data={lineFeature(geometry)}>
+      <Layer
+        id={`mflow-layer-${medicId}`}
+        type="line"
+        layout={{ "line-join": "round", "line-cap": "round" }}
+        paint={{
+          "line-color": "rgba(255,255,255,0.9)",
+          "line-width": 2.4,
+          "line-dasharray": DASH_SEQUENCE[dashIndex],
+        }}
+      />
+    </GeoJSONSource>
+  );
+}
+
 function lineFeature(coordinates: LngLat[]) {
   return {
     type: "FeatureCollection" as const,
@@ -54,12 +83,6 @@ function hasFiniteGeometry(geometry: LngLat[]): boolean {
 export function MedicRoutesLayer({ zoom, dimmed = false }: { zoom: number; dimmed?: boolean }) {
   const markers = useMapStore((s) => s.markers);
   const myId = useSessionStore((s) => s.userId);
-  const [dashIndex, setDashIndex] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
-    return () => clearInterval(timer);
-  }, []);
 
   const medicRoutes = markers.filter(
     (m) => m.type === "paramedic" && m.id !== myId && m.route && m.route.geometry.length >= 2 && hasFiniteGeometry(m.route.geometry),
@@ -104,20 +127,7 @@ export function MedicRoutesLayer({ zoom, dimmed = false }: { zoom: number; dimme
                 />
               </GeoJSONSource>
             ))}
-            {!dimmed ? (
-              <GeoJSONSource id={`mflow-${medic.id}`} data={lineFeature(clip.geometry)}>
-                <Layer
-                  id={`mflow-layer-${medic.id}`}
-                  type="line"
-                  layout={{ "line-join": "round", "line-cap": "round" }}
-                  paint={{
-                    "line-color": "rgba(255,255,255,0.9)",
-                    "line-width": 2.4,
-                    "line-dasharray": DASH_SEQUENCE[dashIndex],
-                  }}
-                />
-              </GeoJSONSource>
-            ) : null}
+            {!dimmed ? <MedicFlowLine medicId={medic.id} geometry={clip.geometry} /> : null}
             {showEta ? (
               <Marker id={`meta-${medic.id}`} lngLat={midpoint(clip.geometry)}>
                 <View style={styles.etaBlock}>
