@@ -418,8 +418,8 @@ export class EventsService implements OnModuleInit {
     const uniqueUserIds = [...new Set(assignments.map((assignment) => assignment.userId))];
     if (uniqueUserIds.length === 0) return;
 
-    const users = await this.db.query<{ id: string; name: string; unit: string | null; role: string | null }>(
-      "SELECT id, name, unit, role FROM users",
+    const users = await this.db.query<{ id: string; name: string; unit: string | null }>(
+      "SELECT id, name, unit FROM users",
     );
     const usersById = new Map(users.rows.map((user) => [user.id, user]));
 
@@ -432,21 +432,18 @@ export class EventsService implements OnModuleInit {
 
       const unit = user?.unit ?? fallback?.unit ?? null;
       const vehicle = assignment?.vehicle ?? assignment?.position ?? null;
-      // Carry the user's role onto the event roster so the mobile app knows who
-      // can dispatch others. event_medics.type drives `amCoordinator` (and the
-      // "Assign medic" button); without this it stays NULL and nobody is a
-      // coordinator on the event. MedicType only has coordinator/paramedic/medic,
-      // so any non-coordinator role collapses to "paramedic".
-      const type = user?.role === "coordinator" ? "coordinator" : "paramedic";
 
+      // Role is NOT copied onto the event — it is a property of the user (the
+      // same for every event) and resolved live from `users` when the roster is
+      // read (see MedicsService.getMedicRoster / isCoordinator).
       // Always let Postgres generate event_medics.id — never use the user UUID as the PK.
       // If the user UUID were reused as id, a user assigned to two different events would
       // hit a PK conflict on the second insert (ON CONFLICT covers event_id+name, not id).
       await this.db.query(
-        `INSERT INTO event_medics (event_id, name, unit, vehicle, type)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle, type = EXCLUDED.type`,
-        [event.id, name, unit, vehicle, type],
+        `INSERT INTO event_medics (event_id, name, unit, vehicle)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle`,
+        [event.id, name, unit, vehicle],
       );
     }
   }

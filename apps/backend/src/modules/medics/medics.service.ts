@@ -81,8 +81,17 @@ export class MedicsService implements OnModuleInit {
   // ─── Roster ──────────────────────────────────────────────────────────────
 
   async getMedicRoster(eventId: string) {
+    // `type` (coordinator vs paramedic) is the user's global role, resolved live
+    // from `users` by name — never stored on the event. Changing a user's role
+    // applies to every event the moment the roster is fetched.
     const { rows } = await this.db.query<RosterRow>(
-      "SELECT id, name, unit, vehicle, type, skills, capabilities FROM event_medics WHERE event_id = $1 ORDER BY name",
+      `SELECT em.id, em.name, em.unit, em.vehicle,
+              CASE WHEN u.role = 'coordinator' THEN 'coordinator' ELSE 'paramedic' END AS type,
+              em.skills, em.capabilities
+       FROM event_medics em
+       LEFT JOIN users u ON u.name = em.name
+       WHERE em.event_id = $1
+       ORDER BY em.name`,
       [eventId],
     );
     return rows.map(rosterRowToMedic);
@@ -124,11 +133,16 @@ export class MedicsService implements OnModuleInit {
   }
 
   async isCoordinator(eventId: string, medicId: string): Promise<boolean> {
-    const { rows } = await this.db.query<{ type: string | null }>(
-      "SELECT type FROM event_medics WHERE event_id = $1 AND id = $2",
+    // Coordinator status is the user's global role, looked up live from `users`
+    // (matched by name) — not stored on the event roster.
+    const { rows } = await this.db.query<{ role: string | null }>(
+      `SELECT u.role
+       FROM event_medics em
+       LEFT JOIN users u ON u.name = em.name
+       WHERE em.event_id = $1 AND em.id = $2`,
       [eventId, medicId],
     );
-    return rows[0]?.type === "coordinator";
+    return rows[0]?.role === "coordinator";
   }
 
   async getMedicState(eventId: string, medicId: string): Promise<MedicState | null> {

@@ -650,11 +650,16 @@ export class IncidentsService implements OnModuleInit {
     caller: { userId: string; role: UserRole },
   ): Promise<IncidentRecord> {
     if (caller.role !== "coordinator" && caller.userId !== paramedicId) {
-      const { rows: callerRows } = await this.db.query<{ type: string | null }>(
-        `SELECT type FROM event_medics WHERE id::text = $1 AND event_id = $2`,
+      // Coordinator status is the caller's global user role (resolved live by
+      // name), not a per-event flag.
+      const { rows: callerRows } = await this.db.query<{ role: string | null }>(
+        `SELECT u.role
+         FROM event_medics em
+         LEFT JOIN users u ON u.name = em.name
+         WHERE em.id::text = $1 AND em.event_id = $2`,
         [caller.userId, eventId],
       );
-      if (callerRows[0]?.type !== "coordinator") {
+      if (callerRows[0]?.role !== "coordinator") {
         throw new ForbiddenException("Only coordinators can unassign other medics");
       }
     }
