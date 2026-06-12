@@ -65,6 +65,9 @@ interface NavState {
   navCameraMode: "follow" | "north";
   /** Bumped to force the nav camera to re-center even if nothing else changed. */
   recenterTick: number;
+  /** Zoom the user pinched to during active nav — keeps location updates from
+   *  snapping the camera back to the default nav zoom. Null = default. */
+  navZoomOverride: number | null;
 
   openTransport: (destination: LatLng & { label: string }, incidentId?: string | null) => void;
   cancel: () => void;
@@ -80,6 +83,7 @@ interface NavState {
   updateProgress: (fix: { lat: number; lng: number; at?: number }) => void;
   /** Compass press while navigating: re-center, toggling follow ↔ north-up. */
   toggleNavCamera: () => void;
+  setNavZoomOverride: (zoom: number | null) => void;
   stop: () => void;
 }
 
@@ -101,6 +105,7 @@ export const useNavStore = create<NavState>((set, get) => ({
   lastFix: null,
   navCameraMode: "follow",
   recenterTick: 0,
+  navZoomOverride: null,
   destinationIncidentId: null,
 
   openTransport: (destination, incidentId = null) =>
@@ -133,6 +138,7 @@ export const useNavStore = create<NavState>((set, get) => ({
       progress: null,
       pendingInsertIndex: null,
       lastFix: null,
+      navZoomOverride: null,
     }),
 
   selectProfile: async (profile, origin) => {
@@ -213,15 +219,20 @@ export const useNavStore = create<NavState>((set, get) => ({
       progress: null,
       lastFix: null,
       navCameraMode: "follow",
+      navZoomOverride: null,
       recenterTick: get().recenterTick + 1,
     });
   },
 
+  // Re-centering deliberately also resets a pinched zoom back to the default.
   toggleNavCamera: () =>
     set((s) => ({
       navCameraMode: s.navCameraMode === "follow" ? "north" : "follow",
+      navZoomOverride: null,
       recenterTick: s.recenterTick + 1,
     })),
+
+  setNavZoomOverride: (navZoomOverride) => set({ navZoomOverride }),
 
   updateProgress: (fix) => {
     const state = get();

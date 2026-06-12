@@ -109,6 +109,16 @@ function isOnline(lastSeenAt: string): boolean {
   return Date.now() - new Date(lastSeenAt).getTime() < 90_000
 }
 
+// Routes/destinations are explicit server state (cleared on arrival/stand-down),
+// not a liveness inference — so they get a much longer staleness window. A
+// backgrounded phone reporting every few minutes must not blink its route off
+// between pings; only a medic gone for this long drops their drawn path.
+const ASSIGNMENT_VISIBLE_MS = 10 * 60_000
+
+function isAssignmentFresh(lastSeenAt: string): boolean {
+  return Date.now() - new Date(lastSeenAt).getTime() < ASSIGNMENT_VISIBLE_MS
+}
+
 // Freshness coloring, matching the mobile app:
 //   0–20 min : green, fresher = more saturated
 //   20–40 min: yellow
@@ -858,7 +868,7 @@ function MedicRoutes({ liveMedics, zoom }: { liveMedics: MedicState[]; zoom: num
   }, [])
 
   const routed = liveMedics.filter(
-    m => m.route && m.route.geometry.length >= 2 && isOnline(m.lastSeenAt) && m.route.geometry.every(c => isFiniteLngLat(c[0], c[1])),
+    m => m.route && m.route.geometry.length >= 2 && isAssignmentFresh(m.lastSeenAt) && m.route.geometry.every(c => isFiniteLngLat(c[0], c[1])),
   )
   if (routed.length === 0) return null
   const showEta = zoom >= ETA_MIN_ZOOM
@@ -939,7 +949,7 @@ function AssignedRoutes({ liveMedics, liveIncidents }: { liveMedics: MedicState[
     if (inc.status === 'resolved' || inc.status === 'closed' || !isFiniteLngLat(inc.lng, inc.lat)) continue
     for (const medicId of inc.responders ?? []) {
       const m = medicById.get(medicId)
-      if (!m || m.route || !isFiniteLngLat(m.lng, m.lat) || !isOnline(m.lastSeenAt)) continue
+      if (!m || m.route || !isFiniteLngLat(m.lng, m.lat) || !isAssignmentFresh(m.lastSeenAt)) continue
       const arc = arcPoints([m.lng, m.lat], [inc.lng, inc.lat])
       links.push({ key: `${inc.id}-${medicId}`, arc, mid: arc[Math.floor(arc.length / 2)] })
     }
@@ -1073,7 +1083,7 @@ export default function MapClient({
         m.destination &&
         !m.route &&
         !responderIds.has(m.medicId) &&
-        isOnline(m.lastSeenAt) &&
+        isAssignmentFresh(m.lastSeenAt) &&
         isFiniteLngLat(m.lng, m.lat) &&
         isFiniteLngLat(m.destination.lng, m.destination.lat),
     )
@@ -1168,7 +1178,7 @@ export default function MapClient({
 
       {/* Going-to destination pins — suppressed when a route or assigned line shows. */}
       {liveMedics
-        .filter(m => m.status === 'going_to' && m.destination && !m.route && !responderIds.has(m.medicId) && isOnline(m.lastSeenAt))
+        .filter(m => m.status === 'going_to' && m.destination && !m.route && !responderIds.has(m.medicId) && isAssignmentFresh(m.lastSeenAt))
         .map(m => <DestinationPin key={`dest-${m.medicId}`} medic={m} />)
       }
 

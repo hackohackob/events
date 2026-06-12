@@ -1,7 +1,8 @@
 import * as ExpoLocation from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as Battery from "expo-battery";
-import { Linking, Platform } from "react-native";
+import Constants from "expo-constants";
+import { AppState, Linking, Platform } from "react-native";
 import { apiFetch } from "../ui/api-client";
 import { getSocket } from "../realtime/socket-client";
 import { useSessionStore } from "../security/session-store";
@@ -9,11 +10,19 @@ import { OfflineQueue } from "../offline/offline-queue";
 import { debugLog } from "../debug/debug-log";
 import { useLocationStatus } from "../debug/location-status";
 import { useSettingsStore } from "../settings/settings-store";
+import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "./battery-optimization";
 
 export const LOCATION_TASK_NAME = "background-location-task";
 
+/** Background-task cadence while actively navigating — the screen may be locked
+ *  but the dashboard still needs a near-live position + ETA. */
+const NAV_MODE_INTERVAL_MS = 5_000;
+
 const locationQueue = new OfflineQueue<Record<string, unknown>>();
 let openedBackgroundLocationSettings = false;
+let promptedBatteryExemption = false;
+/** True while turn-by-turn navigation is active — shortens the update interval. */
+let navModeActive = false;
 
 // ─── Accuracy gating ─────────────────────────────────────────────────────────
 // Drop fixes that are too imprecise to be useful so the map/server never get a
@@ -97,8 +106,15 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
       battery,
     };
 
+    // WS only while the app is actually in the foreground. After the screen
+    // locks, the socket can sit in a zombie state for minutes: `connected` is
+    // still true (the ping timeout hasn't fired yet) but the TCP pipe is dead,
+    // so emits are buffered into nothing and the fix is silently lost — the
+    // medic vanishes from the dashboard even though every send "succeeded".
+    // Background fixes always go over awaited HTTP, which surfaces failures
+    // and falls into the retry queue.
     const socket = getSocket();
-    if (socket.connected) {
+    if (AppState.currentState === "active" && socket.connected) {
       socket.emit("medic_location", payload);
       debugLog("location", "info", "medic location sent via WS", { accuracy: payload.accuracy, battery });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "ws" });
@@ -163,6 +179,10 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
   const session = useSessionStore.getState();
   if (session.role !== "medic" && session.role !== "paramedic" && !session.eventId) return;
 
+  // Drain any fixes that failed to send on earlier wakes first (oldest →
+  // newest), THEN send the current one — so a retried stale position can never
+  // overwrite the fresh one on the server.
+  await flushLocationQueue();
   await sendLocation(location);
 });
 
@@ -216,6 +236,22 @@ export async function startLocationLoop(): Promise<boolean> {
 
   if (!(await requestAlwaysLocationPermission())) return false;
 
+  // Without a Doze exemption Android throttles the foreground service's network
+  // (and often its GPS) once the screen locks, so updates arrive minutes apart
+  // or not at all. Show the one-tap "Allow" prompt once per app run.
+  if (Platform.OS === "android" && !promptedBatteryExemption) {
+    promptedBatteryExemption = true;
+    try {
+      if (!(await isBatteryOptimizationIgnored())) {
+        const packageName = Constants.expoConfig?.android?.package ?? "com.a.atanasov.paramediceventapp";
+        debugLog("location", "info", "requesting battery optimization exemption");
+        await requestDisableBatteryOptimization(packageName);
+      }
+    } catch (err) {
+      debugLog("location", "warn", "battery exemption prompt failed", String(err));
+    }
+  }
+
   try {
     // 3. Stop any previously running task before (re)starting
     const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
@@ -238,7 +274,8 @@ export async function startLocationLoop(): Promise<boolean> {
     // own sticky foreground service. (A notifee-owned foreground service was
     // tried instead to get action buttons on the notification — tracking died
     // the moment the app left the foreground.)
-    const intervalMs = useSettingsStore.getState().locationIntervalMs;
+    const configuredMs = useSettingsStore.getState().locationIntervalMs;
+    const intervalMs = navModeActive ? Math.min(NAV_MODE_INTERVAL_MS, configuredMs) : configuredMs;
     await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
       accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
       timeInterval: intervalMs,
@@ -272,6 +309,38 @@ export async function startLocationLoop(): Promise<boolean> {
   // 5. Fire an immediate one-shot send so the map shows a position right away.
   void sendCurrentLocationNow();
   return true;
+}
+
+/**
+ * Switch the background task between the configured cadence and the fast
+ * navigation cadence. Restarting the updates task applies the new interval;
+ * a no-op when the mode hasn't changed or tracking isn't running.
+ */
+export async function setNavModeTracking(active: boolean): Promise<void> {
+  if (navModeActive === active) return;
+  navModeActive = active;
+  try {
+    const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    if (!running) return;
+    debugLog("location", "info", `nav-mode tracking ${active ? "on" : "off"} — restarting updates`);
+    await startLocationLoop();
+  } catch (err) {
+    debugLog("location", "error", "nav-mode tracking switch failed", String(err));
+  }
+}
+
+let lastNavSendAt = 0;
+const NAV_FOREGROUND_SEND_INTERVAL_MS = 5_000;
+
+/**
+ * Server send for the high-frequency foreground navigation watcher. The watcher
+ * fires every second to drive the puck/camera; reporting every fix would flood
+ * the server, so sends are throttled to one every few seconds.
+ */
+export function sendNavLocationFix(location: ExpoLocation.LocationObject): void {
+  if (Date.now() - lastNavSendAt < NAV_FOREGROUND_SEND_INTERVAL_MS) return;
+  lastNavSendAt = Date.now();
+  void sendLocation(location);
 }
 
 let lastWatchdogRestartAt = 0;
@@ -316,10 +385,12 @@ export async function stopLocationLoop(): Promise<void> {
 
 export async function flushLocationQueue(): Promise<void> {
   const session = useSessionStore.getState();
-  const eventId = session.eventId ?? "";
   const ready = locationQueue.listReady();
   for (const item of ready) {
     try {
+      // Medic items carry their own eventId — the session one may have changed
+      // since the fix was queued.
+      const eventId = (item.payload as any).eventId ?? session.eventId ?? "";
       const url = item.type === "medic_location"
         ? `/events/${eventId}/medics/${(item.payload as any).medicId}/location`
         : `/events/${eventId}/location`;

@@ -53,6 +53,7 @@ import { SettingsScreen } from "../settings/SettingsScreen";
 import { FieldGuideScreen } from "../guide/FieldGuideScreen";
 import { useSettingsStore } from "../settings/settings-store";
 import { useTrackingHealth } from "../location/tracking-health";
+import { setNavModeTracking } from "../location/location-tracker";
 import { archivePoi, assignDestination, setMyRoute, type PoiDto } from "../ui/event-actions";
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
@@ -2394,6 +2395,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     const isActive = navPhase === "active";
     const wasActive = navWasActiveRef.current;
     navWasActiveRef.current = isActive;
+    // Background tracking switches to the fast nav cadence while navigating, so
+    // the dashboard stays near-live even when the screen is locked.
+    void setNavModeTracking(isActive);
     if (isActive && !wasActive) {
       const st = useNavStore.getState();
       const route = st.routes.find((r) => r.id === st.selectedRouteId) ?? st.routes[0];
@@ -2524,8 +2528,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         attribution={false}
         compass={false}
         onRegionDidChange={(event: any) => {
-          const z = event?.properties?.zoom ?? event?.nativeEvent?.zoom;
-          if (typeof z === "number" && Number.isFinite(z)) setMapZoom(z);
+          const props = event?.nativeEvent ?? event?.properties ?? {};
+          const z = props.zoom ?? props.zoomLevel;
+          if (typeof z === "number" && Number.isFinite(z)) {
+            setMapZoom(z);
+            // A pinch during active navigation becomes the standing nav zoom, so
+            // the follow camera doesn't snap back on the next location update.
+            const byUser = props.userInteraction ?? props.isUserInteraction;
+            if (byUser && useNavStore.getState().phase === "active") {
+              useNavStore.getState().setNavZoomOverride(z);
+            }
+          }
         }}
         onLongPress={(event: any) => {
           // PressEvent: { nativeEvent: { lngLat: [lng, lat], point: [x, y] } }.

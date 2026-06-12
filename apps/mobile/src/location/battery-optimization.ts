@@ -1,21 +1,22 @@
-import { Platform, NativeModules } from "react-native";
+import { Platform } from "react-native";
 import * as IntentLauncher from "expo-intent-launcher";
+import * as Battery from "expo-battery";
 
 /**
  * Returns true if the app is already exempt from Android battery optimization.
  * Always returns true on iOS (no equivalent concept).
+ *
+ * Uses expo-battery's PowerManager bridge. (An earlier version probed
+ * NativeModules.PowerManagerModule, which doesn't exist in an Expo app — it
+ * always reported "not exempt", so the exemption looked permanently broken
+ * and the prompt re-fired on every launch even after the user allowed it.)
  */
 export async function isBatteryOptimizationIgnored(): Promise<boolean> {
   if (Platform.OS !== "android") return true;
   try {
-    // PowerManager.isIgnoringBatteryOptimizations() via the Expo module bridge
-    const { PowerManagerModule } = NativeModules;
-    if (PowerManagerModule?.isIgnoringBatteryOptimizations) {
-      return await PowerManagerModule.isIgnoringBatteryOptimizations();
-    }
-    // Fallback: assume not ignored — prompt the user
-    return false;
+    return !(await Battery.isBatteryOptimizationEnabledAsync());
   } catch {
+    // Can't tell → assume not ignored so the user still gets the prompt.
     return false;
   }
 }

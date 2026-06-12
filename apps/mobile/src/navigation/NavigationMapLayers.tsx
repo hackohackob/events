@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
 import { useNavStore } from "./nav-store";
 import { NavPuck } from "./NavPuck";
 import { SURFACE_COLORS } from "./surface";
+import { clipRouteAhead } from "./geo";
 import type { LngLat } from "./types";
 
 function lineFeature(coordinates: LngLat[]) {
@@ -36,11 +37,19 @@ export function NavigationMapLayers() {
   const navCameraMode = useNavStore((s) => s.navCameraMode);
   const destinationIncidentId = useNavStore((s) => s.destinationIncidentId);
 
-  if (phase === "idle" || phase === "transport") return null;
-
   const selected = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
   const alternatives = routes.filter((r) => r.id !== selected?.id);
   const isActive = phase === "active";
+
+  // During active navigation, hide the part of the route already travelled —
+  // the line is drawn from the snapped puck position forward only.
+  const displayed = useMemo(() => {
+    if (!selected) return null;
+    if (!isActive || !progress) return { geometry: selected.geometry, segments: selected.segments };
+    return clipRouteAhead(selected.geometry, selected.segments, progress.snapped);
+  }, [selected, isActive, progress]);
+
+  if (phase === "idle" || phase === "transport") return null;
 
   return (
     <>
@@ -64,9 +73,9 @@ export function NavigationMapLayers() {
         ))}
 
       {/* Selected route — glow, white outline, then coloured surface segments. */}
-      {selected ? (
+      {selected && displayed ? (
         <React.Fragment key={`nav-sel-${selected.id}`}>
-          <GeoJSONSource id="nav-sel-glow-src" data={lineFeature(selected.geometry)}>
+          <GeoJSONSource id="nav-sel-glow-src" data={lineFeature(displayed.geometry)}>
             <Layer
               id="nav-sel-glow"
               type="line"
@@ -79,7 +88,7 @@ export function NavigationMapLayers() {
               }}
             />
           </GeoJSONSource>
-          <GeoJSONSource id="nav-sel-outline-src" data={lineFeature(selected.geometry)}>
+          <GeoJSONSource id="nav-sel-outline-src" data={lineFeature(displayed.geometry)}>
             <Layer
               id="nav-sel-outline"
               type="line"
@@ -87,7 +96,7 @@ export function NavigationMapLayers() {
               paint={{ "line-color": "#FFFFFF", "line-width": isActive ? 13 : 10, "line-opacity": 0.95 }}
             />
           </GeoJSONSource>
-          {selected.segments.map((segment, index) => (
+          {displayed.segments.map((segment, index) => (
             <GeoJSONSource
               key={`nav-seg-${index}`}
               id={`nav-seg-src-${index}`}

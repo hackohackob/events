@@ -9,8 +9,10 @@ Navigation:
 - explain navigation waypoints
 
 Incidents:
-- explain incidents cretion
+- explain incidents creation
 - explain incident voice adding, navigate, assign medic, notes, pictures, assigned responders, chat, close, archive
+- responding to incidents
+- arriving at incident
 
 Map
 - explain map layers

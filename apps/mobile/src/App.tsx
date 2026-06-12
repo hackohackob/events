@@ -9,7 +9,7 @@ import { incidentQueue } from "./incidents/persistent-incident-queue";
 import { flushIncidentQueue } from "./incidents/flush-incidents";
 import { startIncidentReport } from "./incidents/start-report";
 import { useIncidentStore } from "./incidents/incident-store";
-import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive } from "./location/location-tracker";
+import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive, flushLocationQueue } from "./location/location-tracker";
 import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
 import { MapScreen } from "./map/MapScreen";
@@ -101,6 +101,7 @@ export default function App() {
       const online = state.isConnected === true && state.isInternetReachable !== false;
       useIncidentStore.getState().setOnline(online);
       if (online && !incidentQueue.isEmpty) void flushIncidentQueue();
+      if (online) void flushLocationQueue();
     });
 
     return () => {
@@ -120,6 +121,7 @@ export default function App() {
     if (!token) return;
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "active") {
+        void flushLocationQueue();
         void sendCurrentLocationNow();
         void ensureTrackingAlive();
       }
