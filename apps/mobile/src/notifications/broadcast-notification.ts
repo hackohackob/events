@@ -54,9 +54,14 @@ export async function showBroadcastNotification(
   alarm = false,
 ): Promise<void> {
   try {
-    if (alarm && AppState.currentState === "active") {
-      debugLog("app", "info", "suppressed foreground incident alarm", data?.incidentId ?? title);
-      return;
+    // While the app is open we still surface the alert as a heads-up
+    // notification, but drop the insistent looping siren + full-screen takeover
+    // (those are meant for when the phone is pocketed/locked). Otherwise a new
+    // incident arriving with the app foregrounded would show nothing at all.
+    const foregrounded = AppState.currentState === "active";
+    const insistent = alarm && !foregrounded;
+    if (alarm && foregrounded) {
+      debugLog("app", "info", "foreground incident alert (non-insistent)", data?.incidentId ?? title);
     }
     await notifee.requestPermission();
     await ensureChannels();
@@ -81,12 +86,15 @@ export async function showBroadcastNotification(
           ? {
               category: AndroidCategory.ALARM,
               // Repeats the channel sound until the user opens/dismisses the
-              // notification (sets FLAG_INSISTENT under the hood).
-              loopSound: true,
+              // notification (sets FLAG_INSISTENT under the hood). Only when the
+              // app is backgrounded — a looping siren while you're using the app
+              // is obnoxious; a single heads-up chirp is enough there.
+              loopSound: insistent,
               autoCancel: true,
               ongoing: false,
-              // Light up / take over the lock screen like an incoming call.
-              fullScreenAction: { id: "default", launchActivity: "default" },
+              // Light up / take over the lock screen like an incoming call —
+              // only worthwhile when the app isn't already in the foreground.
+              ...(insistent ? { fullScreenAction: { id: "default", launchActivity: "default" } } : {}),
             }
           : {}),
       },

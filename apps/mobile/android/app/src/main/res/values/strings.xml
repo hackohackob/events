@@ -1,3 +1,4 @@
 <resources>
   <string name="app_name">Paramedic Event App</string>
+  <string name="expo_runtime_version">0.5.0</string>
 </resources>

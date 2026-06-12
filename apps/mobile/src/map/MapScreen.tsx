@@ -3150,20 +3150,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <Pressable
             style={styles.menuPageRow}
             onPress={() => {
-              setActiveTab("location");
-              setMenuOpen(false);
-            }}
-          >
-            <Feather name="map-pin" size={18} color="#7dd3fc" style={styles.menuPageIcon} />
-            <View style={styles.menuPageTextWrap}>
-              <Text style={styles.menuPageTitle}>Location diagnostics</Text>
-              <Text style={styles.menuPageSubtitle}>GPS status, accuracy, history</Text>
-            </View>
-            <Feather name="chevron-right" size={16} color="#475569" />
-          </Pressable>
-          <Pressable
-            style={styles.menuPageRow}
-            onPress={() => {
               setActiveTab("guide");
               setMenuOpen(false);
             }}
@@ -3186,6 +3172,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             <View style={styles.menuPageTextWrap}>
               <Text style={styles.menuPageTitle}>Settings</Text>
               <Text style={styles.menuPageSubtitle}>Map display & location tracking</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
+              setActiveTab("location");
+              setMenuOpen(false);
+            }}
+          >
+            <Feather name="map-pin" size={18} color="#7dd3fc" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Location diagnostics</Text>
+              <Text style={styles.menuPageSubtitle}>GPS status, accuracy, history</Text>
             </View>
             <Feather name="chevron-right" size={16} color="#475569" />
           </Pressable>
