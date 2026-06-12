@@ -1,7 +1,8 @@
+app install + permissions
+
 Location 
 - explain the "Allow all the time" option"
 - explain the exclamation mark icon
-
 
 Navigation:
 - explain what Assigned is

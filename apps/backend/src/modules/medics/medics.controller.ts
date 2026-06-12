@@ -42,7 +42,7 @@ export class MedicsController {
   async postMedicLocation(
     @Param("eventId") eventId: string,
     @Param("medicId") medicId: string,
-    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number },
+    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number; timestamp?: string },
   ) {
     const medic = await this.medicsService.getMedicById(eventId, medicId);
     await this.medicsService.upsertMedicLocation({
@@ -55,6 +55,7 @@ export class MedicsController {
       speed: body.speed,
       heading: body.heading,
       battery: body.battery,
+      timestamp: body.timestamp,
     });
     await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, body.lat, body.lng);
   }

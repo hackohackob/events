@@ -104,6 +104,9 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
       speed: location.coords.speed ?? undefined,
       heading: location.coords.heading ?? undefined,
       battery,
+      // Real fix time — without it the server stamps arrival time, so a fix
+      // flushed after a Doze freeze masquerades as a live position.
+      timestamp: new Date(location.timestamp).toISOString(),
     };
 
     // WS only while the app is actually in the foreground. After the screen
@@ -161,6 +164,41 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
   }
 }
 
+// Newest fix timestamp actually delivered to the server, and when we delivered
+// it — used to collapse the post-Doze backlog flush into a single send and to
+// dedupe the direct-watch path against the TaskManager fallback.
+const STALE_FIX_MAX_AGE_MS = 30_000;
+let lastDeliveredFixTimestamp = 0;
+let lastDeliveredAt = 0;
+
+// ─── Direct watch (primary background delivery) ──────────────────────────────
+
+let directWatchSub: ExpoLocation.LocationSubscription | null = null;
+
+async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<void> {
+  directWatchSub?.remove();
+  directWatchSub = null;
+  try {
+    directWatchSub = await ExpoLocation.watchPositionAsync(
+      {
+        accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
+        timeInterval: intervalMs,
+        distanceInterval: 0,
+      },
+      (location) => {
+        // Skip anything the task fallback (or a previous watch) already sent.
+        if (location.timestamp <= lastDeliveredFixTimestamp) return;
+        lastDeliveredFixTimestamp = location.timestamp;
+        lastDeliveredAt = Date.now();
+        void sendLocation(location);
+      },
+    );
+    debugLog("location", "info", "direct location watch started", { intervalMs });
+  } catch (err) {
+    debugLog("location", "error", "direct location watch failed to start", String(err));
+  }
+}
+
 // ─── Background task definition ──────────────────────────────────────────────
 // Must be defined at module level (before registerRootComponent) so the native
 // side can wake the JS runtime and find the task handler.
@@ -178,6 +216,26 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
   const location = locations[locations.length - 1]!;
   const session = useSessionStore.getState();
   if (session.role !== "medic" && session.role !== "paramedic" && !session.eventId) return;
+
+  // Doze flush guard. When the device dozes, the OS freezes the JS runtime but
+  // keeps queueing task invocations; on wake they all execute back-to-back and
+  // 20+ minutes of stale fixes blast the server in one second. Each invocation
+  // here sees one slice of that backlog: skip slices that are older than what
+  // we've already delivered, and skip stale slices when something fresh was
+  // delivered moments ago — but always let one through after a silence so the
+  // server gets the newest known position even if it's old (with its real
+  // timestamp attached, see sendLocation).
+  if (location.timestamp <= lastDeliveredFixTimestamp) {
+    debugLog("location", "info", "skipped already-superseded queued fix");
+    return;
+  }
+  const fixAgeMs = Date.now() - location.timestamp;
+  if (fixAgeMs > STALE_FIX_MAX_AGE_MS && Date.now() - lastDeliveredAt < STALE_FIX_MAX_AGE_MS) {
+    debugLog("location", "info", `skipped stale queued fix (${Math.round(fixAgeMs / 1000)}s old)`);
+    return;
+  }
+  lastDeliveredFixTimestamp = location.timestamp;
+  lastDeliveredAt = Date.now();
 
   // Drain any fixes that failed to send on earlier wakes first (oldest →
   // newest), THEN send the current one — so a retried stale position can never
@@ -239,6 +297,12 @@ export async function startLocationLoop(): Promise<boolean> {
   // Without a Doze exemption Android throttles the foreground service's network
   // (and often its GPS) once the screen locks, so updates arrive minutes apart
   // or not at all. Show the one-tap "Allow" prompt once per app run.
+  if (Platform.OS === "android") {
+    // Surface the exemption state on every (re)start — when background sends go
+    // silent, this is the first thing to check in the debug log.
+    const exempt = await isBatteryOptimizationIgnored().catch(() => false);
+    debugLog("location", exempt ? "info" : "warn", `battery optimization exemption: ${exempt ? "granted" : "NOT granted — background tracking will freeze in Doze"}`);
+  }
   if (Platform.OS === "android" && !promptedBatteryExemption) {
     promptedBatteryExemption = true;
     try {
@@ -301,6 +365,15 @@ export async function startLocationLoop(): Promise<boolean> {
       return false;
     }
     debugLog("location", "info", "background location updates started", { isMedic });
+
+    // The TaskManager task above is delivered through a JobScheduler job
+    // (TaskJobService), and Android/Samsung defers those jobs the moment the
+    // screen locks — fixes pile up and all execute on unlock. The foreground
+    // service keeps this JS runtime alive though, so a plain watch subscription
+    // (direct callback, no JobScheduler) keeps firing while locked. This is the
+    // primary delivery path; the task stays registered as a fallback for when
+    // the process itself is killed and later revived by the service.
+    await startDirectWatch(isMedic, intervalMs);
   } catch (err) {
     debugLog("location", "error", "background location updates failed to start", String(err));
     return false;
@@ -376,6 +449,8 @@ export async function ensureTrackingAlive(): Promise<void> {
 }
 
 export async function stopLocationLoop(): Promise<void> {
+  directWatchSub?.remove();
+  directWatchSub = null;
   const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
   if (running) {
     await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);

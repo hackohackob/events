@@ -43,7 +43,7 @@
     "infra:down": "docker compose down",
     "docker:up": "docker compose up --build",
     "reverse:proxy": "adb ${ANDROID_SERIAL:+-s $ANDROID_SERIAL} reverse tcp:8500 tcp:8500",
-    "eas:build": "cd apps/mobile && eas build --platform android"
+    "eas:build": "cd apps/mobile && eas build --platform android --profile production-apk"
   },
   "devDependencies": {
     "@types/react": "~19.1.10",

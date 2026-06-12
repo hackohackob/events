@@ -41,6 +41,8 @@ export interface UpsertMedicLocationParams {
   speed?: number;
   accuracy?: number;
   battery?: number;
+  /** Client-side fix time (ISO). Falls back to server time when absent. */
+  timestamp?: string;
 }
 
 @Injectable()
@@ -153,6 +155,10 @@ export class MedicsService implements OnModuleInit {
 
   async upsertMedicLocation(params: UpsertMedicLocationParams): Promise<MedicState> {
     const now = new Date().toISOString();
+    // Honour the client's fix time so a backlog flushed after a Doze freeze
+    // doesn't masquerade as a live position; ignore unparsable/future values.
+    const clientTs = params.timestamp ? Date.parse(params.timestamp) : NaN;
+    const recordedAt = Number.isFinite(clientTs) && clientTs <= Date.now() ? new Date(clientTs).toISOString() : now;
 
     // Preserve existing status/destination so a location ping doesn't clear an assignment
     const existing = await this.getMedicLastLocation(params.eventId, params.medicId);
@@ -170,7 +176,7 @@ export class MedicsService implements OnModuleInit {
       status: existing?.status ?? "available",
       destination: existing?.destination ?? null,
       route: existing?.route ?? null,
-      recordedAt: now,
+      recordedAt,
       lastSeenAt: now,
     };
 
@@ -194,7 +200,7 @@ export class MedicsService implements OnModuleInit {
         params.speed ?? null, params.accuracy ?? null, params.battery ?? null,
         state.status, state.destination ? JSON.stringify(state.destination) : null,
         state.route ? JSON.stringify(state.route) : null,
-        now, now,
+        recordedAt, now,
       ],
     );
 
