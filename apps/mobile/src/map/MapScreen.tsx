@@ -2889,8 +2889,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     }}
                   />
                 </GeoJSONSource>
-                <Marker lngLat={[dest.lng, dest.lat]}>
-                  <View style={styles.destFlag}>
+                {/* pointerEvents none: the flag sits on the destination's exact
+                    coordinates, which is usually an incident/POI marker. Without
+                    this the flag overlay swallows taps and the underlying marker
+                    can't be opened. */}
+                <Marker lngLat={[dest.lng, dest.lat]} pointerEvents="none">
+                  <View style={styles.destFlag} pointerEvents="none">
                     <Text style={styles.destFlagText}>🚩</Text>
                   </View>
                 </Marker>
