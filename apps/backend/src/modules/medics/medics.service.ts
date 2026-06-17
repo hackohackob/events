@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
-import { MedicDestination, MedicRoute, MedicState, MedicStatus, MedicType } from "@events/contracts";
+import { MedicDestination, MedicRoute, MedicState, MedicStatus, MedicType, PublicMedicState } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -401,6 +401,23 @@ export class MedicsService implements OnModuleInit {
       route: (r.nav_route as MedicState["route"]) ?? null,
       recordedAt: r.recorded_at,
       lastSeenAt: r.last_seen_at,
+    }));
+  }
+
+  /**
+   * Trimmed active-medic snapshot safe for runners — position + status only,
+   * no battery/route/destination internals. Powers the runner map markers and
+   * nearest-medic pill.
+   */
+  async getPublicActiveMedics(eventId: string): Promise<PublicMedicState[]> {
+    const medics = await this.getActiveMedics(eventId);
+    return medics.map((m) => ({
+      medicId: m.medicId,
+      name: m.name,
+      lat: m.lat,
+      lng: m.lng,
+      status: m.status,
+      recordedAt: m.recordedAt,
     }));
   }
 

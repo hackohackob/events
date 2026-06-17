@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { ForbiddenException, Inject, Injectable, NotFoundException, OnModuleInit, forwardRef } from "@nestjs/common";
-import { IncidentStatus, UserRole } from "@events/contracts";
+import { IncidentStatus, UserRole, IncidentCategory, INCIDENT_CATEGORY_SEVERITY } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -18,6 +18,10 @@ export interface IncidentRecord {
   type: string;
   description: string;
   severity?: string;
+  /** Standardised category from the runner PWA (free-form `type` kept for back-compat). */
+  category?: string;
+  /** GPS accuracy radius (metres) reported at capture time. */
+  accuracy?: number;
   photoUrl?: string;
   /** All photos attached to the incident, oldest first (includes photoUrl). */
   photoUrls: string[];
@@ -33,6 +37,9 @@ export interface IncidentRecord {
   transport?: string;
   closedBy?: string;
   closedAt?: string;
+  /** ISO timestamp of the most recent message on this incident (for unread
+   *  indicators on the client). Undefined when there are no messages. */
+  lastMessageAt?: string;
 }
 
 export interface IncidentMessageRecord {
@@ -58,6 +65,8 @@ interface IncidentRow {
   type: string;
   description: string;
   severity: string | null;
+  category: string | null;
+  accuracy: number | null;
   photo_url: string | null;
   photo_urls: string[] | null;
   status: string;
@@ -105,6 +114,8 @@ function rowToRecord(r: IncidentRow): IncidentRecord {
     type: r.type,
     description: r.description,
     severity: r.severity ?? undefined,
+    category: r.category ?? undefined,
+    accuracy: r.accuracy ?? undefined,
     photoUrl: r.photo_url ?? undefined,
     photoUrls: mergePhotoUrls(r.photo_url, r.photo_urls),
     status: r.status as IncidentStatus,
@@ -187,6 +198,8 @@ export class IncidentsService implements OnModuleInit {
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_by  TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS closed_at  TIMESTAMPTZ`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS category TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS accuracy DOUBLE PRECISION`,
     ];
     for (const sql of alterations) {
       await this.db.query(sql);
@@ -338,12 +351,21 @@ export class IncidentsService implements OnModuleInit {
     const sequence = Number(countRows[0]?.count ?? 0) + 1;
     const name = `Incident ${sequence}`;
 
-    const reporterName = await this.resolveReporterName(eventId, userId);
+    // Runners send their name in the payload (the session userId is a slug);
+    // medics/dashboard resolve from the roster. Prefer an explicit runnerName.
+    const reporterName = input.runnerName?.trim() || (await this.resolveReporterName(eventId, userId));
+
+    // A category implies a default severity + a human-readable `type` label when
+    // the caller didn't supply its own.
+    const category = (input.category as IncidentCategory | undefined) ?? undefined;
+    const severity =
+      input.severity ?? (category ? INCIDENT_CATEGORY_SEVERITY[category] : null);
+    const type = input.type ?? (category ? category.replace(/_/g, " ") : "other");
 
     const { rows } = await this.db.query<IncidentRow>(
       `INSERT INTO incidents
-         (id, event_id, name, lat, lng, type, description, severity, photo_url, status, created_by, reporter_name, created_at, updated_at, responders)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10, $11, $12, $12, '[]')
+         (id, event_id, name, lat, lng, type, description, severity, category, accuracy, photo_url, status, created_by, reporter_name, created_at, updated_at, responders)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12, $13, $14, $14, '[]')
        RETURNING *`,
       [
         id,
@@ -351,9 +373,11 @@ export class IncidentsService implements OnModuleInit {
         name,
         input.lat,
         input.lng,
-        input.type ?? "other",
+        type,
         input.description ?? "",
-        input.severity ?? null,
+        severity,
+        category ?? null,
+        input.accuracy ?? null,
         input.photoUrl ?? null,
         userId,
         reporterName,
@@ -386,12 +410,15 @@ export class IncidentsService implements OnModuleInit {
         incidentType: incident.type,
         lat: incident.lat,
         lng: incident.lng,
+        // Lets each device skip ringing for incidents that predate the app
+        // being opened (a queued push delivered on open must not re-alarm).
+        createdAt: incident.createdAt,
       },
       // Notification-payload push: the OS renders it even if the app process
       // can't be woken (data-only proved unreliable on Samsung when killed).
       // The v3 channel carries the bundled siren sound + strong vibration.
       // Skip the reporter — they shouldn't be alarmed by their own report.
-      { channelId: "incident-alarm-v3", excludeUserId: userId },
+      { channelId: "incident-alarm-v4", excludeUserId: userId },
     );
 
     return { ...incident, nearbyParamedics: [] };
@@ -402,11 +429,32 @@ export class IncidentsService implements OnModuleInit {
       return [];
     }
 
-    const { rows } = await this.db.query<IncidentRow>(
-      `SELECT * FROM incidents WHERE event_id = $1 ORDER BY created_at DESC`,
+    const { rows } = await this.db.query<IncidentRow & { last_message_at: string | null }>(
+      `SELECT i.*, m.last_message_at
+         FROM incidents i
+         LEFT JOIN (
+           SELECT incident_id, max(created_at) AS last_message_at
+             FROM incident_messages
+            GROUP BY incident_id
+         ) m ON m.incident_id = i.id
+        WHERE i.event_id = $1
+        ORDER BY i.created_at DESC`,
       [eventId],
     );
 
+    return rows.map((r) => ({ ...rowToRecord(r), lastMessageAt: toIso(r.last_message_at) }));
+  }
+
+  /**
+   * Incidents the caller reported themselves. Runners can't see the full event
+   * incident list, but they need to follow the dispatch status + assigned medic
+   * for their own SOS (the "SOS sent" / "track medic" screens).
+   */
+  async listMine(eventId: string, userId: string): Promise<IncidentRecord[]> {
+    const { rows } = await this.db.query<IncidentRow>(
+      `SELECT * FROM incidents WHERE event_id = $1 AND created_by = $2 ORDER BY created_at DESC`,
+      [eventId, userId],
+    );
     return rows.map(rowToRecord);
   }
 
@@ -590,7 +638,7 @@ export class IncidentsService implements OnModuleInit {
         lat: incident.lat,
         lng: incident.lng,
       },
-      { channelId: "incident-alarm-v3" },
+      { channelId: "incident-alarm-v4" },
     );
 
     void this.resolveReporterName(eventId, paramedicId).then((medicName) => {

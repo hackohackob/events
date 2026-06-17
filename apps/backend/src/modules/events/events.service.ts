@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
+import type { TrackGeoJson } from "@events/contracts";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { DbService } from "../infra/db.service";
@@ -352,6 +353,39 @@ export class EventsService implements OnModuleInit {
       }
     }
     return tracks;
+  }
+
+  /**
+   * A single track as a GeoJSON FeatureCollection, cacheable offline by the
+   * runner PWA. Looks in the event's own tracks first, then the example tracks.
+   */
+  async getTrackGeoJson(eventId: string, trackId: string): Promise<TrackGeoJson | null> {
+    const eventTracks = await this.listTracksForEvent(eventId);
+    const pool = eventTracks.length > 0 ? eventTracks : this.listTracks();
+    const track = pool.find((t) => t.id === trackId) ?? pool[0];
+    if (!track) return null;
+
+    return {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: track.points.map((p) => [p.lng, p.lat] as [number, number]),
+          },
+          properties: {
+            trackId: track.id,
+            label: track.label,
+            color: track.color,
+            totalAscentMeters: track.elevationProfile.totalAscentMeters,
+            totalDescentMeters: track.elevationProfile.totalDescentMeters,
+            maxElevationMeters: track.elevationProfile.maxElevationMeters,
+            minElevationMeters: track.elevationProfile.minElevationMeters,
+          },
+        },
+      ],
+    };
   }
 
   listPoisForEvent(eventId: string): StoredPoi[] {

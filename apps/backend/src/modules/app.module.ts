@@ -6,6 +6,7 @@ import { CommonModule } from "./common/common.module";
 import { ExampleDataModule } from "./example-data/example-data.module";
 import { EventsModule } from "./events/events.module";
 import { FieldGuideModule } from "./field-guide/field-guide.module";
+import { GuidanceModule } from "./guidance/guidance.module";
 import { EventUsersModule } from "./event-users/event-users.module";
 import { HealthModule } from "./health/health.module";
 import { IncidentsModule } from "./incidents/incidents.module";
@@ -36,6 +37,7 @@ import { UsersModule } from "./users/users.module";
     MedicsModule,
     NotificationsModule,
     IncidentsModule,
+    GuidanceModule,
     AssignmentsModule,
     RealtimeModule,
     RoutingModule,

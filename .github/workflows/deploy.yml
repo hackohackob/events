@@ -9,6 +9,7 @@ env:
   API_IMAGE: hackohackob1/events-api
   WEB_IMAGE: hackohackob1/events-web
   SIM_IMAGE: hackohackob1/events-simulator
+  RUNNER_IMAGE: hackohackob1/events-runner
   DEPLOY_HOST: hackohackob.com
   DEPLOY_USER: hacko
   DEPLOY_DIR: /opt/events
@@ -68,6 +69,19 @@ jobs:
           cache-from: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache,mode=max
 
+      - name: Build and push runner PWA image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/runner/Dockerfile
+          push: true
+          tags: ${{ env.RUNNER_IMAGE }}:latest
+          build-args: |
+            VITE_API_URL=https://events-api.hackohackob.com/api
+            VITE_WS_URL=https://events-api.hackohackob.com/realtime
+          cache-from: type=registry,ref=${{ env.RUNNER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.RUNNER_IMAGE }}:buildcache,mode=max
+
       - name: Copy deploy files to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -75,7 +89,7 @@ jobs:
           username: ${{ env.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
-          source: "docker-compose.prod.yml,apps/backend/graphhopper/config.yml"
+          source: "docker-compose.prod.yml,apps/backend/graphhopper/config.yml,infra/nginx/pwa.hackohackob.com.conf,infra/nginx/README.md"
           target: ${{ env.DEPLOY_DIR }}
 
       - name: Deploy to server
@@ -107,6 +121,7 @@ jobs:
             docker pull hackohackob1/events-api:latest
             docker pull hackohackob1/events-web:latest
             docker pull hackohackob1/events-simulator:latest
+            docker pull hackohackob1/events-runner:latest
 
             docker-compose down
             docker-compose up -d

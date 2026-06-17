@@ -182,14 +182,113 @@ export interface LocationUpdate {
 export type IncidentSeverity = "low" | "medium" | "high" | "critical";
 export type IncidentStatus = "open" | "assigned" | "in_progress" | "resolved" | "closed";
 
+/**
+ * Standardised incident categories reported by the Runner Companion PWA. The
+ * first four match the hi-fi design's 2×2 grid; the rest cover the wider range
+ * of things that can happen to a runner on course. Each maps to a default
+ * severity (see INCIDENT_CATEGORY_SEVERITY).
+ */
+export type IncidentCategory =
+  | "severe_injury"
+  | "chest_pain"
+  | "collapse"
+  | "minor_injury"
+  | "heat_illness"
+  | "dehydration"
+  | "hypothermia"
+  | "allergic_reaction"
+  | "seizure"
+  | "fall_trauma"
+  | "lost_disoriented"
+  | "other";
+
+/** Default severity per category — drives triage colour + ordering. */
+export const INCIDENT_CATEGORY_SEVERITY: Record<IncidentCategory, IncidentSeverity> = {
+  severe_injury: "critical",
+  chest_pain: "critical",
+  collapse: "critical",
+  seizure: "critical",
+  allergic_reaction: "high",
+  fall_trauma: "high",
+  hypothermia: "high",
+  heat_illness: "high",
+  dehydration: "medium",
+  minor_injury: "medium",
+  lost_disoriented: "medium",
+  other: "low",
+};
+
 export interface CreateIncidentRequest {
   eventId: string;
   lat: number;
   lng: number;
-  type: string;
-  description: string;
+  /** Free-form label; optional when `category` is supplied (it derives one). */
+  type?: string;
+  description?: string;
   severity?: IncidentSeverity;
   photoUrl?: string;
+  /** Standardised category from the runner PWA. */
+  category?: IncidentCategory;
+  /** GPS accuracy radius in metres at capture time. */
+  accuracy?: number;
+  /** Reporter bib number (runner PWA). */
+  bibNumber?: string;
+  /** Reporter display name (runner PWA). */
+  runnerName?: string;
+  /** Client capture time (ISO8601). */
+  timestamp?: string;
+}
+
+/** Runner-facing response after creating an incident (medic dispatch summary). */
+export interface CreatedIncidentResponse {
+  incidentId: string;
+  assignedMedicId: string | null;
+  etaMinutes: number | null;
+}
+
+/**
+ * Trimmed medic position safe to expose to runners — no battery, route, or
+ * destination internals. Powers the runner map markers + nearest-medic pill.
+ */
+export interface PublicMedicState {
+  medicId: string;
+  name: string;
+  lat: number;
+  lng: number;
+  status: MedicStatus;
+  recordedAt: string;
+}
+
+/** Track route as GeoJSON, cacheable offline by the runner PWA. */
+export interface TrackGeoJson {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    geometry: { type: "LineString"; coordinates: [number, number][] };
+    properties: {
+      trackId: string;
+      label: string;
+      color?: string;
+      totalAscentMeters: number;
+      totalDescentMeters: number;
+      maxElevationMeters: number | null;
+      minElevationMeters: number | null;
+    };
+  }>;
+}
+
+/** Guided ABC care step. */
+export type AbcStep = "A" | "B" | "C";
+
+export interface GuidanceRequest {
+  transcript: string;
+  category?: IncidentCategory;
+}
+
+export interface GuidanceResponse {
+  currentStep: AbcStep;
+  instruction: string;
+  note: string;
 }
 
 /** Casualty-care summary captured when an incident is closed. */

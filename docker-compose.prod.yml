@@ -60,6 +60,22 @@ services:
       retries: 5
       start_period: 10s
 
+  # Runner Companion PWA (static, served by nginx). Reverse-proxied at
+  # pwa.hackohackob.com → 127.0.0.1:8894. Calls the API cross-origin.
+  runner:
+    image: hackohackob1/events-runner:latest
+    restart: unless-stopped
+    ports:
+      - "8894:8506"
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8506"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # Self-hosted offline OSM routing for the navigation feature. Config comes from
   # the repo (deploy copies apps/backend/graphhopper/config.yml -> ./graphhopper/
   # config.yml); the OSM extract + built graph cache live in ./graphhopper/data

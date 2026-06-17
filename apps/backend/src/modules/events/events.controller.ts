@@ -41,6 +41,17 @@ export class EventsController {
     return this.eventsService.listTracks();
   }
 
+  /** A single track as GeoJSON — cacheable offline by the runner PWA. */
+  @Get(":eventId/tracks/:trackId/geojson")
+  async trackGeoJson(
+    @Param("eventId") eventId: string,
+    @Param("trackId") trackId: string,
+  ) {
+    const geojson = await this.eventsService.getTrackGeoJson(eventId, trackId);
+    if (!geojson) throw new NotFoundException(`Track ${trackId} not found`);
+    return geojson;
+  }
+
   @Get("pois")
   pois(@CurrentUser() user: RequestUser) {
     return this.eventsService.listPoisForEvent(user.eventId);

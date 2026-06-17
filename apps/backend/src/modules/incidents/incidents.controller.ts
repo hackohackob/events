@@ -49,6 +49,12 @@ export class IncidentsController {
     return this.incidentsService.list(user.eventId, user.role);
   }
 
+  /** Incidents the caller reported themselves (runner SOS follow-up). */
+  @Get("mine")
+  listMine(@CurrentUser() user: RequestUser) {
+    return this.incidentsService.listMine(user.eventId, user.userId);
+  }
+
   @Patch(":incidentId/action")
   @Roles("paramedic", "coordinator", "medic")
   action(

@@ -33,6 +33,12 @@ export class MedicsController {
     return this.medicsService.getActiveMedics(eventId);
   }
 
+  /** Runner-safe trimmed snapshot (position + status only). */
+  @Get("medics/active/public")
+  getPublicActiveMedics(@Param("eventId") eventId: string) {
+    return this.medicsService.getPublicActiveMedics(eventId);
+  }
+
   /**
    * HTTP fallback for background location updates when the WebSocket is not
    * available (e.g. app was killed and restarted by the OS task manager).

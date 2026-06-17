@@ -1,0 +1,201 @@
+/* ── Design tokens (from the hi-fi handoff). Dark is default; [data-theme=light]
+   swaps the surface/text tokens. Severity + brand colours stay constant. ── */
+:root,
+:root[data-theme="dark"] {
+  --bg-base: #0a1118;
+  --bg-surface: #0b1623;
+  --bg-card: #16273a;
+  --bg-input: #101826;
+  --bg-overlay: rgba(12, 17, 25, 0.9);
+  --text-primary: #f2f6fb;
+  --text-secondary: #c7d2df;
+  --text-muted: #8a97a8;
+  --text-label: #7e8b9c;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-mid: #233447;
+  --border-strong: #2c3a4a;
+  --map-filter: saturate(0.85) contrast(1.05);
+}
+
+:root[data-theme="light"] {
+  --bg-base: #eef2f7;
+  --bg-surface: #ffffff;
+  --bg-card: #ffffff;
+  --bg-input: #f1f5f9;
+  --bg-overlay: rgba(255, 255, 255, 0.94);
+  --text-primary: #0c1622;
+  --text-secondary: #33414f;
+  --text-muted: #5a6b7e;
+  --text-label: #5a6b7e;
+  --border-subtle: #d6dee8;
+  --border-mid: #d6dee8;
+  --border-strong: #c2cedb;
+  --map-filter: none;
+}
+
+:root {
+  /* Constant across themes — emergency recognition. */
+  --primary: #2be3a0;
+  --primary-dark: #18b883;
+  --primary-bg: rgba(43, 227, 160, 0.09);
+  --live-gps: #2e9bff;
+  --caution: #ffb020;
+  --urgent: #ff8a3d;
+  --critical: #e63946;
+  --critical-dark: #ba1c28;
+  --critical-bg: rgba(230, 57, 70, 0.12);
+
+  --track-10k: #3b82f6;
+  --track-21k: #2be3a0;
+  --track-42k: #ffb020;
+  --track-100k: #ff8a3d;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Manrope", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input {
+  font-family: inherit;
+}
+
+.archivo {
+  font-family: "Archivo", system-ui, sans-serif;
+}
+
+.section-label {
+  font-family: "Manrope", sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+
+/* ── Animations ── */
+@keyframes pulseDot {
+  0% {
+    box-shadow: 0 0 0 0 rgba(46, 155, 255, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 16px rgba(46, 155, 255, 0);
+  }
+}
+@keyframes fabPulse {
+  0%,
+  100% {
+    box-shadow: 0 14px 34px rgba(230, 57, 70, 0.5), 0 0 0 0 rgba(230, 57, 70, 0.45);
+  }
+  50% {
+    box-shadow: 0 14px 34px rgba(230, 57, 70, 0.6), 0 0 0 14px rgba(230, 57, 70, 0);
+  }
+}
+@keyframes ring {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* ── Reusable building blocks ── */
+.screen {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.btn-primary {
+  width: 100%;
+  border-radius: 16px;
+  padding: 17px;
+  font-family: "Archivo", sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  color: #05140e;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  box-shadow: 0 12px 26px rgba(43, 227, 160, 0.32);
+  min-height: 52px;
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.btn-critical {
+  width: 100%;
+  border-radius: 18px;
+  padding: 18px;
+  font-family: "Archivo", sans-serif;
+  font-weight: 900;
+  font-size: 17px;
+  color: #fff;
+  background: linear-gradient(135deg, #ff4d58, #e63946);
+  box-shadow: 0 12px 28px rgba(230, 57, 70, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 13px;
+}
+
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-logo {
+  display: none !important;
+}

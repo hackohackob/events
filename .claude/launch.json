@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace=@events/web"],
       "port": 8503
+    },
+    {
+      "name": "runner",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:runner"],
+      "port": 8506
     }
   ]
 }

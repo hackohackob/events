@@ -34,6 +34,8 @@
     "dev:web": "npm run dev -w @events/web",
     "build:web": "npm run build -w @events/web",
     "dev:simulator": "npm run dev -w @events/simulator",
+    "dev:runner": "npm run dev -w @events/runner",
+    "build:runner": "npm run build -w @events/runner",
     "dev:mobile": "cd apps/mobile && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools npx expo start --dev-client --port 8505",
     "dev:mobile:android": "cd apps/mobile && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools npx expo run:android --device",
     "load:test": "node scripts/load-test.mjs",
