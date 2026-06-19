@@ -352,39 +352,49 @@ export async function startLocationLoop(): Promise<boolean> {
     // the moment the app left the foreground.)
     const configuredMs = useSettingsStore.getState().locationIntervalMs;
     const intervalMs = navModeActive ? Math.min(NAV_MODE_INTERVAL_MS, configuredMs) : configuredMs;
-    await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
-      timeInterval: intervalMs,
-      distanceInterval: 0,
-      deferredUpdatesInterval: 0,
-      deferredUpdatesDistance: 0,
-      mayShowUserSettingsDialog: true,
-      foregroundService: {
-        notificationTitle: "Medic Event App — live tracking",
-        notificationBody: isMedic
-          ? "Sharing your location with the event command centre"
-          : "Sharing location with event coordinators",
-        notificationColor: "#00C37A",
-        killServiceOnDestroy: false,
-      },
-      showsBackgroundLocationIndicator: true,
-      pausesUpdatesAutomatically: false,
-    });
 
-    const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-    if (!registered) {
-      debugLog("location", "error", "background location task did not register after start");
-      return false;
+    // The background task start can throw a native NullPointerException on some
+    // Android devices (expo-location reading a null SharedPreferences). That
+    // must NOT abort tracking: the direct watch below is the PRIMARY delivery
+    // path and works independently of the JobScheduler-backed task. So isolate
+    // the background start in its own try/catch and always fall through to
+    // startDirectWatch.
+    try {
+      await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+        accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
+        timeInterval: intervalMs,
+        distanceInterval: 0,
+        deferredUpdatesInterval: 0,
+        deferredUpdatesDistance: 0,
+        mayShowUserSettingsDialog: true,
+        foregroundService: {
+          notificationTitle: "Medic Event App — live tracking",
+          notificationBody: isMedic
+            ? "Sharing your location with the event command centre"
+            : "Sharing location with event coordinators",
+          notificationColor: "#00C37A",
+          killServiceOnDestroy: false,
+        },
+        showsBackgroundLocationIndicator: true,
+        pausesUpdatesAutomatically: false,
+      });
+
+      const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+      if (registered) {
+        debugLog("location", "info", "background location updates started", { isMedic });
+      } else {
+        debugLog("location", "warn", "background task did not register — relying on direct watch");
+      }
+    } catch (bgErr) {
+      // Known expo-location Android NPE — degrade to direct-watch-only instead
+      // of failing the whole start. Locked-screen delivery via the task is lost,
+      // but the foreground service + direct watch keep live tracking working.
+      debugLog("location", "warn", "background location task failed to start (direct watch still active)", String(bgErr));
     }
-    debugLog("location", "info", "background location updates started", { isMedic });
 
-    // The TaskManager task above is delivered through a JobScheduler job
-    // (TaskJobService), and Android/Samsung defers those jobs the moment the
-    // screen locks — fixes pile up and all execute on unlock. The foreground
-    // service keeps this JS runtime alive though, so a plain watch subscription
-    // (direct callback, no JobScheduler) keeps firing while locked. This is the
-    // primary delivery path; the task stays registered as a fallback for when
-    // the process itself is killed and later revived by the service.
+    // Primary delivery path: a plain watch subscription (direct callback, no
+    // JobScheduler) kept alive by the foreground service. Always started, even
+    // when the background task above fails to register.
     await startDirectWatch(isMedic, intervalMs);
   } catch (err) {
     debugLog("location", "error", "background location updates failed to start", String(err));

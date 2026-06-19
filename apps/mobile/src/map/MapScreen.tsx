@@ -2632,13 +2632,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <Layer
             id="base-raster-layer"
             type="raster"
-            // Pin the base map to the very bottom of the layer stack. Changing
-            // baseLayer remounts this RasterSource (via its key), and a freshly
-            // mounted layer is otherwise appended to the TOP of the native stack
-            // — which buried the track/route lines until they were toggled off/on
-            // to re-add them above. layerIndex={0} forces re-insertion at the
-            // bottom on every (re)mount, keeping the paths visible.
-            layerIndex={0}
             paint={{
               "raster-opacity": 1,
             }}
