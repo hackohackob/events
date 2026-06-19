@@ -55,6 +55,7 @@ import { useSettingsStore } from "../settings/settings-store";
 import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
 import { archivePoi, assignDestination, setMyRoute, type PoiDto } from "../ui/event-actions";
+import { PoiIcon } from "./poi-icons";
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
@@ -197,7 +198,7 @@ function incidentToMarker(incident: IncidentResponse) {
   };
 }
 
-function poiToMarker(poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string }) {
+function poiToMarker(poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string; icon?: string }) {
   return {
     id: poi.id,
     type: "infrastructure" as const,
@@ -206,6 +207,7 @@ function poiToMarker(poi: { id: string; type: string; lat: number; lng: number; 
     lat: poi.lat,
     lng: poi.lng,
     poiType: poi.type,
+    poiIcon: poi.icon,
     poiDescription: poi.description,
   };
 }
@@ -1636,7 +1638,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             ? apiFetch<MedicActiveResponse[]>(`/events/${eventId}/medics/active`).catch(() => [])
             : Promise.resolve<MedicActiveResponse[]>([]),
           apiFetch<unknown>("/events/tracks"),
-          apiFetch<Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number }>>("/events/pois").catch(() => []),
+          apiFetch<Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number; icon?: string }>>("/events/pois").catch(() => []),
           apiFetch<IncidentResponse[]>("/incidents").catch(() => [] as IncidentResponse[]),
         ]);
 
@@ -1686,6 +1688,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           lat: poi.lat,
           lng: poi.lng,
           poiType: poi.type,
+          poiIcon: poi.icon,
           poiDescription: poi.description,
         }));
         const visibleIncidents = incidents.filter((i) => !isArchivedIncidentStatus(i.status));
@@ -1846,7 +1849,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     });
 
     // POIs created/archived elsewhere appear/disappear for everyone live.
-    socket.on("poi.created", (poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string }) => {
+    socket.on("poi.created", (poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string; icon?: string }) => {
       const existing = useMapStore.getState().markers;
       setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
     });
@@ -3053,7 +3056,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 const cfg = poiConfig(marker.poiType);
                 return (
                   <View style={[styles.poiDot, { backgroundColor: cfg.color, width: cfg.size, height: cfg.size, borderRadius: cfg.size / 2 }]}>
-                    <Text style={styles.poiDotText}>{cfg.icon}</Text>
+                    <PoiIcon type={marker.poiType} icon={marker.poiIcon} size={Math.round(cfg.size * 0.58)} color="#ffffff" />
                   </View>
                 );
               })() : null}
@@ -3622,23 +3625,27 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                         : null,
                 ]}
               >
-                <Text
-                  style={[
-                    styles.incidentIconText,
-                    selectedMarker.type === "incident" ? null : styles.sheetCompactIconText,
-                    selectedMarker.type === "infrastructure"
-                      ? { color: poiConfig(selectedMarker.poiType).color }
-                      : null,
-                  ]}
-                >
-                  {selectedMarker.type === "incident"
-                    ? "!"
-                    : selectedMarker.type === "paramedic"
-                      ? markerInitials(selectedMarker.label)
-                      : selectedMarker.type === "infrastructure"
-                        ? poiConfig(selectedMarker.poiType).icon
+                {selectedMarker.type === "infrastructure" ? (
+                  <PoiIcon
+                    type={selectedMarker.poiType}
+                    icon={selectedMarker.poiIcon}
+                    size={20}
+                    color={poiConfig(selectedMarker.poiType).color}
+                  />
+                ) : (
+                  <Text
+                    style={[
+                      styles.incidentIconText,
+                      selectedMarker.type === "incident" ? null : styles.sheetCompactIconText,
+                    ]}
+                  >
+                    {selectedMarker.type === "incident"
+                      ? "!"
+                      : selectedMarker.type === "paramedic"
+                        ? markerInitials(selectedMarker.label)
                         : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
-                </Text>
+                  </Text>
+                )}
               </View>
               <View style={styles.sheetHeaderTextWrap}>
                 <Text style={styles.sheetTitle}>{selectedMarker.name ?? selectedMarker.label}</Text>

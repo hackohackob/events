@@ -60,7 +60,7 @@ export class EventsController {
   @Post("pois")
   createPoi(
     @CurrentUser() user: RequestUser,
-    @Body() body: { lat: number; lng: number; type?: string; name?: string; description?: string },
+    @Body() body: { lat: number; lng: number; type?: string; name?: string; description?: string; icon?: string },
   ) {
     return this.eventsService.createPoi(user.eventId, body);
   }

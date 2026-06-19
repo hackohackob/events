@@ -9,27 +9,19 @@ export const POI_CONFIGS: POIConfig[] = [
   { type: 'wardrobe', label: 'Wardrobe', color: '#f97316', bg: '#7c2d12', category: 'other' },
   { type: 'parking', label: 'Parking', color: '#f59e0b', bg: '#78350f', category: 'other' },
   { type: 'mrs', label: 'Mountain Rescue', color: '#0ea5e9', bg: '#0c4a6e', category: 'medical' },
+  { type: 'food-point', label: 'Food Point', color: '#22c55e', bg: '#14532d', category: 'other' },
+  { type: 'danger', label: 'Danger', color: '#f43f5e', bg: '#7f1d1d', category: 'other' },
+  { type: 'road-crossing', label: 'Road Crossing', color: '#f59e0b', bg: '#78350f', category: 'other' },
+  { type: 'mechanical', label: 'Mechanical', color: '#64748b', bg: '#1e293b', category: 'other' },
+  { type: 'marshal', label: 'Marshal', color: '#3b82f6', bg: '#1e3a5f', category: 'other' },
+  { type: 'checkpoint', label: 'Checkpoint', color: '#a855f7', bg: '#3b1f7a', category: 'other' },
+  { type: 'finish', label: 'Finish', color: '#10b981', bg: '#064e3b', category: 'other' },
+  { type: 'shelter', label: 'Shelter', color: '#0ea5e9', bg: '#0c4a6e', category: 'other' },
   { type: 'custom', label: 'Custom Point', color: '#94a3b8', bg: '#1e293b', category: 'other' },
 ]
 
-/**
- * Glyphs selectable for a custom point of interest. The first is the default.
- * "Danger" (⚠️) marks a dangerous place, as requested for hazard marking.
- */
-export const CUSTOM_POI_ICONS: { icon: string; label: string }[] = [
-  { icon: '⚠️', label: 'Danger' },
-  { icon: '⭐', label: 'Star' },
-  { icon: '🚩', label: 'Flag' },
-  { icon: '📍', label: 'Pin' },
-  { icon: '🏁', label: 'Finish' },
-  { icon: '⛺', label: 'Camp' },
-  { icon: '📷', label: 'Viewpoint' },
-  { icon: '🚧', label: 'Obstacle' },
-  { icon: '☎️', label: 'Contact' },
-  { icon: '🔦', label: 'Search point' },
-  { icon: '🪨', label: 'Rockfall' },
-  { icon: '💧', label: 'Water' },
-]
+// Selectable glyphs for a custom point of interest now live in
+// `@/lib/poi-icons` as CUSTOM_POI_ICON_OPTIONS (keyed vector icons).
 
 export const VEHICLE_CONFIGS: VehicleConfig[] = [
   { value: 'bike', label: 'Bike', icon: '🚲' },

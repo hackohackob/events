@@ -27,6 +27,8 @@ interface Marker {
   accuracy?: number;
   battery?: number;
   poiType?: string;
+  /** Custom glyph key for a "custom" POI; overrides the type's default icon. */
+  poiIcon?: string;
   /** Live medic status: "available" | "rest" | "going_to" */
   status?: string;
   /** Where a medic is currently heading (for the "going to" line + label). */

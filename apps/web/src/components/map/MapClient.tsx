@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import type { PointOfInterest, POIType } from '@/lib/types'
 import type { MedicState } from '@events/contracts'
 import { POI_CONFIGS } from '@/lib/constants'
+import { PoiIcon } from '@/lib/poi-icons'
 import type { LiveIncident } from '@/hooks/useLiveMap'
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
@@ -72,21 +73,6 @@ function getPOIIcon(type: POIType) {
   const config = POI_CONFIGS.find(p => p.type === type)
   if (!config) return { label: '?', color: '#64748b', bg: '#1e293b' }
   return config
-}
-
-function getIconContent(type: POIType): string {
-  switch (type) {
-    case 'base-medical-camp': return '🏠'
-    case 'ambulance': return '🚑'
-    case 'medical-point': return '+'
-    case 'water-point': return '💧'
-    case 'wc': return 'WC'
-    case 'wardrobe': return '👕'
-    case 'parking': return 'P'
-    case 'mrs': return '⛰️'
-    case 'custom': return '★'
-    default: return '•'
-  }
 }
 
 function getInitials(name: string): string {
@@ -158,18 +144,17 @@ function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string
       onDragEnd={e => onMove?.(poi.id, [e.lngLat.lng, e.lngLat.lat])}
     >
       <div
-        className="flex items-center justify-center rounded-full text-white font-bold text-xs cursor-pointer"
+        className="flex items-center justify-center rounded-full text-white cursor-pointer"
         style={{
           width: poi.type === 'base-medical-camp' ? 34 : 28,
           height: poi.type === 'base-medical-camp' ? 34 : 28,
           background: config.color,
           border: '2px solid rgba(255,255,255,0.9)',
           boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-          fontSize: poi.type === 'wc' ? 8 : 11,
         }}
         title={poi.name || poi.type}
       >
-        {poi.icon || getIconContent(poi.type)}
+        <PoiIcon type={poi.type} icon={poi.icon} size={poi.type === 'base-medical-camp' ? 18 : 15} color="#fff" />
       </div>
     </Marker>
   )
@@ -275,7 +260,6 @@ function GoToModal({ medic, pois, incidents, onAssign, onClose }: GoToModalProps
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {pois.map((poi, i) => {
                   const cfg = POI_CONFIGS.find(c => c.type === poi.type)
-                  const icon = poi.icon || getIconContent(poi.type as POIType)
                   const label = poi.name || cfg?.label || poi.type
                   return (
                     <button
@@ -297,9 +281,8 @@ function GoToModal({ medic, pois, incidents, onAssign, onClose }: GoToModalProps
                         background: cfg?.bg ?? '#1e293b',
                         border: `1.5px solid ${cfg?.color ?? '#64748b'}44`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 16,
                       }}>
-                        {icon}
+                        <PoiIcon type={poi.type} icon={poi.icon} size={18} color={cfg?.color ?? '#94a3b8'} />
                       </div>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>{label}</div>

@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { createPoi, type PoiDto } from "../ui/event-actions";
+import { PoiIcon } from "./poi-icons";
 import { debugLog } from "../debug/debug-log";
 
 const POI_TYPES: Array<{ id: string; label: string; icon: string; color: string }> = [
@@ -109,7 +110,7 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
                     }}
                     style={[styles.typeChip, active && { borderColor: t.color, backgroundColor: `${t.color}22` }]}
                   >
-                    <Text style={styles.typeIcon}>{t.icon}</Text>
+                    <PoiIcon type={t.id} size={15} color={active ? t.color : "#94a3b8"} />
                     <Text style={[styles.typeText, active && { color: t.color }]}>{t.label}</Text>
                   </Pressable>
                 );

@@ -407,7 +407,7 @@ export class EventsService implements OnModuleInit {
   /** Create a POI at the given coordinates (long-press on the map). */
   async createPoi(
     eventId: string,
-    input: { lat: number; lng: number; type?: string; name?: string; description?: string },
+    input: { lat: number; lng: number; type?: string; name?: string; description?: string; icon?: string },
   ): Promise<StoredPoi> {
     const event = this.events.find((e) => e.id === eventId);
     if (!event) throw new NotFoundException(`Event ${eventId} not found`);
@@ -421,6 +421,7 @@ export class EventsService implements OnModuleInit {
       lng: input.lng,
       name: input.name?.trim() || undefined,
       description: input.description?.trim() || undefined,
+      icon: input.icon?.trim() || undefined,
     };
     event.days[0].pois.push(poi);
     await this.persist();

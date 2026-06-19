@@ -132,6 +132,8 @@ export interface PoiDto {
   lng: number;
   name?: string;
   description?: string;
+  /** Custom glyph key for "custom" points; overrides the default type icon. */
+  icon?: string;
 }
 
 /** Drop a new point of interest at the given coordinates. */

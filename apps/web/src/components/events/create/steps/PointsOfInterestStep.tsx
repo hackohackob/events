@@ -5,7 +5,8 @@ import { ChevronLeft, ChevronRight, Info, Trash2, Eye, EyeOff, Check, X, Copy, M
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, PointOfInterest, POIType } from '@/lib/types'
-import { POI_CONFIGS, MAP_CENTER, CUSTOM_POI_ICONS } from '@/lib/constants'
+import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
+import { PoiIcon, CUSTOM_POI_ICON_OPTIONS } from '@/lib/poi-icons'
 import { computeTrackBounds } from '@/lib/utils'
 
 interface Props {
@@ -15,36 +16,25 @@ interface Props {
   onBack: () => void
 }
 
-const POI_ICON_LABEL: Record<string, string> = {
-  'base-medical-camp': '🏠',
-  'ambulance': '🚑',
-  'medical-point': '➕',
-  'water-point': '💧',
-  'wc': 'WC',
-  'wardrobe': '👕',
-  'parking': 'P',
-  'custom': '★',
-}
-
-/** Grid of selectable glyphs for a custom point of interest. */
+/** Grid of selectable vector icons for a custom point of interest. */
 function IconPicker({ value, onChange }: { value: string; onChange: (icon: string) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {CUSTOM_POI_ICONS.map(opt => {
-        const active = value === opt.icon
+      {CUSTOM_POI_ICON_OPTIONS.map(opt => {
+        const active = value === opt.key
         return (
           <button
-            key={opt.icon}
+            key={opt.key}
             type="button"
-            onClick={() => onChange(opt.icon)}
+            onClick={() => onChange(opt.key)}
             title={opt.label}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-base transition-all"
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
             style={{
               background: active ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
               border: active ? '1px solid rgba(34,197,94,0.5)' : '1px solid rgba(148,163,184,0.12)',
             }}
           >
-            {opt.icon}
+            <opt.Icon size={16} color={active ? '#22c55e' : '#cbd5e1'} strokeWidth={2.4} />
           </button>
         )
       })}
@@ -56,7 +46,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
   const [selectedDayId, setSelectedDayId] = useState(data.days[0]?.id || '')
   const [selectedType, setSelectedType] = useState<POIType | null>(null)
   const [customPoiName, setCustomPoiName] = useState('')
-  const [customPoiIcon, setCustomPoiIcon] = useState(CUSTOM_POI_ICONS[0].icon)
+  const [customPoiIcon, setCustomPoiIcon] = useState(CUSTOM_POI_ICON_OPTIONS[0].key)
   const [hiddenTrackIds, setHiddenTrackIds] = useState<Set<string>>(new Set())
   const [editingPoiId, setEditingPoiId] = useState<string | null>(null)
   const [editingPoiName, setEditingPoiName] = useState('')
@@ -160,7 +150,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
     setEditingPoiId(poi.id)
     setEditingPoiName(poi.name || config?.label || '')
     setEditingPoiDescription(poi.description || '')
-    setEditingPoiIcon(poi.icon ?? (poi.type === 'custom' ? CUSTOM_POI_ICONS[0].icon : undefined))
+    setEditingPoiIcon(poi.icon ?? (poi.type === 'custom' ? CUSTOM_POI_ICON_OPTIONS[0].key : undefined))
   }
 
   const confirmEditPoiName = () => {
@@ -314,14 +304,13 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                   }}
                 >
                   <div
-                    className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold"
+                    className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
                     style={{
                       background: config.bg,
-                      color: config.color,
                       boxShadow: selectedType === config.type ? `0 0 12px ${config.color}40` : 'none',
                     }}
                   >
-                    {POI_ICON_LABEL[config.type] || '•'}
+                    <PoiIcon type={config.type} size={17} color={config.color} />
                   </div>
                   <span className="flex-1 font-medium text-sm" style={{ color: selectedType === config.type ? '#f1f5f9' : '#94a3b8' }}>
                     {config.label}
@@ -392,10 +381,10 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.06)' }}
                     >
                       <div
-                        className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
-                        style={{ background: config?.bg || '#1e293b', color: config?.color || '#fff' }}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ background: config?.bg || '#1e293b' }}
                       >
-                        {poi.icon || POI_ICON_LABEL[poi.type] || '•'}
+                        <PoiIcon type={poi.type} icon={poi.icon} size={13} color={config?.color || '#fff'} />
                       </div>
                       <div className="flex-1 min-w-0">
                         {isEditing ? (
@@ -427,7 +416,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                               style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(148,163,184,0.2)' }}
                             />
                             {poi.type === 'custom' && (
-                              <IconPicker value={editingPoiIcon ?? CUSTOM_POI_ICONS[0].icon} onChange={setEditingPoiIcon} />
+                              <IconPicker value={editingPoiIcon ?? CUSTOM_POI_ICON_OPTIONS[0].key} onChange={setEditingPoiIcon} />
                             )}
                           </div>
                         ) : (
@@ -650,10 +639,10 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
             return (
               <div key={config.type} className="flex flex-col items-center gap-1 min-w-[52px]">
                 <div
-                  className="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold"
-                  style={{ background: config.bg, color: config.color }}
+                  className="w-7 h-7 rounded-xl flex items-center justify-center"
+                  style={{ background: config.bg }}
                 >
-                  {POI_ICON_LABEL[config.type]}
+                  <PoiIcon type={config.type} size={15} color={config.color} />
                 </div>
                 <div className="text-xs font-bold" style={{ color: count > 0 ? '#f1f5f9' : '#475569' }}>{count}</div>
                 <div className="text-[9px] text-center leading-tight" style={{ color: '#64748b' }}>
