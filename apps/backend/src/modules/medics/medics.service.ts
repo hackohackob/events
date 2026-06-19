@@ -525,22 +525,29 @@ export class MedicsService implements OnModuleInit {
       );
     }
 
-    // Publish real-time update so the dashboard gets a live participant count
-    await this.redis.publish(`event:${params.eventId}:map`, {
-      type: 'location.updated',
-      payload: {
-        userId: params.userId,
-        eventId: params.eventId,
-        lat: params.lat,
-        lng: params.lng,
-        accuracy: params.accuracy ?? null,
-        battery: params.battery ?? null,
-        timestamp: params.timestamp,
-        role: 'runner',
-        name: params.name,
-        bibNumber: params.bibNumber ?? null,
-      },
-    });
+    // No per-participant WS broadcast — clients poll GET /events/:id/heatmap for
+    // an aggregated snapshot instead (one call vs. a flood of events at scale).
+  }
+
+  /**
+   * Aggregated heatmap snapshot — one lightweight payload (no names/bib/battery)
+   * for the coordinator dashboard + medic app to poll, instead of streaming a
+   * WS event per participant. Each point carries recordedAt for freshness.
+   */
+  async getHeatmap(eventId: string): Promise<{
+    generatedAt: string;
+    count: number;
+    points: Array<{ lat: number; lng: number; recordedAt: string }>;
+  }> {
+    const { rows } = await this.db.query<{ lat: number; lng: number; recorded_at: string }>(
+      `SELECT lat, lng, recorded_at FROM participant_last_location WHERE event_id = $1`,
+      [eventId],
+    );
+    return {
+      generatedAt: new Date().toISOString(),
+      count: rows.length,
+      points: rows.map((r) => ({ lat: r.lat, lng: r.lng, recordedAt: r.recorded_at })),
+    };
   }
 
   async getParticipants(eventId: string) {

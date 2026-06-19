@@ -118,4 +118,10 @@ export class MedicsController {
   getParticipants(@Param("eventId") eventId: string) {
     return this.medicsService.getParticipants(eventId);
   }
+
+  /** Aggregated runner heatmap snapshot (dashboard + medic app poll this). */
+  @Get("heatmap")
+  getHeatmap(@Param("eventId") eventId: string) {
+    return this.medicsService.getHeatmap(eventId);
+  }
 }

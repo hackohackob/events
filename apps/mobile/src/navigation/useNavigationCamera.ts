@@ -91,7 +91,9 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
       padding: northUp
         ? { top: 0, bottom: 0, left: 0, right: 0 }
         : { top: Math.round(SCREEN_H * 0.46), bottom: 120, left: 0, right: 0 },
-      duration: 700,
+      // Match the GPS cadence (~1 fix/s) so the camera glides continuously
+      // instead of easing for 700ms then stalling until the next fix.
+      duration: 1000,
     });
   }, [phase, progress, navCameraMode, navZoomOverride, recenterTick, cameraRef]);
 

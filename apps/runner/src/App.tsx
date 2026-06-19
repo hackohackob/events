@@ -7,6 +7,8 @@ import { ReportFullScreen } from "./screens/ReportFullScreen";
 import { Sending } from "./screens/Sending";
 import { SosSent } from "./screens/SosSent";
 import { GuidedCare } from "./screens/GuidedCare";
+import { Terms } from "./screens/Terms";
+import { Medical } from "./screens/Medical";
 import { OfflineBanner } from "./components/OfflineBanner";
 
 // Map-heavy screens pull in maplibre-gl — lazy-load them so the onboarding and
@@ -17,7 +19,7 @@ const Confirm = lazy(() => import("./screens/Confirm").then((m) => ({ default: m
 
 export function App() {
   const { profile } = useApp();
-  const onboarded = Boolean(profile?.selectedTrack);
+  const onboarded = Boolean(profile?.selectedTrackId);
 
   return (
     <Suspense fallback={<div style={{ position: "fixed", inset: 0, background: "var(--bg-base)" }} />}>
@@ -33,6 +35,8 @@ export function App() {
         <Route path="/sending" element={<Sending />} />
         <Route path="/sent" element={<SosSent />} />
         <Route path="/guided" element={<GuidedCare />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/medical" element={<Medical />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

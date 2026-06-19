@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
-import { createIncident, uploadIncidentPhoto } from "../api";
+import { createIncident, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
+import { loadMedical } from "../lib/storage";
+import { medicalSummary } from "../lib/types";
+import { buildSosSmsHref } from "../lib/config";
 import { enqueueIncident } from "../lib/offline-queue";
 import type { CreateIncidentRequest } from "../api/contracts-shim";
 
@@ -14,6 +17,7 @@ export function Sending() {
   const { t } = useT();
   const [steps, setSteps] = useState<StepState[]>(["active", "pending", "pending"]);
   const [queued, setQueued] = useState(false);
+  const [smsHref, setSmsHref] = useState<string | null>(null);
   const started = useRef(false);
 
   useEffect(() => {
@@ -24,12 +28,16 @@ export function Sending() {
       return;
     }
 
+    // Prepend the medical/ICE summary so medics see it on the alert.
+    const med = medicalSummary(loadMedical());
+    const description = [med && `🩺 ${med}`, draft.description].filter(Boolean).join("\n") || undefined;
+
     const payload: CreateIncidentRequest = {
       eventId: "",
       lat: draft.fix?.lat ?? 0,
       lng: draft.fix?.lng ?? 0,
-      // Omit `type`/`description` — the backend derives a readable label from
-      // the category.
+      // Omit `type` — the backend derives a readable label from the category.
+      description,
       category: draft.category,
       accuracy: draft.fix?.accuracy,
       runnerName: profile?.runnerName ?? undefined,
@@ -38,6 +46,7 @@ export function Sending() {
     };
 
     const photos = draft.photos;
+    const voiceBlob = draft.voice;
 
     (async () => {
       setSteps(["done", "active", "pending"]);
@@ -50,6 +59,13 @@ export function Sending() {
             /* photo upload is best-effort */
           }
         }
+        if (voiceBlob) {
+          try {
+            await uploadIncidentVoice(incident.id, voiceBlob);
+          } catch {
+            /* voice upload is best-effort */
+          }
+        }
         setSteps(["done", "done", "active"]);
         setTimeout(() => {
           setSteps(["done", "done", "done"]);
@@ -57,15 +73,23 @@ export function Sending() {
           navigate("/sent", { replace: true, state: { incidentId: incident.id } });
         }, 700);
       } catch {
-        // Offline or server unreachable — queue for background sync.
+        // Offline or server unreachable — queue for background sync AND offer an
+        // SMS fallback (works on cell signal without data). Don't auto-navigate
+        // so the runner can choose to text.
         await enqueueIncident(payload);
         refreshQueued();
         setQueued(true);
+        setSmsHref(
+          buildSosSmsHref({
+            category: draft.category,
+            name: profile?.runnerName ?? undefined,
+            bib: profile?.bibNumber ?? undefined,
+            lat: draft.fix?.lat,
+            lng: draft.fix?.lng,
+            medical: med || undefined,
+          }),
+        );
         setSteps(["done", "done", "pending"]);
-        setTimeout(() => {
-          clearDraft();
-          navigate("/sent", { replace: true, state: { queued: true } });
-        }, 1200);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,7 +125,25 @@ export function Sending() {
         ))}
       </div>
 
-      {queued && <div style={{ marginTop: 24, color: "var(--caution)", fontWeight: 700, fontSize: 13 }}>{t("sending.queued")}</div>}
+      {queued && (
+        <div style={{ width: "100%", maxWidth: 340, marginTop: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ color: "var(--caution)", fontWeight: 700, fontSize: 13, textAlign: "center" }}>{t("sending.queued")}</div>
+          {smsHref && (
+            <a href={smsHref} style={{ textDecoration: "none" }}>
+              <button className="btn-critical" style={{ width: "100%" }}>💬 {t("sending.smsFallback")}</button>
+            </a>
+          )}
+          <button
+            onClick={() => {
+              clearDraft();
+              navigate("/sent", { replace: true, state: { queued: true } });
+            }}
+            style={{ width: "100%", padding: 14, borderRadius: 16, border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontWeight: 700 }}
+          >
+            {t("sending.continue")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

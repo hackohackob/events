@@ -47,8 +47,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setModeState(m);
   }, []);
 
+  // Cycle auto → light → dark → auto so the runner can follow the phone (auto)
+  // or pin a theme and get back to phone-tracking.
   const toggle = useCallback(() => {
-    setMode(resolve(mode) === "light" ? "dark" : "light");
+    setMode(mode === "auto" ? "light" : mode === "light" ? "dark" : "auto");
   }, [mode, setMode]);
 
   const value = useMemo(() => ({ mode, resolved, setMode, toggle }), [mode, resolved, setMode, toggle]);

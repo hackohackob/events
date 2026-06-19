@@ -1,13 +1,20 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import { fileURLToPath } from "url";
 
 // Lightweight runner PWA. Aliases @events/contracts to the source so the shared
 // types compile without a separate build step.
+// Set HTTPS=true to serve over self-signed TLS — required for the browser to
+// grant real GPS (geolocation needs a secure context) when testing on a phone
+// over the LAN (http://192.168.x.x is treated as insecure → coarse ±km fixes).
+const useHttps = process.env.HTTPS === "true";
+
 export default defineConfig({
   plugins: [
     react(),
+    ...(useHttps ? [basicSsl()] : []),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg"],

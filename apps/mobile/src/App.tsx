@@ -15,6 +15,7 @@ import { registerPushToken, registerPushTapHandler } from "./notifications/push-
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
 import { useSettingsStore } from "./settings/settings-store";
+import { useIncidentReadsStore } from "./incidents/incident-reads-store";
 
 function GlobalToast() {
   const toastMessage = useIncidentStore((s) => s.toastMessage);
@@ -71,6 +72,7 @@ export default function App() {
   useEffect(() => {
     void hydrate();
     void useSettingsStore.getState().hydrate();
+    void useIncidentReadsStore.getState().hydrate();
   }, [hydrate]);
 
   useEffect(() => {

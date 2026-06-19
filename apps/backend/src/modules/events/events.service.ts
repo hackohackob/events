@@ -79,7 +79,7 @@ export interface EventTrack {
   id: string;
   label: string;
   color?: string;
-  points: Array<{ lat: number; lng: number }>;
+  points: Array<{ lat: number; lng: number; ele?: number }>;
   elevationProfile: {
     totalAscentMeters: number;
     totalDescentMeters: number;
@@ -111,18 +111,24 @@ const MOCK_MEDICS: Record<string, { name: string; unit?: string }> = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function parseGpxPoints(content: string): Array<{ lat: number; lng: number }> {
-  const points: Array<{ lat: number; lng: number }> = [];
-  const tagRe = /<trkpt\b([^>]+)>/g;
+function parseGpxPoints(content: string): Array<{ lat: number; lng: number; ele?: number }> {
+  const points: Array<{ lat: number; lng: number; ele?: number }> = [];
+  // Capture each trkpt's attributes + body (so we can read the nested <ele>).
+  const tagRe = /<trkpt\b([^>]*)>([\s\S]*?)<\/trkpt>|<trkpt\b([^>]*)\/>/g;
   let match: RegExpExecArray | null;
   while ((match = tagRe.exec(content)) !== null) {
-    const attrs = match[1];
+    const attrs = match[1] ?? match[3] ?? "";
+    const body = match[2] ?? "";
     const latM = /lat="([^"]+)"/.exec(attrs);
     const lonM = /lon="([^"]+)"/.exec(attrs);
     if (!latM || !lonM) continue;
     const lat = parseFloat(latM[1]);
     const lng = parseFloat(lonM[1]);
-    if (isFinite(lat) && isFinite(lng)) points.push({ lat, lng });
+    const eleM = /<ele>([^<]+)<\/ele>/.exec(body);
+    const ele = eleM ? parseFloat(eleM[1]) : undefined;
+    if (isFinite(lat) && isFinite(lng)) {
+      points.push({ lat, lng, ele: ele !== undefined && isFinite(ele) ? ele : undefined });
+    }
   }
   return points;
 }
@@ -309,7 +315,7 @@ export class EventsService implements OnModuleInit {
     return this.exampleDataService.listTracks().map((track) => ({
       id: track.id,
       label: track.label,
-      points: track.points.map((point) => ({ lat: point.lat, lng: point.lng })),
+      points: track.points.map((point) => ({ lat: point.lat, lng: point.lng, ele: point.ele })),
       elevationProfile: {
         ...track.elevationProfile,
         segmentSlopes: [...track.elevationProfile.segmentSlopes],
@@ -372,7 +378,11 @@ export class EventsService implements OnModuleInit {
           type: "Feature",
           geometry: {
             type: "LineString",
-            coordinates: track.points.map((p) => [p.lng, p.lat] as [number, number]),
+            // Include elevation as the 3rd coordinate when available so the
+            // runner can render the real gradient.
+            coordinates: track.points.map(
+              (p) => (p.ele != null ? [p.lng, p.lat, p.ele] : [p.lng, p.lat]) as [number, number],
+            ),
           },
           properties: {
             trackId: track.id,

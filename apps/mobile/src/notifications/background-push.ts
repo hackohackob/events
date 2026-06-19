@@ -2,6 +2,7 @@ import * as TaskManager from "expo-task-manager";
 import * as Notifications from "expo-notifications";
 import { showBroadcastNotification } from "./broadcast-notification";
 import { incidentNotificationBody } from "./incident-notification";
+import { shouldRaiseIncidentAlarm } from "./incident-alarm-guard";
 
 export const BACKGROUND_PUSH_TASK = "background-push-task";
 
@@ -44,6 +45,17 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
   // (incidentName/incidentType/lat/lng). We deliberately do NOT fall back to
   // payload.body: on Android that arrives as the raw JSON-stringified data blob,
   // which is what used to leak into the notification.
+  // Skip incidents reported before the app/process came up — opening the app
+  // (which can trigger a queued push delivery) must not ring for old incidents.
+  // Assignment pushes are always live, so they bypass the age check.
+  const isAssignedPush = payload.kind === "incident_assigned";
+  if (
+    !isAssignedPush &&
+    !shouldRaiseIncidentAlarm({ incidentId: payload.incidentId, createdAt: payload.createdAt })
+  ) {
+    return;
+  }
+
   const name = payload.incidentName ? String(payload.incidentName) : undefined;
   const assigned = payload.kind === "incident_assigned";
   const title = name

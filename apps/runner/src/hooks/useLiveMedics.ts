@@ -24,9 +24,13 @@ export function useLiveMedics(eventId: string) {
 
   useEffect(() => {
     let alive = true;
-    fetchPublicMedics(eventId)
-      .then((snap) => alive && setMedics(snap))
-      .catch(() => undefined);
+    const refresh = () =>
+      fetchPublicMedics(eventId)
+        .then((snap) => alive && setMedics(snap))
+        .catch(() => undefined);
+    refresh();
+    // Poll as a fallback so positions refresh even if a WS update is missed.
+    const poll = setInterval(refresh, 12_000);
 
     const socket = io(WS_URL, {
       transports: ["websocket"],
@@ -54,6 +58,7 @@ export function useLiveMedics(eventId: string) {
 
     return () => {
       alive = false;
+      clearInterval(poll);
       socket.disconnect();
     };
   }, [eventId]);

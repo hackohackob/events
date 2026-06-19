@@ -46,6 +46,37 @@ export function snapToRoute(
   };
 }
 
+/** Interpolate the [lng,lat] position at a given km-along the route. */
+export function pointAtKm(
+  coords: [number, number][],
+  cumulative: number[],
+  km: number,
+): [number, number] | null {
+  if (coords.length === 0) return null;
+  const target = km * 1000;
+  if (target <= 0) return coords[0];
+  for (let i = 1; i < coords.length; i++) {
+    if (cumulative[i] >= target) {
+      const span = cumulative[i] - cumulative[i - 1] || 1;
+      const f = (target - cumulative[i - 1]) / span;
+      const a = coords[i - 1];
+      const b = coords[i];
+      return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+    }
+  }
+  return coords[coords.length - 1];
+}
+
+/** Compass bearing in degrees (0 = north) from point a to point b. */
+export function bearingDeg(a: LngLat, b: LngLat): number {
+  const φ1 = (a.lat * Math.PI) / 180;
+  const φ2 = (b.lat * Math.PI) / 180;
+  const Δλ = ((b.lng - a.lng) * Math.PI) / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (Math.atan2(y, x) * 180) / Math.PI;
+}
+
 export function formatDistance(meters: number): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;

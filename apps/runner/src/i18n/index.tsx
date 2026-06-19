@@ -6,6 +6,17 @@ export type Lang = "bg" | "en";
 type Dict = Record<string, string>;
 const DICTS: Record<Lang, Dict> = { bg, en };
 
+/** Languages shown in the picker. bg/en ship now; the rest are roadmap
+ *  (structure supports them — see i18n README) and render disabled. */
+export const LANGUAGES: { code: Lang | string; flag: string; label: string; ready: boolean }[] = [
+  { code: "bg", flag: "🇧🇬", label: "Български", ready: true },
+  { code: "en", flag: "🇬🇧", label: "English", ready: true },
+  { code: "uk", flag: "🇺🇦", label: "Українська", ready: false },
+  { code: "it", flag: "🇮🇹", label: "Italiano", ready: false },
+  { code: "de", flag: "🇩🇪", label: "Deutsch", ready: false },
+  { code: "ro", flag: "🇷🇴", label: "Română", ready: false },
+];
+
 const STORAGE_KEY = "pe_lang";
 
 interface I18nValue {

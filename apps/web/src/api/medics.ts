@@ -46,3 +46,20 @@ export async function getParticipants(eventId: string): Promise<ParticipantLastL
   const { data } = await client.get<ParticipantLastLocation[]>(`/events/${eventId}/participants`);
   return data;
 }
+
+export interface HeatmapPoint {
+  lat: number;
+  lng: number;
+  recordedAt: string;
+}
+export interface HeatmapSnapshot {
+  generatedAt: string;
+  count: number;
+  points: HeatmapPoint[];
+}
+
+/** Aggregated runner heatmap — one lightweight call (poll it). */
+export async function getHeatmap(eventId: string): Promise<HeatmapSnapshot> {
+  const { data } = await client.get<HeatmapSnapshot>(`/events/${eventId}/heatmap`);
+  return data;
+}

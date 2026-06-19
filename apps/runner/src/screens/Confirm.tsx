@@ -1,17 +1,27 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { ALL_CATEGORIES } from "../lib/types";
 import { RunnerMap } from "../map/RunnerMap";
+import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 
 export function Confirm() {
   const navigate = useNavigate();
-  const { draft, setDraftPhotos, profile } = useApp();
+  const { draft, patchDraft, profile } = useApp();
   const { t } = useT();
   const [confirming, setConfirming] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
+  const voice = useVoiceRecorder();
+  // Stable clamp centre: the originally captured fix, set once (not updated as
+  // the pin is dragged) so the 500 m limit is measured from the real GPS point.
+  const [pinOrigin, setPinOrigin] = useState<[number, number] | null>(
+    draft?.fix ? [draft.fix.lng, draft.fix.lat] : null,
+  );
+  useEffect(() => {
+    if (!pinOrigin && draft?.fix) setPinOrigin([draft.fix.lng, draft.fix.lat]);
+  }, [draft?.fix, pinOrigin]);
 
   if (!draft) {
     navigate("/map", { replace: true });
@@ -23,8 +33,17 @@ export function Confirm() {
 
   function addPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file && photos.length < 3) setDraftPhotos([...photos, file]);
+    if (file && photos.length < 3) patchDraft({ photos: [...photos, file] });
     e.target.value = "";
+  }
+
+  async function toggleVoice() {
+    if (voice.recording) {
+      const res = await voice.stop();
+      if (res) patchDraft({ voice: res.blob });
+    } else {
+      await voice.start().catch(() => undefined);
+    }
   }
 
   return (
@@ -41,20 +60,82 @@ export function Confirm() {
         </button>
       </div>
 
-      {/* GPS thumbnail */}
-      <div style={{ position: "relative", height: 112, borderRadius: 16, overflow: "hidden", border: "1px solid var(--border-subtle)", marginTop: 16, background: "#0E1A28" }}>
+      {/* GPS thumbnail with a draggable, radius-clamped incident pin */}
+      <div style={{ position: "relative", height: 190, borderRadius: 16, overflow: "hidden", border: "1px solid var(--border-subtle)", marginTop: 16, background: "#0E1A28" }}>
         {draft.fix ? (
-          <RunnerMap coords={null} routeColor="#2BE3A0" medics={[]} pois={[]} fix={draft.fix} interactive={false} />
+          <RunnerMap
+            coords={null}
+            routeColor="#2BE3A0"
+            medics={[]}
+            pois={[]}
+            fix={null}
+            editablePin={pinOrigin}
+            pinMaxMeters={500}
+            onPinMove={([lng, lat]) => draft.fix && patchDraft({ fix: { ...draft.fix, lng, lat } })}
+          />
         ) : null}
         {draft.fix && (
           <div style={{ position: "absolute", left: 8, bottom: 8, padding: "4px 9px", borderRadius: 999, background: "var(--bg-overlay)", fontSize: 11, fontWeight: 700 }}>
-            ± {Math.round(draft.fix.accuracy)} {t("common.m")} · {profile?.selectedTrack ?? ""}
+            ± {Math.round(draft.fix.accuracy)} {t("common.m")} · {profile?.selectedTrackLabel ?? ""}
           </div>
         )}
       </div>
       <div style={{ marginTop: 8, fontSize: 11.5, fontWeight: 700, color: draft.fix ? "var(--primary)" : "var(--text-muted)" }}>
         {draft.fix ? t("confirm.gpsLock") : t("confirm.gpsAcquiring")}
       </div>
+      {draft.fix && (
+        <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>{t("confirm.adjustPin")}</div>
+      )}
+
+      {/* Description + voice note (during creation) */}
+      <textarea
+        value={draft.description}
+        placeholder={t("confirm.description")}
+        onChange={(e) => patchDraft({ description: e.target.value })}
+        rows={2}
+        style={{
+          width: "100%",
+          marginTop: 16,
+          padding: "12px 14px",
+          borderRadius: 13,
+          background: "var(--bg-input)",
+          border: "1px solid var(--border-mid)",
+          color: "var(--text-primary)",
+          fontSize: 14,
+          fontFamily: "Manrope",
+          resize: "none",
+          outline: "none",
+        }}
+      />
+      {voice.supported && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+          <button
+            onClick={toggleVoice}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: `1px solid ${voice.recording ? "var(--critical)" : "var(--border-mid)"}`,
+              background: voice.recording ? "var(--critical-bg)" : "var(--bg-input)",
+              color: voice.recording ? "var(--critical)" : "var(--text-secondary)",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            {voice.recording ? "⏹" : "🎙️"} {voice.recording ? t("confirm.recording") : t("confirm.record")}
+          </button>
+          {draft.voice && !voice.recording && (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "var(--primary)" }}>
+              {t("confirm.voiceReady")}
+              <button onClick={() => patchDraft({ voice: null })} style={{ color: "var(--text-muted)", textDecoration: "underline", fontSize: 12 }}>
+                {t("confirm.voiceDelete")}
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Photos */}
       <div style={{ display: "flex", justifyContent: "space-between", margin: "20px 0 10px" }}>
@@ -66,7 +147,7 @@ export function Confirm() {
           <div key={i} style={{ position: "relative", width: 60, height: 60, borderRadius: 13, overflow: "hidden", border: "1px solid var(--border-mid)" }}>
             <img src={URL.createObjectURL(p)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             <button
-              onClick={() => setDraftPhotos(photos.filter((_, j) => j !== i))}
+              onClick={() => patchDraft({ photos: photos.filter((_, j) => j !== i) })}
               style={{ position: "absolute", top: 2, right: 2, width: 18, height: 18, borderRadius: "50%", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11 }}
             >
               ✕

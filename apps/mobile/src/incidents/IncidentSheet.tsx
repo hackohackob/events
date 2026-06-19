@@ -33,6 +33,7 @@ import { useRosterStore } from "../security/roster-store";
 import { freshnessBucket, freshnessColor, freshnessLabel } from "../map/freshness";
 import { uploadIncidentPhoto, uploadIncidentVoice } from "./incident-api";
 import { debugLog } from "../debug/debug-log";
+import { useIncidentReadsStore } from "./incident-reads-store";
 
 const TYPE_META: Record<string, { label: string; icon: string }> = {
   medical: { label: "Medical", icon: "🏥" },
@@ -250,6 +251,8 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
   // ── Chat: load history + live socket updates ───────────────────────────────
   useEffect(() => {
     let active = true;
+    // Opening the thread clears the unread indicator for this incident.
+    useIncidentReadsStore.getState().markRead(incident.id);
     void listIncidentMessages(incident.id)
       .then((list) => active && setMessages(list))
       .catch((err) => debugLog("api", "error", "load messages failed", String(err)));
@@ -258,6 +261,8 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
     const onMessage = (msg: IncidentMessageDto) => {
       if (msg.incidentId !== incident.id) return;
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      // Sheet is open → keep it marked read as new messages land.
+      useIncidentReadsStore.getState().markRead(incident.id);
     };
     socket.on("incident.message", onMessage);
     return () => {

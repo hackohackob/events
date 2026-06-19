@@ -22,6 +22,8 @@ export interface RunnerLocation {
   userId: string
   lat: number
   lng: number
+  /** ISO time the position was recorded (drives heatmap freshness). */
+  recordedAt?: string
 }
 
 export interface LiveIncident {
@@ -132,10 +134,18 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
       scheduleSync()
     })
 
-    socket.on('location.updated', (payload: { userId: string; lat: number; lng: number }) => {
-      runnersRef.current.set(payload.userId, { userId: payload.userId, lat: payload.lat, lng: payload.lng })
-      scheduleSync()
-    })
+    socket.on(
+      'location.updated',
+      (payload: { userId: string; lat: number; lng: number; timestamp?: string; recordedAt?: string }) => {
+        runnersRef.current.set(payload.userId, {
+          userId: payload.userId,
+          lat: payload.lat,
+          lng: payload.lng,
+          recordedAt: payload.recordedAt ?? payload.timestamp ?? new Date().toISOString(),
+        })
+        scheduleSync()
+      },
+    )
 
     socket.on('incident.created', (payload: any) => {
       const incident = toLiveIncident(payload)

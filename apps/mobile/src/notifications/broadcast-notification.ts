@@ -10,7 +10,7 @@ const ALERT_CHANNEL_ID = "alerts";
  * vibration. The backend sends remote pushes on this same channel id so
  * closed-app deliveries behave identically.
  */
-export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v3";
+export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v4";
 let channelsEnsured = false;
 
 async function ensureChannels(): Promise<void> {
@@ -85,11 +85,13 @@ export async function showBroadcastNotification(
         ...(alarm
           ? {
               category: AndroidCategory.ALARM,
-              // Repeats the channel sound until the user opens/dismisses the
-              // notification (sets FLAG_INSISTENT under the hood). Only when the
-              // app is backgrounded — a looping siren while you're using the app
-              // is obnoxious; a single heads-up chirp is enough there.
-              loopSound: insistent,
+              // The bundled siren is itself ~30s long, so a single play already
+              // rings for the full window. We deliberately do NOT loop it
+              // (FLAG_INSISTENT): looping would ring forever until dismissed, and
+              // capping that with `timeoutAfter` would also remove the incident
+              // from the tray. Playing the 30s file once stops the sound on its
+              // own while leaving the notification in place.
+              loopSound: false,
               autoCancel: true,
               ongoing: false,
               // Light up / take over the lock screen like an incoming call —

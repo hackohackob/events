@@ -40,6 +40,11 @@ export interface IncidentRecord {
   /** ISO timestamp of the most recent message on this incident (for unread
    *  indicators on the client). Undefined when there are no messages. */
   lastMessageAt?: string;
+  /** A responding medic is actively navigating to this incident (vs just
+   *  assigned). Set on the runner's /incidents/mine view. */
+  assignedMedicNavigating?: boolean;
+  /** ISO ETA of the navigating responder, when available. */
+  assignedMedicEtaIso?: string | null;
 }
 
 export interface IncidentMessageRecord {
@@ -455,7 +460,23 @@ export class IncidentsService implements OnModuleInit {
       `SELECT * FROM incidents WHERE event_id = $1 AND created_by = $2 ORDER BY created_at DESC`,
       [eventId, userId],
     );
-    return rows.map(rowToRecord);
+
+    const records = rows.map(rowToRecord);
+
+    // Distinguish "assigned" from "navigating": a responder is en route only when
+    // their live state is going_to AND their active route targets this incident.
+    for (const incident of records) {
+      if (incident.responders.length === 0) continue;
+      for (const medicId of incident.responders) {
+        const state = await this.medicsService.getMedicState(eventId, medicId).catch(() => null);
+        if (state?.status === "going_to" && state.route?.incidentId === incident.id) {
+          incident.assignedMedicNavigating = true;
+          incident.assignedMedicEtaIso = state.route?.etaIso ?? null;
+          break;
+        }
+      }
+    }
+    return records;
   }
 
   async applyAction(

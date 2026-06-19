@@ -264,7 +264,8 @@ export interface TrackGeoJson {
   type: "FeatureCollection";
   features: Array<{
     type: "Feature";
-    geometry: { type: "LineString"; coordinates: [number, number][] };
+    /** Coordinates are `[lng, lat]` or `[lng, lat, ele]` when elevation is known. */
+    geometry: { type: "LineString"; coordinates: number[][] };
     properties: {
       trackId: string;
       label: string;

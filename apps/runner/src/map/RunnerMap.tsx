@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { PublicMedicState } from "../api/contracts-shim";
 import type { Fix } from "../hooks/useGeolocation";
 import type { PoiLike } from "../api";
+import { haversineMeters } from "../lib/geo";
 
-const OSM_STYLE: StyleSpecification = {
+const MAP_STYLE: StyleSpecification = {
   version: 8,
   sources: {
     osm: {
@@ -13,8 +14,17 @@ const OSM_STYLE: StyleSpecification = {
       tileSize: 256,
       attribution: "© OpenStreetMap",
     },
+    satellite: {
+      type: "raster",
+      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      attribution: "© Esri",
+    },
   },
-  layers: [{ id: "osm", type: "raster", source: "osm" }],
+  layers: [
+    { id: "osm", type: "raster", source: "osm" },
+    { id: "satellite", type: "raster", source: "satellite", layout: { visibility: "none" } },
+  ],
 };
 
 interface Props {
@@ -25,16 +35,49 @@ interface Props {
   fix: Fix | null;
   youLabel?: string;
   recenterSignal?: number;
+  compassSignal?: number;
+  fitSignal?: number;
+  satellite?: boolean;
+  scrubPoint?: [number, number] | null;
   interactive?: boolean;
+  /** Editable incident pin (Confirm screen): initial position. */
+  editablePin?: [number, number] | null;
+  pinMaxMeters?: number;
+  onPinMove?: (lngLat: [number, number]) => void;
 }
 
-function poiVisual(type: string): { bg: string; glyph: string } {
+function poiVisual(type: string): { bg: string; glyph: string } | null {
   const t = type.toLowerCase();
-  if (/tent|camp|hospital|medical/.test(t)) return { bg: "#FFFFFF", glyph: "✚" };
-  if (/water|hydrat|aid/.test(t)) return { bg: "#2E9BFF", glyph: "💧" };
-  if (/check|cp|control/.test(t)) return { bg: "#0C1119", glyph: "•" };
-  if (/start|finish/.test(t)) return { bg: "#14B576", glyph: "🏁" };
-  return { bg: "#16273A", glyph: "📍" };
+  if (/tent|camp|hospital|medical|aid/.test(t)) return { bg: "#FFFFFF", glyph: "✚" };
+  if (/water|hydrat/.test(t)) return { bg: "#2E9BFF", glyph: "💧" };
+  return null;
+}
+
+/** Single self-contained SVG marker (no nested positioning — that's what made
+ *  markers drift on zoom). Green, grey when resting, blue arrow badge drawn
+ *  inside the SVG when the medic is moving. */
+function medicMarkerEl(status: string): HTMLElement {
+  const resting = status === "rest" || status === "stationary";
+  const color = resting ? "#5A6B7E" : "#18B883";
+  const moving = status === "going_to";
+  const el = document.createElement("div");
+  el.style.width = "38px";
+  el.style.height = "48px";
+  el.innerHTML = `
+    <svg width="38" height="48" viewBox="0 0 38 48" xmlns="http://www.w3.org/2000/svg"
+         style="filter:drop-shadow(0 4px 6px rgba(0,0,0,0.45))">
+      <path d="M19 2C9.6 2 2 9.4 2 18.6 2 30.6 19 46 19 46s17-15.4 17-27.4C36 9.4 28.4 2 19 2Z"
+            fill="${color}" stroke="#fff" stroke-width="2"/>
+      <circle cx="19" cy="18.6" r="12" fill="#fff"/>
+      <path d="M16.3 11h5.4v4.9h4.9v5.4h-4.9v4.9h-5.4v-4.9h-4.9v-5.4h4.9z" fill="${color}"/>
+      ${
+        moving
+          ? `<circle cx="31" cy="8" r="7.5" fill="#2E9BFF" stroke="#fff" stroke-width="2"/>
+             <text x="31" y="11.5" text-anchor="middle" font-size="10" fill="#fff" font-weight="bold">↗</text>`
+          : ""
+      }
+    </svg>`;
+  return el;
 }
 
 export function RunnerMap({
@@ -45,47 +88,71 @@ export function RunnerMap({
   fix,
   youLabel,
   recenterSignal,
+  compassSignal,
+  fitSignal,
+  satellite,
+  scrubPoint,
   interactive = true,
+  editablePin,
+  pinMaxMeters = 500,
+  onPinMove,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const youMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const readyRef = useRef(false);
+  const scrubMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const pinMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const pinOriginRef = useRef<[number, number] | null>(null);
+  const [ready, setReady] = useState(false);
+  const fittedRef = useRef(false);
+  const centeredOnFixRef = useRef(false);
 
   // Init
   useEffect(() => {
     if (!containerRef.current) return;
-    const center: [number, number] = fix
-      ? [fix.lng, fix.lat]
-      : coords && coords.length
-        ? coords[Math.floor(coords.length / 2)]
-        : [23.32, 42.7];
+    const center: [number, number] = editablePin
+      ? editablePin
+      : fix
+        ? [fix.lng, fix.lat]
+        : coords && coords.length
+          ? coords[Math.floor(coords.length / 2)]
+          : [23.32, 42.7];
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: OSM_STYLE,
+      style: MAP_STYLE,
       center,
-      zoom: 13.5,
+      zoom: editablePin ? 15.5 : 13.5,
       attributionControl: false,
       interactive,
     });
-    map.getCanvas().style.filter = "var(--map-filter)";
     mapRef.current = map;
+    if (fix) centeredOnFixRef.current = true;
     map.on("load", () => {
-      readyRef.current = true;
-      drawRoute();
+      map.getCanvas().style.filter = satellite ? "none" : "var(--map-filter)";
+      setReady(true);
     });
     return () => {
       map.remove();
       mapRef.current = null;
-      readyRef.current = false;
+      setReady(false);
+      // The map (and all its markers) are gone — drop the single-instance marker
+      // refs so they're recreated on the next mount (StrictMode / remount safe).
+      youMarkerRef.current = null;
+      scrubMarkerRef.current = null;
+      pinMarkerRef.current = null;
+      markersRef.current = [];
+      fittedRef.current = false;
+      centeredOnFixRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function drawRoute() {
+  // Draw / update route — runs once the map is ready and whenever coords change,
+  // so it can't lose a coords update that arrived before load.
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map || !readyRef.current || !coords || coords.length < 2) return;
+    if (!map || !ready || !coords || coords.length < 2) return;
     const data = {
       type: "Feature" as const,
       geometry: { type: "LineString" as const, coordinates: coords },
@@ -94,35 +161,37 @@ export function RunnerMap({
     const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
     if (src) {
       src.setData(data);
-      return;
+    } else {
+      map.addSource("route", { type: "geojson", data });
+      map.addLayer({
+        id: "route-casing",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 9 },
+      });
+      map.addLayer({
+        id: "route-line",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": routeColor, "line-width": 4.5 },
+      });
     }
-    map.addSource("route", { type: "geojson", data });
-    map.addLayer({
-      id: "route-casing",
-      type: "line",
-      source: "route",
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": "#ffffff", "line-width": 9 },
-    });
-    map.addLayer({
-      id: "route-line",
-      type: "line",
-      source: "route",
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": routeColor, "line-width": 4.5 },
-    });
-    const bounds = coords.reduce(
-      (b, c) => b.extend(c as [number, number]),
-      new maplibregl.LngLatBounds(coords[0], coords[0]),
-    );
-    map.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 0 });
-  }
+    map.setPaintProperty("route-line", "line-color", routeColor);
+    if (!fittedRef.current && !fix && !editablePin) {
+      map.fitBounds(routeBounds(coords), { padding: 50, maxZoom: 14, duration: 0 });
+      fittedRef.current = true;
+    }
+  }, [ready, coords, routeColor, fix, editablePin]);
 
-  // Redraw route when coords change
+  // Satellite toggle
   useEffect(() => {
-    drawRoute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coords, routeColor]);
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.setLayoutProperty("satellite", "visibility", satellite ? "visible" : "none");
+    map.getCanvas().style.filter = satellite ? "none" : "var(--map-filter)";
+  }, [satellite, ready]);
 
   // Medic + POI markers
   useEffect(() => {
@@ -130,28 +199,27 @@ export function RunnerMap({
     if (!map) return;
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-
     for (const poi of pois) {
       const v = poiVisual(poi.type);
+      if (!v) continue;
       const el = document.createElement("div");
-      el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${v.bg};display:grid;place-items:center;font-size:14px;border:2px solid ${v.bg === "#FFFFFF" ? "var(--critical)" : "rgba(255,255,255,0.6)"};box-shadow:0 2px 6px rgba(0,0,0,0.4);color:${v.bg === "#FFFFFF" ? "var(--critical)" : "#fff"}`;
-      el.textContent = poi.icon || v.glyph;
+      el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${v.bg};display:grid;place-items:center;font-size:14px;border:2px solid ${v.bg === "#FFFFFF" ? "var(--critical)" : "rgba(255,255,255,0.7)"};box-shadow:0 2px 6px rgba(0,0,0,0.4);color:${v.bg === "#FFFFFF" ? "var(--critical)" : "#fff"}`;
+      el.textContent = v.glyph;
       markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat([poi.lng, poi.lat]).addTo(map));
     }
-
     for (const m of medics) {
-      const el = document.createElement("div");
-      el.style.cssText =
-        "width:32px;height:32px;border-radius:10px;background:var(--caution);display:grid;place-items:center;font-size:16px;box-shadow:0 4px 10px rgba(0,0,0,0.4)";
-      el.textContent = "🛡️";
-      markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat([m.lng, m.lat]).addTo(map));
+      markersRef.current.push(
+        new maplibregl.Marker({ element: medicMarkerEl(m.status), anchor: "bottom" })
+          .setLngLat([m.lng, m.lat])
+          .addTo(map),
+      );
     }
   }, [medics, pois]);
 
-  // YOU marker (pulsing)
+  // YOU marker (pulsing) — recenter the first time a fix arrives.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !fix) return;
+    if (!map || !fix || editablePin) return;
     if (!youMarkerRef.current) {
       const wrap = document.createElement("div");
       wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:4px";
@@ -163,21 +231,118 @@ export function RunnerMap({
         wrap.appendChild(label);
       }
       const dot = document.createElement("div");
-      dot.style.cssText =
-        "width:22px;height:22px;border-radius:50%;background:#2E9BFF;border:3px solid #fff;animation:pulseDot 2s infinite";
+      dot.style.cssText = "width:22px;height:22px;border-radius:50%;background:#2E9BFF;border:3px solid #fff;animation:pulseDot 2s infinite";
       wrap.appendChild(dot);
       youMarkerRef.current = new maplibregl.Marker({ element: wrap }).setLngLat([fix.lng, fix.lat]).addTo(map);
     } else {
       youMarkerRef.current.setLngLat([fix.lng, fix.lat]);
     }
-  }, [fix, youLabel]);
+    if (!centeredOnFixRef.current) {
+      centeredOnFixRef.current = true;
+      map.flyTo({ center: [fix.lng, fix.lat], zoom: 14.5, duration: 600 });
+    }
+  }, [fix, youLabel, editablePin]);
 
-  // Recenter on demand
+  // Editable incident pin (draggable, clamped to pinMaxMeters from origin).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !editablePin) return;
+    if (!pinMarkerRef.current) {
+      pinOriginRef.current = editablePin; // fixed clamp centre (original capture)
+      const el = document.createElement("div");
+      el.style.width = "30px";
+      el.style.height = "40px";
+      el.innerHTML = `<svg width="30" height="40" viewBox="0 0 30 40" style="filter:drop-shadow(0 3px 5px rgba(0,0,0,0.5))">
+        <path d="M15 1C7.8 1 2 6.6 2 13.6 2 23 15 39 15 39s13-16 13-25.4C28 6.6 22.2 1 15 1Z" fill="#E63946" stroke="#fff" stroke-width="2"/>
+        <circle cx="15" cy="14" r="5" fill="#fff"/></svg>`;
+      const marker = new maplibregl.Marker({ element: el, anchor: "bottom", draggable: true })
+        .setLngLat(editablePin)
+        .addTo(map);
+      marker.on("drag", () => {
+        const ll = marker.getLngLat();
+        const origin = pinOriginRef.current!;
+        const d = haversineMeters({ lng: origin[0], lat: origin[1] }, { lng: ll.lng, lat: ll.lat });
+        if (d > pinMaxMeters) {
+          const f = pinMaxMeters / d;
+          const clamped: [number, number] = [origin[0] + (ll.lng - origin[0]) * f, origin[1] + (ll.lat - origin[1]) * f];
+          marker.setLngLat(clamped);
+        }
+      });
+      marker.on("dragend", () => {
+        const ll = marker.getLngLat();
+        onPinMove?.([ll.lng, ll.lat]);
+      });
+      pinMarkerRef.current = marker;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editablePin]);
+
+  // Allowed-radius circle for the editable pin
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !editablePin) return;
+    const circle = circlePolygon(editablePin, pinMaxMeters);
+    const src = map.getSource("pin-radius") as maplibregl.GeoJSONSource | undefined;
+    if (src) {
+      src.setData(circle);
+    } else {
+      map.addSource("pin-radius", { type: "geojson", data: circle });
+      map.addLayer({ id: "pin-radius-fill", type: "fill", source: "pin-radius", paint: { "fill-color": "#E63946", "fill-opacity": 0.08 } });
+      map.addLayer({ id: "pin-radius-line", type: "line", source: "pin-radius", paint: { "line-color": "#E63946", "line-width": 1.5, "line-dasharray": [2, 2] } });
+    }
+  }, [ready, editablePin, pinMaxMeters]);
+
+  // Scrubber marker
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!scrubPoint) {
+      scrubMarkerRef.current?.remove();
+      scrubMarkerRef.current = null;
+      return;
+    }
+    if (!scrubMarkerRef.current) {
+      const el = document.createElement("div");
+      el.style.cssText = "width:18px;height:18px;border-radius:50%;background:#fff;border:3px solid #2BE3A0;box-shadow:0 2px 8px rgba(0,0,0,0.5)";
+      scrubMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat(scrubPoint).addTo(map);
+    } else {
+      scrubMarkerRef.current.setLngLat(scrubPoint);
+    }
+  }, [scrubPoint]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !fix || recenterSignal === undefined) return;
     map.flyTo({ center: [fix.lng, fix.lat], zoom: 14.5, duration: 600 });
   }, [recenterSignal, fix]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || compassSignal === undefined) return;
+    map.easeTo({ bearing: 0, pitch: 0, duration: 400 });
+  }, [compassSignal]);
+
+  // Fit to the full track (e.g. when Track Studio opens)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || fitSignal === undefined || !coords || coords.length < 2) return;
+    map.fitBounds(routeBounds(coords), { padding: 60, maxZoom: 15, duration: 600 });
+  }, [fitSignal, coords]);
+
   return <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />;
+}
+
+function routeBounds(coords: [number, number][]): maplibregl.LngLatBounds {
+  return coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+}
+
+function circlePolygon([lng, lat]: [number, number], radiusM: number) {
+  const pts: [number, number][] = [];
+  const dLat = radiusM / 111320;
+  const dLng = radiusM / (111320 * Math.cos((lat * Math.PI) / 180));
+  for (let i = 0; i <= 64; i++) {
+    const a = (i / 64) * 2 * Math.PI;
+    pts.push([lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)]);
+  }
+  return { type: "Feature" as const, geometry: { type: "Polygon" as const, coordinates: [pts] }, properties: {} };
 }

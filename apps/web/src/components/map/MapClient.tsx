@@ -43,8 +43,8 @@ interface MapClientProps {
   /** Live medic states from WS */
   liveMedics?: MedicState[]
   onMedicAssign?: (medicId: string, destination: { lat: number; lng: number; label: string } | null) => void
-  /** Live runner locations for heatmap */
-  runnerLocations?: Array<{ userId: string; lat: number; lng: number }>
+  /** Live runner locations for heatmap (recordedAt drives freshness) */
+  runnerLocations?: Array<{ userId?: string; lat: number; lng: number; recordedAt?: string }>
   showHeatmap?: boolean
   /** Live incident markers */
   liveIncidents?: LiveIncident[]
@@ -985,6 +985,22 @@ function AssignedRoutes({ liveMedics, liveIncidents }: { liveMedics: MedicState[
 // ─── Heatmap constants ────────────────────────────────────────────────────────
 const CELL_DEG = 0.0009 // ≈100m
 const MAX_EXPECTED = 50
+const DEFAULT_TRUST_MIN = 40 // hide pings older than this (coordinator-adjustable)
+
+/** Freshness weight: 1 at now, decaying linearly to ~0 at the trust window so
+ *  stale pings (where runners have moved on) contribute far less heat. */
+function freshnessWeight(ageMin: number, trustMin: number): number {
+  if (ageMin >= trustMin) return 0
+  return Math.max(0.05, 1 - ageMin / trustMin)
+}
+
+/** Age → colour for individual freshness dots. */
+function ageColor(ageMin: number): string {
+  if (ageMin < 5) return '#22c55e' // fresh
+  if (ageMin < 15) return '#14b8a6' // recent
+  if (ageMin < 30) return '#f59e0b' // aging
+  return '#8a97a8' // stale
+}
 
 export default function MapClient({
   center,
@@ -1016,6 +1032,13 @@ export default function MapClient({
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
+  // Heatmap freshness: re-tick so ages keep decaying live; trust window filters.
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  const [trustMin, setTrustMin] = useState(DEFAULT_TRUST_MIN)
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
   // Focusing a marker opens its detail drawer (440px, slides in from the right
   // on desktop) — pad the camera right so the point centres in the area that
   // stays visible instead of landing behind the drawer.
@@ -1030,20 +1053,41 @@ export default function MapClient({
   }
   const boundsKey = fitBounds ? JSON.stringify(fitBounds) : null
 
-  // Aggregate runner locations into ~100m grid cells for absolute-scale heatmap
-  type HeatCell = { lat: number; lng: number; count: number }
-  const heatCells = useMemo((): HeatCell[] => {
-    const cells: Map<string, HeatCell> = new Map()
+  // Aggregate runner locations into ~100m grid cells, weighting each ping by
+  // freshness so a stale crowd no longer reads as a hot "now" crowd. Also build
+  // per-runner freshness dots (for close zoom) + summary stats for the panel.
+  const { heatCells, freshnessDots, heatStats } = useMemo(() => {
+    const cells = new Map<string, { lat: number; lng: number; weight: number }>()
+    const dotFeatures: Array<{ type: 'Feature'; properties: { color: string; ageMin: number }; geometry: { type: 'Point'; coordinates: [number, number] } }> = []
+    const ages: number[] = []
     runnerLocations.forEach(r => {
+      const ageMin = r.recordedAt ? (nowTick - new Date(r.recordedAt).getTime()) / 60_000 : trustMin
+      if (ageMin >= trustMin || ageMin < 0) return // outside the trust window
+      ages.push(ageMin)
+      const w = freshnessWeight(ageMin, trustMin)
       const gLat = Math.round(r.lat / CELL_DEG) * CELL_DEG
       const gLng = Math.round(r.lng / CELL_DEG) * CELL_DEG
       const key = `${gLat}:${gLng}`
       const c = cells.get(key)
-      if (c) c.count++
-      else cells.set(key, { lat: gLat, lng: gLng, count: 1 })
+      if (c) c.weight += w
+      else cells.set(key, { lat: gLat, lng: gLng, weight: w })
+      dotFeatures.push({
+        type: 'Feature',
+        properties: { color: ageColor(ageMin), ageMin: Math.round(ageMin) },
+        geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
+      })
     })
-    return Array.from(cells.values())
-  }, [runnerLocations])
+    ages.sort((a, b) => a - b)
+    return {
+      heatCells: Array.from(cells.values()),
+      freshnessDots: { type: 'FeatureCollection' as const, features: dotFeatures },
+      heatStats: {
+        count: ages.length,
+        medianMin: ages.length ? Math.round(ages[Math.floor(ages.length / 2)]) : 0,
+        oldestMin: ages.length ? Math.round(ages[ages.length - 1]) : 0,
+      },
+    }
+  }, [runnerLocations, nowTick, trustMin])
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
@@ -1182,8 +1226,9 @@ export default function MapClient({
         .map(m => <DestinationPin key={`dest-${m.medicId}`} medic={m} />)
       }
 
-      {/* Runner heatmap — absolute scale, 50 people per cell = red */}
-      {showHeatmap && runnerLocations.length > 0 && (
+      {/* Runner heatmap — freshness-weighted density. Fades out as you zoom in,
+          where individual freshness dots take over. */}
+      {showHeatmap && heatCells.length > 0 && (
         <Source
           id="runner-heat"
           type="geojson"
@@ -1191,7 +1236,7 @@ export default function MapClient({
             type: 'FeatureCollection',
             features: heatCells.map(c => ({
               type: 'Feature' as const,
-              properties: { w: Math.min(c.count / MAX_EXPECTED, 1) },
+              properties: { w: Math.min(c.weight / MAX_EXPECTED, 1) },
               geometry: { type: 'Point' as const, coordinates: [c.lng, c.lat] },
             })),
           }}
@@ -1212,7 +1257,26 @@ export default function MapClient({
                 1,    'rgba(180,10,10,1)',
               ],
               'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 18, 13, 30, 16, 50, 18, 70],
-              'heatmap-opacity': 0.95,
+              // fade the blob out at close zoom so the dots read clearly
+              'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0.95, 16, 0.55, 17.5, 0.15],
+            }}
+          />
+        </Source>
+      )}
+
+      {/* Individual freshness dots — appear as you zoom in, coloured by age */}
+      {showHeatmap && freshnessDots.features.length > 0 && (
+        <Source id="runner-dots" type="geojson" data={freshnessDots}>
+          <Layer
+            id="runner-dots-layer"
+            type="circle"
+            paint={{
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 2, 16, 5, 18, 8],
+              'circle-color': ['get', 'color'],
+              'circle-stroke-width': 1.5,
+              'circle-stroke-color': 'rgba(255,255,255,0.85)',
+              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 16, 0.9],
+              'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 16, 0.9],
             }}
           />
         </Source>
@@ -1242,6 +1306,69 @@ export default function MapClient({
             }}
           />
         </Marker>
+      )}
+
+      {/* Heatmap freshness panel: live count, median/oldest age, legend + trust slider */}
+      {showHeatmap && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 12,
+            bottom: 12,
+            width: 232,
+            padding: '12px 14px',
+            borderRadius: 14,
+            background: 'rgba(10,20,36,0.82)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+            color: '#f1f5f9',
+            fontSize: 12,
+            zIndex: 5,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', animation: 'pulse 2s infinite' }} />
+            <span style={{ fontWeight: 800, fontSize: 13 }}>{heatStats.count} runners</span>
+            <span style={{ marginLeft: 'auto', color: '#94a3b8', fontSize: 11 }}>live density</span>
+          </div>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 10 }}>
+            <div>
+              <div style={{ color: '#64748b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Median age</div>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{heatStats.medianMin} min</div>
+            </div>
+            <div>
+              <div style={{ color: '#64748b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Oldest</div>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{heatStats.oldestMin} min</div>
+            </div>
+          </div>
+          {/* Freshness legend (dot colours at close zoom) */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginBottom: 10 }}>
+            {[
+              ['#22c55e', '<5m'],
+              ['#14b8a6', '<15m'],
+              ['#f59e0b', '<30m'],
+              ['#8a97a8', 'older'],
+            ].map(([c, label]) => (
+              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#cbd5e1', fontSize: 11 }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: c }} />
+                {label}
+              </span>
+            ))}
+          </div>
+          <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>
+            Trust window: <span style={{ color: '#f1f5f9', fontWeight: 700 }}>{trustMin} min</span>
+          </div>
+          <input
+            type="range"
+            min={10}
+            max={90}
+            step={5}
+            value={trustMin}
+            onChange={e => setTrustMin(Number(e.target.value))}
+            style={{ width: '100%', accentColor: '#22c55e' }}
+          />
+        </div>
       )}
     </MapGL>
   )

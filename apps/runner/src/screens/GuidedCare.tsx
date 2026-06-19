@@ -1,137 +1,155 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
-import { fetchGuidance, fetchMyIncidents } from "../api";
-import type { AbcStep, IncidentCategory } from "../api/contracts-shim";
-
-const STATIC: Record<AbcStep, string> = {
-  A: "Tilt the head back gently & lift the chin. Check the mouth is clear.",
-  B: "Look, listen, feel for breathing. If none, prepare to give rescue breaths.",
-  C: "Press firmly on centre of chest — hard and fast, 100–120 bpm. Don't stop.",
-};
-const ORDER: AbcStep[] = ["A", "B", "C"];
-
-// Minimal typing for the optional Web Speech API.
-type SpeechRec = { start(): void; stop(): void; onresult: ((e: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null; continuous: boolean; interimResults: boolean; lang: string };
+import { fetchMyIncidents } from "../api";
+import { COMMAND_PHONE } from "../lib/config";
+import { TRIAGE, TRIAGE_START, type OptionTone } from "../lib/triage";
+import { CprMode } from "../components/CprMode";
 
 export function GuidedCare() {
   const navigate = useNavigate();
   const { t, lang } = useT();
-  const [step, setStep] = useState<AbcStep>("A");
-  const [instruction, setInstruction] = useState(STATIC.A);
-  const [transcript, setTranscript] = useState("");
-  const [listening, setListening] = useState(false);
-  const [category, setCategory] = useState<IncidentCategory | undefined>();
-  const recRef = useRef<SpeechRec | null>(null);
+  const [nodeId, setNodeId] = useState(TRIAGE_START);
+  const [showCpr, setShowCpr] = useState(false);
+  const [eta, setEta] = useState<{ navigating: boolean; assigned: boolean; etaMin: number | null }>({
+    navigating: false,
+    assigned: false,
+    etaMin: null,
+  });
 
+  // Real medic status for the header (no hardcoded ETA).
   useEffect(() => {
-    fetchMyIncidents()
-      .then((list) => list[0]?.category && setCategory(list[0].category as IncidentCategory))
-      .catch(() => undefined);
+    let alive = true;
+    const tick = () =>
+      fetchMyIncidents()
+        .then((list) => {
+          if (!alive) return;
+          const inc = list.find((i) => i.status !== "resolved" && i.status !== "closed") ?? list[0];
+          if (!inc) return;
+          const navigating = Boolean(inc.assignedMedicNavigating);
+          const assigned = (inc.responders?.length ?? 0) > 0;
+          let etaMin: number | null = null;
+          if (navigating && inc.assignedMedicEtaIso) {
+            const m = Math.round((new Date(inc.assignedMedicEtaIso).getTime() - Date.now()) / 60000);
+            etaMin = Number.isFinite(m) ? Math.max(1, m) : null;
+          }
+          setEta({ navigating, assigned, etaMin });
+        })
+        .catch(() => undefined);
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, []);
 
-  function applyTranscript(text: string) {
-    setTranscript(text);
-    fetchGuidance({ transcript: text, category })
-      .then((g) => {
-        setStep(g.currentStep);
-        setInstruction(g.instruction);
-      })
-      .catch(() => undefined);
-  }
+  const node = TRIAGE[nodeId] ?? TRIAGE[TRIAGE_START];
+  const tr = (ls: { bg: string; en: string }) => ls[lang];
 
-  function toggleListen() {
-    const SR = (window as unknown as { webkitSpeechRecognition?: new () => SpeechRec; SpeechRecognition?: new () => SpeechRec });
-    const Ctor = SR.SpeechRecognition || SR.webkitSpeechRecognition;
-    if (!Ctor) {
-      // No speech API — advance through steps manually.
-      nextStep();
-      return;
-    }
-    if (listening) {
-      recRef.current?.stop();
-      setListening(false);
-      return;
-    }
-    const rec = new Ctor();
-    rec.lang = lang === "bg" ? "bg-BG" : "en-US";
-    rec.interimResults = false;
-    rec.continuous = false;
-    rec.onresult = (e) => {
-      const text = e.results[e.results.length - 1][0].transcript;
-      applyTranscript(text);
-      setListening(false);
-    };
-    recRef.current = rec;
-    rec.start();
-    setListening(true);
-  }
+  const etaLabel =
+    eta.navigating && eta.etaMin != null
+      ? t("guided.enRoute", { eta: eta.etaMin })
+      : eta.assigned
+        ? t("guided.assigned")
+        : t("guided.awaiting");
 
-  function nextStep() {
-    const idx = ORDER.indexOf(step);
-    const next = ORDER[Math.min(ORDER.length - 1, idx + 1)];
-    setStep(next);
-    setInstruction(STATIC[next]);
-  }
-
-  const stepNum = ORDER.indexOf(step) + 1;
+  const accent =
+    node.tone === "critical" ? "var(--critical)" : node.tone === "good" ? "var(--primary)" : "var(--border-strong)";
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--bg-base)", display: "flex", flexDirection: "column", padding: "44px 18px 24px" }}>
+    <div style={{ position: "fixed", inset: 0, background: "var(--bg-base)", display: "flex", flexDirection: "column", padding: "44px 18px 20px" }}>
+      {/* Header: live medic status + close */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "rgba(43,227,160,0.12)", border: "1px solid rgba(43,227,160,0.35)", fontSize: 11, fontWeight: 800, color: "var(--primary)" }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--primary)", animation: "pulseDot 2s infinite" }} />
-          {t("guided.enRoute", { eta: 6 })}
+          {etaLabel}
         </span>
         <button onClick={() => navigate("/map")} style={{ color: "var(--text-muted)", fontSize: 13 }}>{t("guided.title")}</button>
       </div>
 
-      {/* Voice orb */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 24 }}>
-        <button onClick={toggleListen} style={{ position: "relative", width: 90, height: 90, display: "grid", placeItems: "center" }}>
-          {listening && [0, 1].map((i) => (
-            <span key={i} style={{ position: "absolute", inset: 12, borderRadius: "50%", border: "2px solid #2BE3A0", animation: `ring 2.2s ${i * 1.1}s infinite` }} />
-          ))}
-          <span style={{ width: 66, height: 66, borderRadius: "50%", background: "linear-gradient(135deg,#2BE3A0,#18B883)", display: "grid", placeItems: "center", fontSize: 28, color: "#05140E" }}>🎤</span>
+      {/* Call Race Command — always available */}
+      <a href={`tel:${COMMAND_PHONE}`} style={{ textDecoration: "none" }}>
+        <button className="btn-critical" style={{ width: "100%", marginTop: 14, minHeight: 50 }}>
+          📞 {t("guided.call")}
         </button>
-        <div style={{ display: "flex", gap: 4, marginTop: 12, height: 22, alignItems: "center" }}>
-          {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-            <span key={i} style={{ width: 4, height: 18, borderRadius: 2, background: "#2BE3A0", transformOrigin: "center", animation: listening ? `wave 0.8s ${i * 0.1}s infinite` : "none", opacity: listening ? 1 : 0.3 }} />
-          ))}
-        </div>
-        <p style={{ fontStyle: "italic", color: "var(--text-secondary)", fontSize: 13, marginTop: 12, textAlign: "center", minHeight: 18 }}>
-          {transcript ? `"${transcript}"` : t(listening ? "guided.listen" : "guided.tapToSpeak")}
-        </p>
+      </a>
+      <div style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", marginTop: 6 }}>
+        {t("guided.callBanner")}
       </div>
 
-      {/* ABC progress */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18 }}>
-        <span className="section-label">{t("guided.abc", { n: stepNum })}</span>
-        <div style={{ display: "flex", gap: 5 }}>
-          {ORDER.map((s) => (
-            <span key={s} style={{ width: 18, height: 4, borderRadius: 2, background: ORDER.indexOf(s) <= ORDER.indexOf(step) ? "var(--primary)" : "var(--border-strong)" }} />
-          ))}
-        </div>
+      {/* Triage card */}
+      <div
+        style={{
+          marginTop: 18,
+          padding: "22px 18px",
+          borderRadius: 18,
+          background: node.tone === "critical" ? "var(--critical-bg)" : node.tone === "good" ? "var(--primary-bg)" : "var(--bg-card)",
+          border: `1.5px solid ${accent}`,
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontSize: 52, lineHeight: 1 }}>{node.visual}</div>
+        <h2 className="archivo" style={{ fontWeight: 800, fontSize: 21, margin: "14px 0 0", lineHeight: 1.25 }}>
+          {tr(node.title)}
+        </h2>
+        {node.body && (
+          <p style={{ color: "var(--text-secondary)", fontSize: 14.5, lineHeight: 1.5, margin: "12px 0 0" }}>{tr(node.body)}</p>
+        )}
       </div>
 
-      {/* Current step card */}
-      <div style={{ background: "rgba(43,227,160,0.07)", border: "1.5px solid rgba(43,227,160,0.40)", borderRadius: 16, padding: 16, marginTop: 12, display: "flex", gap: 14 }}>
-        <div style={{ width: 62, height: 62, borderRadius: 13, background: "#0A1118", display: "grid", placeItems: "center", fontSize: 30 }}>
-          {step === "A" ? "🫁" : step === "B" ? "💨" : "❤️"}
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 24, height: 24, borderRadius: 7, background: "var(--primary)", color: "#05140E", display: "grid", placeItems: "center", fontFamily: "Archivo", fontWeight: 900, fontSize: 14 }}>{step}</span>
-            <span className="archivo" style={{ fontWeight: 800, fontSize: 15 }}>{t(`guided.${step}`)}</span>
-          </div>
-          <p style={{ color: "var(--text-secondary)", fontSize: 12.5, lineHeight: 1.4, marginTop: 8 }}>{instruction}</p>
-        </div>
+      {/* CPR launcher on the CPR node */}
+      {nodeId === "cpr" && (
+        <button
+          onClick={() => setShowCpr(true)}
+          style={{ width: "100%", marginTop: 16, padding: 18, borderRadius: 16, background: "linear-gradient(135deg,#FF5964,#E63946)", color: "#fff", fontFamily: "Archivo", fontWeight: 900, fontSize: 17, boxShadow: "0 12px 28px rgba(230,57,70,0.4)" }}
+        >
+          ❤️ {t("cpr.start")}
+        </button>
+      )}
+
+      {/* Big answer buttons */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
+        {node.options.map((opt, i) => (
+          <button key={i} onClick={() => setNodeId(opt.next)} style={bigBtnStyle(opt.tone)}>
+            {tr(opt.label)}
+          </button>
+        ))}
       </div>
 
       <div style={{ flex: 1 }} />
-      <button className="btn-primary" onClick={nextStep}>
-        {t("guided.next", { name: t(`guided.${ORDER[Math.min(2, stepNum)]}`) })}
-      </button>
+
+      {showCpr && <CprMode onClose={() => setShowCpr(false)} />}
+
+      {nodeId !== TRIAGE_START && (
+        <button
+          onClick={() => setNodeId(TRIAGE_START)}
+          style={{ marginTop: 16, padding: 14, borderRadius: 14, border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontWeight: 700, fontSize: 14 }}
+        >
+          {t("guided.restart")}
+        </button>
+      )}
     </div>
   );
+}
+
+function bigBtnStyle(tone?: OptionTone): React.CSSProperties {
+  const base: React.CSSProperties = {
+    width: "100%",
+    padding: "18px 16px",
+    borderRadius: 16,
+    fontFamily: "Archivo",
+    fontWeight: 800,
+    fontSize: 17,
+    textAlign: "center",
+    border: "1.5px solid var(--border-mid)",
+    background: "var(--bg-card)",
+    color: "var(--text-primary)",
+  };
+  if (tone === "yes" || tone === "no") {
+    const c = tone === "yes" ? "var(--primary)" : "var(--critical)";
+    return { ...base, border: `1.5px solid ${c}`, color: c, background: tone === "yes" ? "var(--primary-bg)" : "var(--critical-bg)" };
+  }
+  if (tone === "critical") return { ...base, border: "1.5px solid var(--critical)", color: "var(--critical)", background: "var(--critical-bg)" };
+  return base;
 }

@@ -10,6 +10,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
 import { useLiveMap } from '@/hooks/useLiveMap'
+import { useHeatmap } from '@/hooks/useHeatmap'
 import MapWrapper from '@/components/map/MapWrapper'
 import BroadcastModal from '@/components/BroadcastModal'
 import IncidentDrawer from '@/components/IncidentDrawer'
@@ -263,11 +264,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
   const isActive = event?.status === 'active'
   const {
-    medics, runners, incidents: liveIncidents, incidentMessages, connected,
+    medics, incidents: liveIncidents, incidentMessages, connected,
     alarmSignal, broadcasts, dismissBroadcast,
     assignDestination, removeActiveMedic, assignIncident,
     resolveIncident, closeIncident, updateIncidentNotes, loadMessages, sendMessage,
   } = useLiveMap({ eventId: id, enabled: isActive })
+
+  // Runner heatmap from one aggregated, polled snapshot (not per-participant WS).
+  const { points: heatPoints, count: runnerCount } = useHeatmap(id, isActive)
 
   const [showBroadcast, setShowBroadcast] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
@@ -801,13 +805,13 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   <div className="rounded-2xl p-4" style={{ background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.15)' }}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ background: runners.length > 0 ? '#f97316' : '#475569', ...(runners.length > 0 ? { animation: 'pulse 2s infinite' } : {}) }} />
+                        <div className="w-2 h-2 rounded-full" style={{ background: runnerCount > 0 ? '#f97316' : '#475569', ...(runnerCount > 0 ? { animation: 'pulse 2s infinite' } : {}) }} />
                         <span className="text-xs font-bold" style={{ color: '#f97316' }}>LIVE PARTICIPANTS</span>
                       </div>
-                      <span className="text-2xl font-black" style={{ color: runners.length > 0 ? '#f97316' : '#475569' }}>{runners.length}</span>
+                      <span className="text-2xl font-black" style={{ color: runnerCount > 0 ? '#f97316' : '#475569' }}>{runnerCount}</span>
                     </div>
                     <p className="text-xs" style={{ color: '#64748b' }}>
-                      {runners.length > 0
+                      {runnerCount > 0
                         ? 'GPS positions updating live. Toggle "Heatmap" in the layer panel to visualise.'
                         : 'No participants transmitting yet. Positions will appear when runners join.'}
                     </p>
@@ -977,7 +981,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             tracks={showTracks ? allTracks : []}
             liveMedics={isActive && showMedics ? medics : []}
             onMedicAssign={assignDestination}
-            runnerLocations={isActive ? runners : []}
+            runnerLocations={isActive ? heatPoints : []}
             showHeatmap={showParticipants}
             fitBounds={mapFitBounds}
             liveIncidents={isActive && showIncidents ? liveIncidents : []}
@@ -1029,7 +1033,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 { key: 'tracks', label: 'Tracks', count: allTracks.filter(t => t.coordinates.length > 0).length, color: '#3b82f6', active: showTracks, toggle: () => setShowTracks(v => !v) },
                 { key: 'medics', label: 'Medics', count: medics.length, color: '#22c55e', active: showMedics, toggle: () => setShowMedics(v => !v) },
                 { key: 'pois', label: 'POIs', count: totalPois, color: '#ef4444', active: showPois, toggle: () => setShowPois(v => !v) },
-                { key: 'participants', label: 'Heatmap', count: runners.length, color: '#f97316', active: showParticipants, toggle: () => setShowParticipants(v => !v) },
+                { key: 'participants', label: 'Heatmap', count: runnerCount, color: '#f97316', active: showParticipants, toggle: () => setShowParticipants(v => !v) },
                 { key: 'incidents', label: 'Incidents', count: liveIncidents.length, color: '#f87171', active: showIncidents, toggle: () => setShowIncidents(v => !v) },
               ].map(({ key, label, count, color, active, toggle }) => (
                 <button
@@ -1064,7 +1068,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           </div>
 
           {/* Live participant stats — shown when heatmap is active */}
-          {isActive && showParticipants && runners.length > 0 && (
+          {isActive && showParticipants && runnerCount > 0 && (
             <div
               className="absolute top-4 left-4 flex items-center gap-2.5 px-3 py-2 rounded-xl"
               style={{
@@ -1076,7 +1080,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             >
               <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#f97316' }} />
               <span className="text-xs font-bold" style={{ color: '#f97316' }}>
-                {runners.length} on course
+                {runnerCount} on course
               </span>
               <span className="text-[10px]" style={{ color: '#64748b' }}>· live GPS</span>
             </div>

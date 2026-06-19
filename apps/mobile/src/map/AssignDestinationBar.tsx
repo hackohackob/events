@@ -46,6 +46,34 @@ export function AssignDestinationBar({
   const mine = markers.find((m) => m.id === myId && m.type === "paramedic");
   const goingHere = mine?.destination?.lat === destination.lat && mine?.destination?.lng === destination.lng;
 
+  // Am I already on this incident's responder list? Used to swap the "mark me
+  // assigned" button for a confirmed state.
+  const amResponder = Boolean(
+    incidentId &&
+      myId &&
+      markers
+        .find((m) => m.id === incidentId && m.type === "incident")
+        ?.respondingParamedicIds?.includes(myId),
+  );
+  const [markBusy, setMarkBusy] = useState(false);
+
+  // Register myself as a responder WITHOUT starting navigation. Mirrors the
+  // optimistic responder update navigateTo() does, minus openTransport.
+  const markAssigned = async () => {
+    if (!incidentId || !myId || markBusy) return;
+    setMarkBusy(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIncidentResponder(myId, true);
+    try {
+      await respondToIncident(incidentId);
+    } catch (err) {
+      setIncidentResponder(myId, false); // roll back on failure
+      debugLog("api", "error", "mark assigned failed", String(err));
+    } finally {
+      setMarkBusy(false);
+    }
+  };
+
   // Optimistically add/remove a medic from the incident's responder list so the
   // RESPONDERS tab reflects the change instantly (the socket confirms shortly after).
   const setIncidentResponder = (medicId: string, add: boolean) => {
@@ -121,6 +149,19 @@ export function AssignDestinationBar({
         </Pressable>
       )}
 
+      {/* Assign myself to the incident without starting navigation. */}
+      {incidentId && !goingHere ? (
+        amResponder ? (
+          <View style={[styles.btn, styles.assignedBtn]}>
+            <Text style={styles.assignedBtnText}>✓ You're assigned</Text>
+          </View>
+        ) : (
+          <Pressable style={[styles.btn, styles.markBtn]} onPress={markAssigned} disabled={markBusy}>
+            <Text style={styles.markBtnText}>{markBusy ? "…" : "✓ Mark me assigned"}</Text>
+          </Pressable>
+        )
+      ) : null}
+
       {amCoordinator ? (
         <>
           <Pressable style={[styles.btn, styles.assignBtn]} onPress={() => setPicking((v) => !v)}>
@@ -153,6 +194,10 @@ const styles = StyleSheet.create({
   goBtnText: { color: "#1a1206", fontSize: 14, fontWeight: "900" },
   clearBtn: { backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1, borderColor: "rgba(239,68,68,0.35)" },
   clearBtnText: { color: "#f87171", fontSize: 13, fontWeight: "800" },
+  markBtn: { backgroundColor: "rgba(52,211,153,0.14)", borderWidth: 1, borderColor: "rgba(52,211,153,0.4)" },
+  markBtnText: { color: "#34d399", fontSize: 13, fontWeight: "800" },
+  assignedBtn: { backgroundColor: "rgba(52,211,153,0.12)", borderWidth: 1, borderColor: "rgba(52,211,153,0.3)" },
+  assignedBtnText: { color: "#34d399", fontSize: 13, fontWeight: "800" },
   assignBtn: { backgroundColor: "rgba(59,130,246,0.14)", borderWidth: 1, borderColor: "rgba(59,130,246,0.35)" },
   assignBtnText: { color: "#93c5fd", fontSize: 13, fontWeight: "800" },
   pickList: { gap: 4, backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 6 },

@@ -50,4 +50,7 @@ export interface IncidentRecordLike {
   status: string;
   responders: string[];
   createdAt: string;
+  description?: string;
+  assignedMedicNavigating?: boolean;
+  assignedMedicEtaIso?: string | null;
 }

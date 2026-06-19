@@ -58,6 +58,8 @@ import { archivePoi, assignDestination, setMyRoute, type PoiDto } from "../ui/ev
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
+import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
+import { useIncidentReadsStore, incidentHasUnread } from "../incidents/incident-reads-store";
 import { useNotificationFocus } from "../notifications/notification-focus";
 import { useNavStore } from "../navigation/nav-store";
 import { useNavigationCamera } from "../navigation/useNavigationCamera";
@@ -173,6 +175,7 @@ interface IncidentResponse {
   createdBy?: string;
   reportedBy?: string;
   createdAt?: string;
+  lastMessageAt?: string;
 }
 
 function incidentToMarker(incident: IncidentResponse) {
@@ -1420,6 +1423,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const offlineBadgeOpacity = useRef(new Animated.Value(1)).current;
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  // Unread-comment tracking for the incident pin indicator.
+  const incidentLastReadAt = useIncidentReadsStore((s) => s.lastReadAt);
+  const incidentLatestMessageAt = useIncidentReadsStore((s) => s.latestMessageAt);
   const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "settings" | "profile" | "guide">("map");
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
@@ -1554,6 +1560,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const existing = useMapStore.getState().markers;
       const others = existing.filter((m) => m.type !== "incident");
       const visible = incidents.filter((i) => !isArchivedIncidentStatus(i.status));
+      const observe = useIncidentReadsStore.getState().observe;
+      visible.forEach((i) => observe(i.id, i.lastMessageAt));
       setMarkers([...others, ...visible.map(incidentToMarker)]);
     } catch (err) {
       debugLog("api", "error", "incidents refresh failed", String(err));
@@ -1664,9 +1672,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           poiType: poi.type,
           poiDescription: poi.description,
         }));
-        const incidentMarkers = incidents
-          .filter((i) => !isArchivedIncidentStatus(i.status))
-          .map(incidentToMarker);
+        const visibleIncidents = incidents.filter((i) => !isArchivedIncidentStatus(i.status));
+        const observeRead = useIncidentReadsStore.getState().observe;
+        visibleIncidents.forEach((i) => observeRead(i.id, i.lastMessageAt));
+        const incidentMarkers = visibleIncidents.map(incidentToMarker);
         setMarkers([...locationMarkers, ...medicMarkers, ...poiMarkers, ...incidentMarkers]);
         const normalizedTracks = Array.isArray(eventTracksPayload)
           ? eventTracksPayload
@@ -1755,9 +1764,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       setMarkers(
         [...existing.filter((m) => m.id !== payload.id), incidentToMarker(payload)].slice(-2200),
       );
-      // Alarm: heads-up notification for everyone except the medic who reported it.
+      // Alarm: heads-up notification for everyone except the medic who reported
+      // it — and only for incidents reported after the app was opened (an
+      // incident that predates this session must not ring just because the app
+      // came to the foreground and re-received it).
       const myId = useSessionStore.getState().userId;
-      if (payload.createdBy !== myId) {
+      if (payload.createdBy !== myId && shouldRaiseIncidentAlarm({ incidentId: payload.id, createdAt: payload.createdAt })) {
         void incidentNotificationBody({ type: payload.type, lat: payload.lat, lng: payload.lng }).then((detail) =>
           showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id }, true),
         );
@@ -1791,6 +1803,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       setMarkers([...withoutIncident, merged].slice(-2200));
     };
     socket.on("incident.updated", upsertIncident);
+    // Track unread comments across all incidents (not just the open one) so the
+    // map pin can show an indicator. Skip my own messages.
+    socket.on("incident.message", (msg: { incidentId: string; authorId?: string; createdAt?: string }) => {
+      // Skip my own messages and system log entries ("Reported by…", etc.).
+      if (msg.authorId === "system") return;
+      if (msg.authorId && msg.authorId === useSessionStore.getState().userId) return;
+      useIncidentReadsStore.getState().noteMessage(msg.incidentId, msg.createdAt);
+    });
     // Dashboard broadcast → real OS heads-up notification (no in-app banner).
     socket.on("broadcast", (payload: { title?: string; body?: string }) => {
       const title = payload.title ?? "📢 Broadcast";
@@ -1824,6 +1844,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       socket.off("medic_location");
       socket.off("incident.created");
       socket.off("incident.updated");
+      socket.off("incident.message");
       socket.off("incident.action");
       socket.off("broadcast");
       socket.off("poi.created");
@@ -2953,6 +2974,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               {marker.type === "incident" ? (() => {
                 const closed = isClosedIncidentStatus(marker.status);
                 const isSelected = marker.id === selectedMarkerId;
+                const unread = incidentHasUnread(marker.id, incidentLastReadAt, incidentLatestMessageAt);
                 return (
                   <SelectionPulse active={isSelected} size={26} color={closed ? "#94a3b8" : "#ef4444"}>
                     <View style={[styles.incidentDot, closed && styles.incidentDotClosed, isSelected && styles.incidentDotSelected]}>
@@ -2960,6 +2982,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                         {closed ? "✓" : "!"}
                       </Text>
                     </View>
+                    {/* Unread-comment indicator. */}
+                    {unread ? (
+                      <View style={styles.incidentUnreadBadge}>
+                        <Text style={styles.incidentUnreadBadgeText}>*</Text>
+                      </View>
+                    ) : null}
                   </SelectionPulse>
                 );
               })() : null}
@@ -4357,6 +4385,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     lineHeight: 14,
+    textAlign: "center",
+  },
+  // Small badge on the incident pin signalling unread comments.
+  incidentUnreadBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    backgroundColor: "#fbbf24",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  incidentUnreadBadgeText: {
+    color: "#1a1206",
+    fontSize: 13,
+    fontWeight: "900",
+    lineHeight: 15,
     textAlign: "center",
   },
   // Selected marker: bright halo ring so the active selection is unmistakable.

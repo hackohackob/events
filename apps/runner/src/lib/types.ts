@@ -1,28 +1,63 @@
 import type { IncidentCategory } from "@events/contracts";
 
-/** The four design track options. `id` doubles as the localStorage value. */
-export type TrackKey = "10K" | "21K" | "42K" | "100K";
-
-export interface TrackOption {
-  key: TrackKey;
-  distanceKm: number;
+/** A selectable course track / discipline, resolved from the event's tracks. */
+export interface TrackChoice {
+  id: string;
+  label: string;
   color: string;
-  /** i18n key for the sub-label. */
-  subKey: string;
 }
 
-export const TRACK_OPTIONS: TrackOption[] = [
-  { key: "10K", distanceKm: 10, color: "var(--track-10k)", subKey: "track.coastal" },
-  { key: "21K", distanceKm: 21, color: "var(--track-21k)", subKey: "track.half" },
-  { key: "42K", distanceKm: 42, color: "var(--track-42k)", subKey: "track.marathon" },
-  { key: "100K", distanceKm: 100, color: "var(--track-100k)", subKey: "track.ultra" },
-];
+const TRACK_COLORS = ["var(--track-10k)", "var(--track-21k)", "var(--track-42k)", "var(--track-100k)"];
+
+/** Cycle the brand track colours for tracks that don't define their own. */
+export function trackColor(index: number, provided?: string): string {
+  return provided || TRACK_COLORS[index % TRACK_COLORS.length];
+}
 
 export interface RunnerProfile {
   runnerName: string | null;
   bibNumber: string | null;
   phone: string | null;
-  selectedTrack: TrackKey | null;
+  selectedTrackId: string | null;
+  selectedTrackLabel: string | null;
+  selectedTrackColor: string | null;
+}
+
+/** Event identity + selectable tracks, fetched from the API on open. */
+export interface EventInfo {
+  id: string;
+  title: string;
+  tracks: TrackChoice[];
+}
+
+/** Optional medical / ICE profile, kept on-device and attached to any SOS. */
+export interface MedicalInfo {
+  bloodType: string;
+  allergies: string;
+  medications: string;
+  conditions: string;
+  emergencyName: string;
+  emergencyPhone: string;
+}
+
+export const BLOOD_TYPES = ["", "A+", "A−", "B+", "B−", "AB+", "AB−", "0+", "0−"];
+
+/** True when the profile has any field filled. */
+export function hasMedicalInfo(m: MedicalInfo | null): boolean {
+  return !!m && Object.values(m).some((v) => v.trim() !== "");
+}
+
+/** One-line summary for attaching to an incident report. */
+export function medicalSummary(m: MedicalInfo | null): string {
+  if (!hasMedicalInfo(m)) return "";
+  const parts: string[] = [];
+  if (m!.bloodType) parts.push(`Blood ${m!.bloodType}`);
+  if (m!.allergies) parts.push(`Allergies: ${m!.allergies}`);
+  if (m!.medications) parts.push(`Meds: ${m!.medications}`);
+  if (m!.conditions) parts.push(`Conditions: ${m!.conditions}`);
+  if (m!.emergencyName || m!.emergencyPhone)
+    parts.push(`ICE: ${m!.emergencyName} ${m!.emergencyPhone}`.trim());
+  return parts.join(" · ");
 }
 
 export interface IncidentCategoryDef {

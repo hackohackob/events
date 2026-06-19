@@ -48,6 +48,7 @@ export default function App() {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const incidentMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
 
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {}
   const [apiUrl, setApiUrl] = useState(viteEnv.VITE_API_URL ?? 'http://localhost:8500')
@@ -469,6 +470,49 @@ export default function App() {
       log({ type: 'error', message: `Incidents load failed: ${(err as Error).message}` })
     }
   }, [apiUrl, eventId, log])
+
+  // Poll incidents continuously so created reports show up on the map live.
+  useEffect(() => {
+    void refreshIncidents()
+    const id = setInterval(() => void refreshIncidents(), 5000)
+    return () => clearInterval(id)
+  }, [refreshIncidents])
+
+  // Render incident markers (red pulsing pins) on the map.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const current = new Set(incidents.map(i => i.id))
+    for (const [id, marker] of incidentMarkersRef.current) {
+      if (!current.has(id)) {
+        marker.remove()
+        incidentMarkersRef.current.delete(id)
+      }
+    }
+    for (const inc of incidents) {
+      let marker = incidentMarkersRef.current.get(inc.id)
+      if (!marker) {
+        const el = document.createElement('div')
+        el.style.cssText = `
+          width: 30px; height: 38px;
+          filter: drop-shadow(0 3px 5px rgba(0,0,0,0.5));
+          cursor: pointer;
+        `
+        el.title = inc.name ?? 'Incident'
+        el.innerHTML = `
+          <svg width="30" height="38" viewBox="0 0 30 38" xmlns="http://www.w3.org/2000/svg">
+            <path d="M15 1C7 1 1 6.8 1 14.3 1 24 15 37 15 37s14-13 14-22.7C29 6.8 23 1 15 1Z" fill="#ef4444" stroke="#fff" stroke-width="2"/>
+            <text x="15" y="20" text-anchor="middle" font-size="15" fill="#fff" font-weight="bold">!</text>
+          </svg>`
+        marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([inc.lng, inc.lat])
+          .addTo(map)
+        incidentMarkersRef.current.set(inc.id, marker)
+      } else {
+        marker.setLngLat([inc.lng, inc.lat])
+      }
+    }
+  }, [incidents])
 
   const setMedicStatusFn = useCallback((id: string, status: MedicStatus) => {
     const e = getEntity(id); if (!e) return

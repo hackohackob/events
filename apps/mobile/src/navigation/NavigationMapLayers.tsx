@@ -5,6 +5,7 @@ import { useNavStore } from "./nav-store";
 import { NavPuck } from "./NavPuck";
 import { SURFACE_COLORS } from "./surface";
 import { clipRouteAhead } from "./geo";
+import { useSmoothedPosition } from "./useSmoothedPosition";
 import type { LngLat } from "./types";
 
 function lineFeature(coordinates: LngLat[]) {
@@ -40,6 +41,9 @@ export function NavigationMapLayers() {
   const selected = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
   const alternatives = routes.filter((r) => r.id !== selected?.id);
   const isActive = phase === "active";
+
+  // Glide the puck between GPS fixes (≈1/s) instead of teleporting.
+  const smoothedPuck = useSmoothedPosition(isActive ? progress?.snapped : null);
 
   // During active navigation, hide the part of the route already travelled —
   // the line is drawn from the snapped puck position forward only.
@@ -145,7 +149,7 @@ export function NavigationMapLayers() {
           follow mode the map is rotated to travel direction (arrow points up);
           in north-up mode the arrow itself rotates by the route bearing. */}
       {isActive && progress ? (
-        <Marker id="nav-puck" lngLat={[progress.snapped.lng, progress.snapped.lat]}>
+        <Marker id="nav-puck" lngLat={[(smoothedPuck ?? progress.snapped).lng, (smoothedPuck ?? progress.snapped).lat]}>
           <NavPuck
             rotation={navCameraMode === "north" ? progress.bearing : 0}
             responding={Boolean(destinationIncidentId)}
