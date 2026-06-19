@@ -5,6 +5,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,8 +17,16 @@ import { debugLog } from "../debug/debug-log";
 
 const POI_TYPES: Array<{ id: string; label: string; icon: string; color: string }> = [
   { id: "medical-point", label: "Medical", icon: "✚", color: "#ef4444" },
-  { id: "water-point", label: "Water", icon: "💧", color: "#3b82f6" },
   { id: "ambulance", label: "Ambulance", icon: "🚑", color: "#ef4444" },
+  { id: "danger", label: "Danger", icon: "⚠️", color: "#f43f5e" },
+  { id: "road-crossing", label: "Crossing", icon: "🚧", color: "#f59e0b" },
+  { id: "water-point", label: "Water", icon: "💧", color: "#3b82f6" },
+  { id: "food-point", label: "Food", icon: "🍌", color: "#22c55e" },
+  { id: "mechanical", label: "Mechanic", icon: "🔧", color: "#64748b" },
+  { id: "marshal", label: "Marshal", icon: "🚩", color: "#3b82f6" },
+  { id: "checkpoint", label: "Checkpoint", icon: "⏱️", color: "#a855f7" },
+  { id: "finish", label: "Finish", icon: "🏁", color: "#10b981" },
+  { id: "shelter", label: "Shelter", icon: "⛺", color: "#0ea5e9" },
   { id: "wc", label: "WC", icon: "🚻", color: "#8b5cf6" },
   { id: "parking", label: "Parking", icon: "🅿️", color: "#f59e0b" },
   { id: "custom", label: "Other", icon: "★", color: "#94a3b8" },
@@ -69,12 +78,19 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
     <Modal visible={!!pending} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.centerWrap}
         >
           {/* Stop propagation so taps inside the card don't dismiss. */}
           <Pressable style={styles.card} onPress={() => {}}>
             <View style={styles.grabber} />
+            {/* Scrollable so the keyboard can't bury the name/description
+                fields — the focused input scrolls up above it. */}
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.cardScrollContent}
+            >
             <Text style={styles.title}>New point of interest</Text>
             <Text style={styles.subtitle}>
               {pending ? `${pending.lat.toFixed(5)}, ${pending.lng.toFixed(5)}` : ""}
@@ -131,6 +147,7 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
             <Pressable style={styles.cancelBtn} onPress={onClose}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
+            </ScrollView>
           </Pressable>
         </KeyboardAvoidingView>
       </Pressable>
@@ -149,8 +166,11 @@ const styles = StyleSheet.create({
     borderColor: "rgba(180,201,223,0.22)",
     paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 28,
+    // Cap height so the inner ScrollView is bounded and can scroll the fields
+    // clear of the keyboard.
+    maxHeight: "88%",
   },
+  cardScrollContent: { paddingBottom: 28 },
   grabber: {
     alignSelf: "center",
     width: 44,

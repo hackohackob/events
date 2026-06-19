@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { type DebugCategory, type DebugLevel, useDebugLog } from "./debug-log";
 
 const CATEGORIES: Array<DebugCategory | "all"> = ["all", "location", "api", "socket", "incident", "app"];
@@ -24,7 +25,7 @@ function formatTime(at: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function DebugScreen() {
+export function DebugScreen({ onClose }: { onClose?: () => void }) {
   const entries = useDebugLog((s) => s.entries);
   const clear = useDebugLog((s) => s.clear);
   const [filter, setFilter] = useState<DebugCategory | "all">("all");
@@ -46,6 +47,11 @@ export function DebugScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
+        {onClose ? (
+          <Pressable style={styles.backBtn} onPress={onClose} hitSlop={10}>
+            <Feather name="chevron-left" size={22} color="#cbd5e1" />
+          </Pressable>
+        ) : null}
         <Text style={styles.heading}>Debug log</Text>
         <View style={styles.headerActions}>
           <Pressable style={styles.smallBtn} onPress={() => void copyAll()}>
@@ -93,9 +99,17 @@ export function DebugScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#020b18" },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
   heading: { color: "#eff6ff", fontSize: 20, fontWeight: "900" },
-  headerActions: { flexDirection: "row", gap: 8 },
+  headerActions: { flexDirection: "row", gap: 8, marginLeft: "auto" },
   smallBtn: { backgroundColor: "#16263d", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   smallBtnText: { color: "#9fb3cc", fontSize: 12, fontWeight: "700" },
   filterBar: { maxHeight: 44, flexGrow: 0 },

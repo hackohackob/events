@@ -1238,6 +1238,14 @@ const POI_CONFIG: Record<string, { color: string; icon: string; size: number }> 
   "wc":                { color: "#8b5cf6", icon: "WC", size: 28 },
   "wardrobe":          { color: "#f97316", icon: "👕", size: 28 },
   "parking":           { color: "#f59e0b", icon: "P",  size: 28 },
+  "danger":            { color: "#f43f5e", icon: "⚠️", size: 30 },
+  "road-crossing":     { color: "#f59e0b", icon: "🚧", size: 28 },
+  "food-point":        { color: "#22c55e", icon: "🍌", size: 28 },
+  "mechanical":        { color: "#64748b", icon: "🔧", size: 28 },
+  "marshal":           { color: "#3b82f6", icon: "🚩", size: 28 },
+  "checkpoint":        { color: "#a855f7", icon: "⏱️", size: 28 },
+  "finish":            { color: "#10b981", icon: "🏁", size: 30 },
+  "shelter":           { color: "#0ea5e9", icon: "⛺", size: 28 },
   "custom":            { color: "#94a3b8", icon: "★",  size: 28 },
 };
 
@@ -1253,6 +1261,14 @@ const POI_TYPE_LABELS: Record<string, string> = {
   "wc": "Toilets",
   "wardrobe": "Wardrobe",
   "parking": "Parking",
+  "danger": "Danger / hazard",
+  "road-crossing": "Road crossing",
+  "food-point": "Food / nutrition",
+  "mechanical": "Mechanical support",
+  "marshal": "Marshal post",
+  "checkpoint": "Checkpoint",
+  "finish": "Finish",
+  "shelter": "Shelter",
   "custom": "Point of interest",
   "marker": "Point of interest",
 };
@@ -2613,6 +2629,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <Layer
             id="base-raster-layer"
             type="raster"
+            // Pin the base map to the very bottom of the layer stack. Changing
+            // baseLayer remounts this RasterSource (via its key), and a freshly
+            // mounted layer is otherwise appended to the TOP of the native stack
+            // — which buried the track/route lines until they were toggled off/on
+            // to re-add them above. layerIndex={0} forces re-insertion at the
+            // bottom on every (re)mount, keeping the paths visible.
+            layerIndex={0}
             paint={{
               "raster-opacity": 1,
             }}
@@ -3132,7 +3155,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </View>
         </Pressable>
 
-        {!selectedMarker ? (
+        {!selectedMarker && !trackModeActive ? (
           <View style={styles.headerActions} pointerEvents="box-none">
             <Pressable
               style={[styles.headerActionButton, layersOpen && styles.headerActionButtonActive]}
@@ -3565,6 +3588,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         snapPoints={MARKER_SHEET_SNAP_POINTS}
         enableDynamicSizing={false}
         enablePanDownToClose
+        // Only the top handle drags the sheet. Otherwise press-and-hold on the
+        // incident voice (push-to-talk) mic button feeds into the content pan
+        // gesture and collapses the expanded sheet. The handle still drags.
+        enableContentPanningGesture={false}
         onClose={closeSelection}
         backgroundStyle={styles.markerSheetBg}
         handleIndicatorStyle={styles.sheetHandle}
@@ -3777,7 +3804,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
       {activeTab === "map" && !selectedMarker && navPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
-      {!selectedMarker && navPhase === "idle" ? <IncidentFAB /> : null}
+      {!selectedMarker && navPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
       <ReportIncidentSheet />
 
       {/* Navigation feature: radial menu + transport/variants/editing/active overlays. */}
@@ -3839,12 +3866,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
       {activeTab === "location" ? (
         <View style={styles.tabOverlay}>
-          <LocationScreen />
+          <LocationScreen onClose={() => setActiveTab("map")} />
         </View>
       ) : null}
       {activeTab === "debug" ? (
         <View style={styles.tabOverlay}>
-          <DebugScreen />
+          <DebugScreen onClose={() => setActiveTab("map")} />
         </View>
       ) : null}
       {activeTab === "settings" ? (

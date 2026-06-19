@@ -317,10 +317,22 @@ export async function startLocationLoop(): Promise<boolean> {
   }
 
   try {
-    // 3. Stop any previously running task before (re)starting
+    // 3. Stop any previously running task before (re)starting.
+    //
+    // On Android, stopLocationUpdatesAsync can throw a NullPointerException
+    // (SharedPreferences.getAll() on null) when TaskManager reports the task as
+    // registered but expo-location's own prefs store hasn't hydrated yet — the
+    // typical case being a cold start where JobScheduler revives the task before
+    // the location module initializes. This stop is pure cleanup, so swallow the
+    // failure and fall through to startLocationUpdatesAsync, which re-registers
+    // the task with a fresh config anyway.
     const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
     if (running) {
-      await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      try {
+        await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      } catch (stopErr) {
+        debugLog("location", "warn", "stopLocationUpdatesAsync failed during restart (ignored)", String(stopErr));
+      }
     }
 
     // 4. Start continuous background updates.
@@ -453,8 +465,15 @@ export async function stopLocationLoop(): Promise<void> {
   directWatchSub = null;
   const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
   if (running) {
-    await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-    debugLog("location", "info", "background location updates stopped");
+    try {
+      await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      debugLog("location", "info", "background location updates stopped");
+    } catch (err) {
+      // Same Android NPE as in the restart path — see startLocationLoop. The
+      // direct watch is already removed above, so tracking is effectively off
+      // regardless of whether the native task tears down cleanly.
+      debugLog("location", "warn", "stopLocationUpdatesAsync failed (ignored)", String(err));
+    }
   }
 }
 

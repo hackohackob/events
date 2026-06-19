@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import * as ExpoLocation from "expo-location";
 import * as Battery from "expo-battery";
 import Constants from "expo-constants";
@@ -40,7 +41,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function LocationScreen() {
+export function LocationScreen({ onClose }: { onClose?: () => void }) {
   const lastFix = useLocationStatus((s) => s.lastFix);
   const lastReport = useLocationStatus((s) => s.lastReport);
   const role = useSessionStore((s) => s.role);
@@ -101,12 +102,22 @@ export function LocationScreen() {
   const reportAge = lastReport ? Date.now() - lastReport.at : undefined;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#22ff88" />}
-    >
-      <Text style={styles.heading}>Location diagnostics</Text>
+    <View style={styles.container}>
+      {onClose ? (
+        <View style={styles.header}>
+          <Pressable style={styles.backBtn} onPress={onClose} hitSlop={10}>
+            <Feather name="chevron-left" size={22} color="#cbd5e1" />
+          </Pressable>
+          <Text style={styles.headerTitle}>Location diagnostics</Text>
+          <View style={{ width: 36 }} />
+        </View>
+      ) : null}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#22ff88" />}
+      >
+        {onClose ? null : <Text style={styles.heading}>Location diagnostics</Text>}
 
       <Section title="LAST GPS FIX">
         {lastFix ? (
@@ -191,12 +202,33 @@ export function LocationScreen() {
         <Row label="API base" value={API_BASE_URL} />
         <Row label="Role / event" value={`${role} / ${eventId ?? "—"}`} />
       </Section>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#020b18" },
+  scroll: { flex: 1 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(148,163,184,0.1)",
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  headerTitle: { color: "#EFF6FF", fontSize: 17, fontWeight: "900", letterSpacing: 0.3 },
   content: { padding: 16, paddingBottom: 40 },
   heading: { color: "#eff6ff", fontSize: 20, fontWeight: "900", marginBottom: 16 },
   section: {
