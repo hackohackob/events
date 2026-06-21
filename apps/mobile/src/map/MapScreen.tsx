@@ -2471,6 +2471,19 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     return ids;
   }, [markers]);
 
+  // Incidents still open (not resolved/closed/archived). A medic's route can
+  // stay tagged with an incident id after the incident closes; the flash must
+  // stop in that case, so gate the route-based responding check on this set.
+  const openIncidentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of markers) {
+      if (m.type === "incident" && !isClosedIncidentStatus(m.status) && !isArchivedIncidentStatus(m.status)) {
+        ids.add(m.id);
+      }
+    }
+    return ids;
+  }, [markers]);
+
   const toggleLayer = (key: keyof LayerVisibility) => {
     setLayerVisibility((state) => ({
       ...state,
@@ -3021,7 +3034,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 const isResting = marker.status === "rest";
                 const isStationary = marker.status === "stationary";
                 // Responding to an incident → whole dot flashes red/blue for everyone.
-                const isResponding = respondingMedicIds.has(marker.id) || Boolean(marker.route?.incidentId);
+                // The route-tagged check is gated on the incident still being open
+                // so the flash stops once it's closed/archived.
+                const isResponding =
+                  respondingMedicIds.has(marker.id) ||
+                  (marker.route?.incidentId ? openIncidentIds.has(marker.route.incidentId) : false);
                 // Heading to a (non-incident) point → a "moving" badge.
                 const isGoingToPoint = !isResponding && (Boolean(marker.route) || Boolean(marker.destination)) && marker.status === "going_to";
                 const dotColor = isResting ? "#a78bfa" : freshColor;

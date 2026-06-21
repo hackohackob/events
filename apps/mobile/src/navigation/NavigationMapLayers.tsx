@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
 import { useNavStore } from "./nav-store";
+import { useMapStore } from "../map/map-store";
 import { NavPuck } from "./NavPuck";
 import { SURFACE_COLORS } from "./surface";
 import { clipRouteAhead } from "./geo";
@@ -37,6 +38,17 @@ export function NavigationMapLayers() {
   const progress = useNavStore((s) => s.progress);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
   const destinationIncidentId = useNavStore((s) => s.destinationIncidentId);
+  const markers = useMapStore((s) => s.markers);
+
+  // Only flash the puck red/blue while navigating to an incident that is still
+  // open — once it's resolved/closed/archived the emergency flash stops.
+  const respondingToOpenIncident = useMemo(() => {
+    if (!destinationIncidentId) return false;
+    const incident = markers.find((m) => m.id === destinationIncidentId && m.type === "incident");
+    if (!incident) return false;
+    const status = incident.status;
+    return status !== "resolved" && status !== "closed" && status !== "archived";
+  }, [destinationIncidentId, markers]);
 
   const selected = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
   const alternatives = routes.filter((r) => r.id !== selected?.id);
@@ -152,7 +164,7 @@ export function NavigationMapLayers() {
         <Marker id="nav-puck" lngLat={[(smoothedPuck ?? progress.snapped).lng, (smoothedPuck ?? progress.snapped).lat]}>
           <NavPuck
             rotation={navCameraMode === "north" ? progress.bearing : 0}
-            responding={Boolean(destinationIncidentId)}
+            responding={respondingToOpenIncident}
           />
         </Marker>
       ) : null}

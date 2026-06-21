@@ -57,18 +57,35 @@ export function AssignDestinationBar({
   );
   const [markBusy, setMarkBusy] = useState(false);
 
-  // Register myself as a responder WITHOUT starting navigation. Mirrors the
-  // optimistic responder update navigateTo() does, minus openTransport.
+  // Assign myself to this point WITHOUT starting navigation. For an incident
+  // that means joining the responder list; for a plain POI it means taking the
+  // point as my post (destination + "going_to" status), minus the turn-by-turn
+  // navigation screen.
   const markAssigned = async () => {
-    if (!incidentId || !myId || markBusy) return;
+    if (!myId || markBusy) return;
     setMarkBusy(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIncidentResponder(myId, true);
+    if (incidentId) {
+      setIncidentResponder(myId, true);
+      try {
+        await respondToIncident(incidentId);
+      } catch (err) {
+        setIncidentResponder(myId, false); // roll back on failure
+        debugLog("api", "error", "mark assigned failed", String(err));
+      } finally {
+        setMarkBusy(false);
+      }
+      return;
+    }
+    // POI / plain point: take this point as my post without navigating.
+    const current = useMapStore.getState().markers;
+    setMarkers(current.map((m) => (m.id === myId && m.type === "paramedic" ? { ...m, status: "going_to", destination } : m)));
     try {
-      await respondToIncident(incidentId);
+      await assignDestination(destination, myId);
     } catch (err) {
-      setIncidentResponder(myId, false); // roll back on failure
-      debugLog("api", "error", "mark assigned failed", String(err));
+      const cur = useMapStore.getState().markers; // roll back on failure
+      setMarkers(cur.map((m) => (m.id === myId && m.type === "paramedic" ? { ...m, status: "available", destination: null } : m)));
+      debugLog("api", "error", "assign to point failed", String(err));
     } finally {
       setMarkBusy(false);
     }
@@ -149,15 +166,18 @@ export function AssignDestinationBar({
         </Pressable>
       )}
 
-      {/* Assign myself to the incident without starting navigation. */}
-      {incidentId && !goingHere ? (
-        amResponder ? (
+      {/* Assign myself to this point without starting navigation — for incidents
+          (join responders) and for plain POIs (take the point as my post). */}
+      {!goingHere ? (
+        incidentId && amResponder ? (
           <View style={[styles.btn, styles.assignedBtn]}>
             <Text style={styles.assignedBtnText}>✓ You're assigned</Text>
           </View>
         ) : (
           <Pressable style={[styles.btn, styles.markBtn]} onPress={markAssigned} disabled={markBusy}>
-            <Text style={styles.markBtnText}>{markBusy ? "…" : "✓ Mark me assigned"}</Text>
+            <Text style={styles.markBtnText}>
+              {markBusy ? "…" : incidentId ? "✓ Mark me assigned" : "✓ Assign me here"}
+            </Text>
           </Pressable>
         )
       ) : null}
