@@ -238,6 +238,26 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     [eventId, scheduleSync],
   )
 
+  const unassignIncident = useCallback(
+    async (incidentId: string, medicId: string) => {
+      if (!eventId) return
+      const { unassignMedicFromIncident } = await import('@/api/incidents')
+      await unassignMedicFromIncident(eventId, incidentId, medicId)
+      const existing = incidentsRef.current.get(incidentId)
+      if (existing) {
+        const responders = (existing.responders ?? []).filter((id) => id !== medicId)
+        incidentsRef.current.set(incidentId, {
+          ...existing,
+          responders,
+          // Back to unassigned/open when the last responder is removed.
+          status: responders.length === 0 && existing.status === 'assigned' ? 'open' : existing.status,
+        })
+        scheduleSync()
+      }
+    },
+    [eventId, scheduleSync],
+  )
+
   const resolveIncident = useCallback(
     async (incidentId: string) => {
       await actionIncident(incidentId, { incidentId, action: 'resolved' }, eventId ?? undefined)
@@ -307,6 +327,7 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     assignDestination,
     removeActiveMedic,
     assignIncident,
+    unassignIncident,
     resolveIncident,
     closeIncident,
     updateIncidentNotes,

@@ -31,6 +31,7 @@ interface Props {
   /** Medics available to dispatch to this incident. */
   availableMedics?: Array<{ medicId: string; name: string }>
   onAssignResponder?: (incidentId: string, medicId: string) => void
+  onUnassignResponder?: (incidentId: string, medicId: string) => void
   /** medicId → display name, for showing current responders. */
   medicNameById?: Record<string, string>
   /** Save edited incident notes (description). */
@@ -39,7 +40,7 @@ interface Props {
 
 export default function IncidentDrawer({
   incident, messages, onClose, onResolve, onCloseIncident, onSendMessage, loadMessages,
-  availableMedics = [], onAssignResponder, medicNameById = {}, onUpdateNotes,
+  availableMedics = [], onAssignResponder, onUnassignResponder, medicNameById = {}, onUpdateNotes,
 }: Props) {
   const [tab, setTab] = useState<'details' | 'chat'>('details')
   const [showAssign, setShowAssign] = useState(false)
@@ -105,10 +106,12 @@ export default function IncidentDrawer({
   }
 
   return (
-    <div className="fixed inset-0" style={{ zIndex: 70 }}>
-      <div className="absolute inset-0" style={{ background: 'rgba(5,10,20,0.6)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+    // pointer-events-none on the wrapper so the map stays pannable/zoomable next
+    // to the drawer; only the panel itself captures input. No backdrop blur or
+    // dim — the operator needs to keep watching the live map while triaging.
+    <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 70 }}>
       <div
-        className="absolute top-0 right-0 h-full flex flex-col"
+        className="absolute top-0 right-0 h-full flex flex-col pointer-events-auto"
         style={{ width: 440, maxWidth: '95vw', background: 'rgba(8,15,28,0.99)', borderLeft: '1px solid rgba(148,163,184,0.12)', boxShadow: '-24px 0 80px rgba(0,0,0,0.6)' }}
       >
         {/* Header */}
@@ -223,8 +226,18 @@ export default function IncidentDrawer({
                   {(incident.responders ?? []).length > 0 ? (
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {(incident.responders ?? []).map(id => (
-                        <span key={id} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>
+                        <span key={id} className="inline-flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded-lg" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>
                           {medicNameById[id] ?? id.slice(0, 6)}
+                          {onUnassignResponder && (
+                            <button
+                              onClick={() => onUnassignResponder(incident.id, id)}
+                              title="Unassign medic"
+                              className="flex items-center justify-center w-4 h-4 rounded hover:bg-white/10 transition-colors"
+                              style={{ color: '#22c55e' }}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
                         </span>
                       ))}
                     </div>

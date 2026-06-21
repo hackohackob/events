@@ -51,7 +51,7 @@ export function TransportSheet() {
           <Text style={styles.destName} numberOfLines={1}>
             {destination.label}
           </Text>
-          <Text style={styles.destMeta}>{distanceLabel} away • Choose transport</Text>
+          <Text style={styles.destMeta}>{distanceLabel} away</Text>
         </View>
         <Pressable style={styles.closeButton} onPress={cancel} hitSlop={10}>
           <Feather name="x" size={18} color="#94a3b8" />
@@ -59,6 +59,8 @@ export function TransportSheet() {
       </View>
 
       {!fix ? <Text style={styles.warn}>Waiting for GPS fix…</Text> : null}
+
+      <Text style={styles.sectionTitle}>CHOOSE MODE OF TRANSPORTATION</Text>
 
       <View style={styles.row}>
         {PROFILE_ORDER.map((profile) => {
@@ -126,6 +128,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   warn: { color: "#f59e0b", fontSize: 12, fontWeight: "700", marginBottom: 8 },
+  sectionTitle: {
+    color: "#7c8ba1",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.1,
+    marginBottom: 9,
+  },
   row: { flexDirection: "row", gap: 9 },
   choice: {
     flex: 1,

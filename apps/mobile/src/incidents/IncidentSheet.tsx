@@ -88,8 +88,6 @@ function formatVoiceDuration(ms?: number): string {
 
 /** Minimum recording length for a voice note — anything shorter is discarded. */
 const MIN_VOICE_MS = 800;
-/** Presses shorter than this latch the recording on (tap-to-toggle). */
-const TAP_TOGGLE_MS = 350;
 
 interface Props {
   incident: MapMarker;
@@ -129,10 +127,6 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
   const [recordingUi, setRecordingUi] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
   const [voiceSending, setVoiceSending] = useState(false);
-  // Quick tap latches the recording on (toggle); a long press is push-to-talk.
-  const [latched, setLatched] = useState(false);
-  const latchedRef = React.useRef(false);
-  const micPressedAt = React.useRef(0);
   const recordStartPromise = React.useRef<Promise<boolean> | null>(null);
   const recordStartedAt = React.useRef(0);
 
@@ -168,8 +162,6 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
   const endVoiceNote = () => {
     const startPromise = recordStartPromise.current;
     recordStartPromise.current = null;
-    latchedRef.current = false;
-    setLatched(false);
     void (async () => {
       const started = await startPromise;
       if (!started) return;
@@ -193,25 +185,16 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
     })();
   };
 
-  // Hold = push-to-talk (release sends). A quick tap latches the recording on
-  // until the next tap, for hands-free voice notes.
-  const onMicPressIn = () => {
-    if (latchedRef.current) {
-      endVoiceNote(); // second tap → stop & send
-      return;
+  // Tap-to-toggle (NOT push-to-talk): a tap starts recording, the next tap — on
+  // the mic OR the red recording bar — stops and sends. Using a plain `onPress`
+  // (not press-in/press-out) keeps the touch a quick tap, so the surrounding
+  // bottom sheet's pan gesture never grabs it and collapses the panel.
+  const toggleVoiceNote = () => {
+    if (recordingUi || recordStartPromise.current) {
+      endVoiceNote();
+    } else {
+      beginVoiceNote();
     }
-    micPressedAt.current = Date.now();
-    beginVoiceNote();
-  };
-
-  const onMicPressOut = () => {
-    if (latchedRef.current || !recordStartPromise.current) return;
-    if (Date.now() - micPressedAt.current < TAP_TOGGLE_MS) {
-      latchedRef.current = true;
-      setLatched(true);
-      return;
-    }
-    endVoiceNote();
   };
 
   // Shared playback for voice bubbles — tap a bubble to play, tap again to stop.
@@ -452,11 +435,10 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             </Text>
           </View>
         </View>
-        {/* Hold to talk, or tap to toggle — records straight into the team chat. */}
+        {/* Tap to start, tap again (or tap the red bar) to send — straight into chat. */}
         <Pressable
           style={[styles.micBtn, recordingUi && styles.micBtnActive]}
-          onPressIn={onMicPressIn}
-          onPressOut={onMicPressOut}
+          onPress={toggleVoiceNote}
           disabled={voiceSending}
           hitSlop={6}
         >
@@ -472,13 +454,13 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
       </View>
 
       {recordingUi ? (
-        <View style={styles.recordingBar}>
+        <Pressable style={styles.recordingBar} onPress={endVoiceNote}>
           <View style={styles.recordingDot} />
           <Text style={styles.recordingText}>
             Recording voice note · {formatVoiceDuration(recordSecs * 1000)}
           </Text>
-          <Text style={styles.recordingHint}>{latched ? "tap mic to send" : "release to send"}</Text>
-        </View>
+          <Text style={styles.recordingHint}>tap to send</Text>
+        </Pressable>
       ) : null}
 
       <BottomSheetScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>

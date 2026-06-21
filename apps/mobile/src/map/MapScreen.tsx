@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   AppState,
+  BackHandler,
   Dimensions,
   Image,
   Modal,
@@ -45,6 +46,7 @@ import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
 import { MedicDot } from "./MedicDot";
 import { SelectionPulse } from "./SelectionPulse";
+import { ScaleBar } from "./ScaleBar";
 import { AssignDestinationBar } from "./AssignDestinationBar";
 import { IncidentSheet } from "../incidents/IncidentSheet";
 import * as Haptics from "expo-haptics";
@@ -1449,6 +1451,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mapZoom, setMapZoom] = useState(FALLBACK_ZOOM);
+  const [mapCenterLat, setMapCenterLat] = useState(FALLBACK_LAT);
   const [layersOpen, setLayersOpen] = useState(false);
   const [pendingPoi, setPendingPoi] = useState<{ lat: number; lng: number } | null>(null);
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
@@ -2435,6 +2438,48 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     }
   }, [navPhase]);
 
+  // Android hardware back: dismiss whatever overlay is on top instead of leaving
+  // the screen. Returns true (handled) until nothing is open, then false so the
+  // OS does its default (exit). Modal-based sheets (new POI, photo viewer,
+  // pending incidents) handle their own back via onRequestClose and never reach
+  // here. Re-registers when the relevant state changes so it reads fresh values.
+  useEffect(() => {
+    const onBack = (): boolean => {
+      if (radialAnchor) {
+        setRadialAnchor(null);
+        return true;
+      }
+      if (menuOpen) {
+        setMenuOpen(false);
+        return true;
+      }
+      if (layersOpen) {
+        setLayersOpen(false);
+        return true;
+      }
+      // Full-screen tab overlays (location/debug/settings/guide/profile).
+      if (activeTab !== "map" && activeTab !== "tracks") {
+        setActiveTab("map");
+        return true;
+      }
+      if (selectedMarkerId) {
+        setSelectedMarkerId(null);
+        return true;
+      }
+      if (navPhase !== "idle") {
+        useNavStore.getState().cancel();
+        return true;
+      }
+      if (activeTab === "tracks") {
+        setActiveTab("map");
+        return true;
+      }
+      return false;
+    };
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+    return () => sub.remove();
+  }, [radialAnchor, menuOpen, layersOpen, activeTab, selectedMarkerId, navPhase]);
+
   // Broadcast my active navigation path to the whole team when navigation starts,
   // and clear it when it ends — so everyone + the dashboard sees the route + ETA.
   const navWasActiveRef = useRef(false);
@@ -2590,6 +2635,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         onRegionDidChange={(event: any) => {
           const props = event?.nativeEvent ?? event?.properties ?? {};
           const z = props.zoom ?? props.zoomLevel;
+          // Track centre latitude so the scale bar's metres-per-pixel is correct.
+          const center =
+            props.center ?? event?.geometry?.coordinates ?? event?.nativeEvent?.geometry?.coordinates;
+          if (Array.isArray(center) && Number.isFinite(center[1])) setMapCenterLat(center[1]);
           if (typeof z === "number" && Number.isFinite(z)) {
             setMapZoom(z);
             // A pinch during active navigation becomes the standing nav zoom, so
@@ -3174,6 +3223,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             {/* <Text style={styles.eventMetaText}>{viewMode.toUpperCase()}</Text> */}
           </View>
         </Pressable>
+
+        {/* Map scale bar (мащаб) — hidden while an incident/marker sheet is open. */}
+        {!selectedMarker && !trackModeActive ? (
+          <View style={styles.scaleBar} pointerEvents="none">
+            <ScaleBar zoom={mapZoom} latitude={mapCenterLat} />
+          </View>
+        ) : null}
 
         {!selectedMarker && !trackModeActive ? (
           <View style={styles.headerActions} pointerEvents="box-none">
@@ -4050,6 +4106,11 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     gap: 9,
+  },
+  scaleBar: {
+    position: "absolute",
+    left: 14,
+    bottom: BOTTOM_BAR_HEIGHT + 18,
   },
   clearDestBtn: {
     flexDirection: "row",

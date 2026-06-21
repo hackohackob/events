@@ -135,28 +135,60 @@ function freshnessColor(ageMs: number): string {
 
 function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string, coords: [number, number]) => void }) {
   const config = getPOIIcon(poi.type)
+  const meta = POI_CONFIGS.find(p => p.type === poi.type)
+  const [showPopup, setShowPopup] = useState(false)
   return (
-    <Marker
-      key={poi.id}
-      longitude={poi.coordinates[0]}
-      latitude={poi.coordinates[1]}
-      draggable={!!onMove}
-      onDragEnd={e => onMove?.(poi.id, [e.lngLat.lng, e.lngLat.lat])}
-    >
-      <div
-        className="flex items-center justify-center rounded-full text-white cursor-pointer"
-        style={{
-          width: poi.type === 'base-medical-camp' ? 34 : 28,
-          height: poi.type === 'base-medical-camp' ? 34 : 28,
-          background: config.color,
-          border: '2px solid rgba(255,255,255,0.9)',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-        }}
-        title={poi.name || poi.type}
+    <>
+      <Marker
+        key={poi.id}
+        longitude={poi.coordinates[0]}
+        latitude={poi.coordinates[1]}
+        draggable={!!onMove}
+        onDragStart={() => setShowPopup(false)}
+        onDragEnd={e => onMove?.(poi.id, [e.lngLat.lng, e.lngLat.lat])}
       >
-        <PoiIcon type={poi.type} icon={poi.icon} size={poi.type === 'base-medical-camp' ? 18 : 15} color="#fff" />
-      </div>
-    </Marker>
+        <div
+          className="flex items-center justify-center rounded-full text-white cursor-pointer transition-transform hover:scale-110"
+          style={{
+            width: poi.type === 'base-medical-camp' ? 34 : 28,
+            height: poi.type === 'base-medical-camp' ? 34 : 28,
+            background: config.color,
+            border: showPopup ? '2px solid #fff' : '2px solid rgba(255,255,255,0.9)',
+            boxShadow: showPopup ? `0 0 0 4px ${config.color}55, 0 2px 8px rgba(0,0,0,0.4)` : '0 2px 8px rgba(0,0,0,0.4)',
+          }}
+          title={poi.name || poi.type}
+          onClick={e => { e.stopPropagation(); setShowPopup(v => !v) }}
+        >
+          <PoiIcon type={poi.type} icon={poi.icon} size={poi.type === 'base-medical-camp' ? 18 : 15} color="#fff" />
+        </div>
+      </Marker>
+      {showPopup && (
+        <Popup
+          longitude={poi.coordinates[0]}
+          latitude={poi.coordinates[1]}
+          anchor="bottom"
+          offset={poi.type === 'base-medical-camp' ? 22 : 18}
+          closeButton={false}
+          onClose={() => setShowPopup(false)}
+          className="poi-popup"
+          maxWidth="260px"
+        >
+          <div className="px-1 py-0.5" style={{ minWidth: 160 }}>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center justify-center rounded-md flex-shrink-0" style={{ width: 22, height: 22, background: config.color }}>
+                <PoiIcon type={poi.type} icon={poi.icon} size={13} color="#fff" />
+              </div>
+              <div className="text-sm font-bold text-slate-100 leading-tight">{poi.name || meta?.label || poi.type}</div>
+            </div>
+            <div className="text-[11px] font-semibold mb-1" style={{ color: config.color }}>{meta?.label ?? poi.type}</div>
+            {poi.description ? <div className="text-xs text-slate-300 mb-1.5">{poi.description}</div> : null}
+            <div className="text-[10px] font-mono" style={{ color: '#64748b' }}>
+              {poi.coordinates[1].toFixed(5)}, {poi.coordinates[0].toFixed(5)}
+            </div>
+          </div>
+        </Popup>
+      )}
+    </>
   )
 }
 

@@ -7,7 +7,7 @@ import { apiFetch } from "../ui/api-client";
 import { getSocket } from "../realtime/socket-client";
 import { useSessionStore } from "../security/session-store";
 import { OfflineQueue } from "../offline/offline-queue";
-import { debugLog } from "../debug/debug-log";
+import { debugLog, describeError } from "../debug/debug-log";
 import { useLocationStatus } from "../debug/location-status";
 import { useSettingsStore } from "../settings/settings-store";
 import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "./battery-optimization";
@@ -21,6 +21,39 @@ const NAV_MODE_INTERVAL_MS = 5_000;
 const locationQueue = new OfflineQueue<Record<string, unknown>>();
 let openedBackgroundLocationSettings = false;
 let promptedBatteryExemption = false;
+
+// ─── Background-task failure backoff ─────────────────────────────────────────
+// On some Android builds expo-task-manager's TaskService loses its Context
+// (it's held in a WeakReference that can be GC'd), after which every
+// start/stopLocationUpdatesAsync rejects with a SharedPreferences.getAll() NPE
+// — persistently, for the life of the process. Without a backoff the watchdog
+// re-runs the full start every couple of minutes, and each run logs two more
+// native NPEs (stop + start). We latch the failure and exponentially back off
+// re-attempts so the log stays readable and we stop hammering a call that can't
+// succeed, while still retrying occasionally in case a fresh Context recovers.
+let bgTaskFailures = 0;
+let bgTaskRetryAfter = 0; // epoch ms; don't re-attempt the background task before this
+const BG_TASK_BACKOFF_BASE_MS = 60_000;
+const BG_TASK_BACKOFF_MAX_MS = 15 * 60_000;
+
+function noteBgTaskFailure(err: unknown): void {
+  bgTaskFailures += 1;
+  const backoff = Math.min(BG_TASK_BACKOFF_BASE_MS * 2 ** (bgTaskFailures - 1), BG_TASK_BACKOFF_MAX_MS);
+  bgTaskRetryAfter = Date.now() + backoff;
+  debugLog("location", "warn", "background location task failed to start (direct watch still active)", {
+    error: describeError(err),
+    consecutiveFailures: bgTaskFailures,
+    nextRetryInSec: Math.round(backoff / 1000),
+    impact:
+      "JobScheduler/locked-screen delivery is degraded on this device — foreground tracking via the direct watch keeps working, but background fixes need the native TaskService fix (see patches/expo-task-manager).",
+  });
+}
+
+function noteBgTaskSuccess(): void {
+  if (bgTaskFailures > 0) debugLog("location", "info", "background location task recovered", { afterFailures: bgTaskFailures });
+  bgTaskFailures = 0;
+  bgTaskRetryAfter = 0;
+}
 /** True while turn-by-turn navigation is active — shortens the update interval. */
 let navModeActive = false;
 
@@ -55,6 +88,11 @@ function accuracyRejectReason(accuracy?: number): string | null {
     return `accuracy ${Math.round(accuracy)}m ≫ last ${Math.round(lastAcceptedAccuracy)}m`;
   }
   return null;
+}
+
+function isMedicSession(): boolean {
+  const role = useSessionStore.getState().role;
+  return role === "medic" || role === "paramedic";
 }
 
 async function readBatteryLevel(): Promise<number | undefined> {
@@ -195,7 +233,7 @@ async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<v
     );
     debugLog("location", "info", "direct location watch started", { intervalMs });
   } catch (err) {
-    debugLog("location", "error", "direct location watch failed to start", String(err));
+    debugLog("location", "error", "direct location watch failed to start", describeError(err));
   }
 }
 
@@ -326,12 +364,16 @@ export async function startLocationLoop(): Promise<boolean> {
     // the location module initializes. This stop is pure cleanup, so swallow the
     // failure and fall through to startLocationUpdatesAsync, which re-registers
     // the task with a fresh config anyway.
-    const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    // While the background task is in its failure backoff, skip the pre-stop
+    // too: it hits the same native NPE and only adds noise. We'll re-attempt the
+    // whole start/stop dance once the backoff window elapses.
+    const attemptBgTask = Date.now() >= bgTaskRetryAfter;
+    const running = attemptBgTask && (await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME));
     if (running) {
       try {
         await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
       } catch (stopErr) {
-        debugLog("location", "warn", "stopLocationUpdatesAsync failed during restart (ignored)", String(stopErr));
+        debugLog("location", "warn", "stopLocationUpdatesAsync failed during restart (ignored)", describeError(stopErr));
       }
     }
 
@@ -359,37 +401,47 @@ export async function startLocationLoop(): Promise<boolean> {
     // path and works independently of the JobScheduler-backed task. So isolate
     // the background start in its own try/catch and always fall through to
     // startDirectWatch.
-    try {
-      await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-        accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
-        timeInterval: intervalMs,
-        distanceInterval: 0,
-        deferredUpdatesInterval: 0,
-        deferredUpdatesDistance: 0,
-        mayShowUserSettingsDialog: true,
-        foregroundService: {
-          notificationTitle: "Medic Event App — live tracking",
-          notificationBody: isMedic
-            ? "Sharing your location with the event command centre"
-            : "Sharing location with event coordinators",
-          notificationColor: "#00C37A",
-          killServiceOnDestroy: false,
-        },
-        showsBackgroundLocationIndicator: true,
-        pausesUpdatesAutomatically: false,
+    if (!attemptBgTask) {
+      // Still inside the backoff window from an earlier persistent failure.
+      debugLog("location", "info", "background task start skipped — backing off", {
+        consecutiveFailures: bgTaskFailures,
+        retryInSec: Math.max(0, Math.round((bgTaskRetryAfter - Date.now()) / 1000)),
       });
+    } else {
+      try {
+        await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
+          timeInterval: intervalMs,
+          distanceInterval: 0,
+          deferredUpdatesInterval: 0,
+          deferredUpdatesDistance: 0,
+          mayShowUserSettingsDialog: true,
+          foregroundService: {
+            notificationTitle: "Medic Event App — live tracking",
+            notificationBody: isMedic
+              ? "Sharing your location with the event command centre"
+              : "Sharing location with event coordinators",
+            notificationColor: "#00C37A",
+            killServiceOnDestroy: false,
+          },
+          showsBackgroundLocationIndicator: true,
+          pausesUpdatesAutomatically: false,
+        });
 
-      const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-      if (registered) {
-        debugLog("location", "info", "background location updates started", { isMedic });
-      } else {
-        debugLog("location", "warn", "background task did not register — relying on direct watch");
+        const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+        if (registered) {
+          noteBgTaskSuccess();
+          debugLog("location", "info", "background location updates started", { isMedic });
+        } else {
+          debugLog("location", "warn", "background task did not register — relying on direct watch");
+        }
+      } catch (bgErr) {
+        // Known expo-task-manager Android NPE (TaskService lost its Context) —
+        // degrade to direct-watch-only instead of failing the whole start.
+        // Locked-screen delivery via the task is lost, but the foreground
+        // service + direct watch keep live tracking working. Latch + back off.
+        noteBgTaskFailure(bgErr);
       }
-    } catch (bgErr) {
-      // Known expo-location Android NPE — degrade to direct-watch-only instead
-      // of failing the whole start. Locked-screen delivery via the task is lost,
-      // but the foreground service + direct watch keep live tracking working.
-      debugLog("location", "warn", "background location task failed to start (direct watch still active)", String(bgErr));
     }
 
     // Primary delivery path: a plain watch subscription (direct callback, no
@@ -461,12 +513,20 @@ export async function ensureTrackingAlive(): Promise<void> {
     const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
     if (registered) return;
 
+    // If the background task is in its failure backoff, a restart would just hit
+    // the same native NPE — let the backoff window govern re-attempts instead of
+    // the 2-minute watchdog cooldown, and keep the direct watch alive meanwhile.
+    if (Date.now() < bgTaskRetryAfter) {
+      if (!directWatchSub) await startDirectWatch(isMedicSession(), useSettingsStore.getState().locationIntervalMs);
+      return;
+    }
+
     if (Date.now() - lastWatchdogRestartAt < WATCHDOG_RESTART_COOLDOWN_MS) return;
     lastWatchdogRestartAt = Date.now();
     debugLog("location", "warn", "tracking watchdog: task not registered — restarting");
     await startLocationLoop();
   } catch (err) {
-    debugLog("location", "error", "tracking watchdog failed", String(err));
+    debugLog("location", "error", "tracking watchdog failed", describeError(err));
   }
 }
 
@@ -482,7 +542,7 @@ export async function stopLocationLoop(): Promise<void> {
       // Same Android NPE as in the restart path — see startLocationLoop. The
       // direct watch is already removed above, so tracking is effectively off
       // regardless of whether the native task tears down cleanly.
-      debugLog("location", "warn", "stopLocationUpdatesAsync failed (ignored)", String(err));
+      debugLog("location", "warn", "stopLocationUpdatesAsync failed (ignored)", describeError(err));
     }
   }
 }

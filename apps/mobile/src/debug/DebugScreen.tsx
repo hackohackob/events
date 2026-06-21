@@ -3,7 +3,10 @@ import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-nati
 import { Feather } from "@expo/vector-icons";
 import { type DebugCategory, type DebugLevel, useDebugLog } from "./debug-log";
 
-const CATEGORIES: Array<DebugCategory | "all"> = ["all", "location", "api", "socket", "incident", "app"];
+type Filter = DebugCategory | "all" | "errors";
+// "errors" is a cross-category filter (level === "error"), kept first after
+// "all" so it's the quickest thing to reach when something's wrong.
+const CATEGORIES: Array<Filter> = ["all", "errors", "location", "api", "socket", "incident", "app"];
 
 const LEVEL_COLOR: Record<DebugLevel, string> = {
   info: "#7c8a9c",
@@ -28,12 +31,15 @@ function formatTime(at: number): string {
 export function DebugScreen({ onClose }: { onClose?: () => void }) {
   const entries = useDebugLog((s) => s.entries);
   const clear = useDebugLog((s) => s.clear);
-  const [filter, setFilter] = useState<DebugCategory | "all">("all");
+  const [filter, setFilter] = useState<Filter>("all");
 
-  const visible = useMemo(
-    () => (filter === "all" ? entries : entries.filter((e) => e.category === filter)),
-    [entries, filter],
-  );
+  const visible = useMemo(() => {
+    if (filter === "all") return entries;
+    if (filter === "errors") return entries.filter((e) => e.level === "error");
+    return entries.filter((e) => e.category === filter);
+  }, [entries, filter]);
+
+  const errorCount = useMemo(() => entries.filter((e) => e.level === "error").length, [entries]);
 
   const copyAll = async () => {
     const text = entries
@@ -64,15 +70,33 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterBar} contentContainerStyle={styles.filterBarContent}>
-        {CATEGORIES.map((cat) => (
-          <Pressable
-            key={cat}
-            style={[styles.chip, filter === cat && styles.chipActive]}
-            onPress={() => setFilter(cat)}
-          >
-            <Text style={[styles.chipText, filter === cat && styles.chipTextActive]}>{cat}</Text>
-          </Pressable>
-        ))}
+        {CATEGORIES.map((cat) => {
+          const active = filter === cat;
+          const isErrors = cat === "errors";
+          const label = isErrors && errorCount > 0 ? `errors (${errorCount})` : cat;
+          return (
+            <Pressable
+              key={cat}
+              style={[
+                styles.chip,
+                active && styles.chipActive,
+                isErrors && styles.chipError,
+                isErrors && active && styles.chipErrorActive,
+              ]}
+              onPress={() => setFilter(cat)}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  active && styles.chipTextActive,
+                  isErrors && styles.chipErrorText,
+                ]}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
@@ -116,8 +140,11 @@ const styles = StyleSheet.create({
   filterBarContent: { paddingHorizontal: 12, gap: 8, alignItems: "center" },
   chip: { backgroundColor: "#0b1729", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: "rgba(148,163,184,0.12)" },
   chipActive: { backgroundColor: "#1e3a5f", borderColor: "#3b82f6" },
+  chipError: { borderColor: "rgba(255,107,107,0.4)" },
+  chipErrorActive: { backgroundColor: "#3a1620", borderColor: "#ff6b6b" },
   chipText: { color: "#7c8a9c", fontSize: 12, fontWeight: "700" },
   chipTextActive: { color: "#bfdbfe" },
+  chipErrorText: { color: "#ff8d8d" },
   list: { flex: 1 },
   listContent: { padding: 12, paddingBottom: 40 },
   empty: { color: "#5f7da0", fontSize: 13, textAlign: "center", marginTop: 40 },

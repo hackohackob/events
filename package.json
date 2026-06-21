@@ -25,6 +25,7 @@
     "react-dom": "19.1.0"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "dev": "npm run infra && concurrently -p \"[{name}]\" -n backend,web,mobile -c blue,green,magenta \"npm:dev:backend\" \"npm:dev:web\" \"npm:dev:mobile\"",
     "dev:services": "npm run infra && concurrently -k -p \"[{name}]\" -n backend,web -c blue,green \"npm:dev:backend\" \"npm:dev:web\"",
     "build": "npm run build --workspaces",
@@ -50,7 +51,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
-    "concurrently": "^10.0.3"
+    "concurrently": "^10.0.3",
+    "patch-package": "^8.0.1"
   },
   "packageManager": "npm@10.9.2"
 }

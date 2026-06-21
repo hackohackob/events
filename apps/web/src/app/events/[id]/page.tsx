@@ -266,7 +266,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const {
     medics, incidents: liveIncidents, incidentMessages, connected,
     alarmSignal, broadcasts, dismissBroadcast,
-    assignDestination, removeActiveMedic, assignIncident,
+    assignDestination, removeActiveMedic, assignIncident, unassignIncident,
     resolveIncident, closeIncident, updateIncidentNotes, loadMessages, sendMessage,
   } = useLiveMap({ eventId: id, enabled: isActive })
 
@@ -1133,6 +1133,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           loadMessages={loadMessages}
           availableMedics={onlineMedics.map(m => ({ medicId: m.medicId, name: m.name }))}
           onAssignResponder={assignIncident}
+          onUnassignResponder={unassignIncident}
           medicNameById={Object.fromEntries(medics.map(m => [m.medicId, m.name]))}
           onUpdateNotes={updateIncidentNotes}
         />

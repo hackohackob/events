@@ -34,6 +34,16 @@ export async function assignIncident(incidentId: string, paramedicId: string) {
   return res.data;
 }
 
+export async function unassignMedicFromIncident(
+  eventId: string,
+  incidentId: string,
+  paramedicId: string,
+): Promise<void> {
+  await client.delete(`/incidents/${incidentId}/assign/${paramedicId}`, {
+    headers: eventHeaders(eventId),
+  });
+}
+
 export async function assignMedicToIncident(
   eventId: string,
   incidentId: string,
