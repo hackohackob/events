@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Info, Trash2, Eye, EyeOff, Check, X, Copy, Mountain, TrendingUp } from 'lucide-react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { ChevronLeft, ChevronRight, ChevronDown, Info, Trash2, Eye, EyeOff, Check, X, Copy, Mountain, TrendingUp } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, PointOfInterest, POIType } from '@/lib/types'
@@ -16,28 +16,56 @@ interface Props {
   onBack: () => void
 }
 
-/** Grid of selectable vector icons for a custom point of interest. */
+/** Compact dropdown of selectable vector icons for a custom point of interest. */
 function IconPicker({ value, onChange }: { value: string; onChange: (icon: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = CUSTOM_POI_ICON_OPTIONS.find(o => o.key === value) ?? CUSTOM_POI_ICON_OPTIONS[0]
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {CUSTOM_POI_ICON_OPTIONS.map(opt => {
-        const active = value === opt.key
-        return (
-          <button
-            key={opt.key}
-            type="button"
-            onClick={() => onChange(opt.key)}
-            title={opt.label}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
-            style={{
-              background: active ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
-              border: active ? '1px solid rgba(34,197,94,0.5)' : '1px solid rgba(148,163,184,0.12)',
-            }}
-          >
-            <opt.Icon size={16} color={active ? '#22c55e' : '#cbd5e1'} strokeWidth={2.4} />
-          </button>
-        )
-      })}
+    <div ref={ref} className="relative w-44">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full h-9 px-2.5 rounded-lg flex items-center gap-2 transition-colors"
+        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(148,163,184,0.18)' }}
+      >
+        <selected.Icon size={16} color="#22c55e" strokeWidth={2.4} />
+        <span className="text-xs text-slate-200 flex-1 text-left">{selected.label}</span>
+        <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div
+          className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto rounded-lg py-1 shadow-xl"
+          style={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.18)' }}
+        >
+          {CUSTOM_POI_ICON_OPTIONS.map(opt => {
+            const active = value === opt.key
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => { onChange(opt.key); setOpen(false) }}
+                className="w-full px-2.5 py-1.5 flex items-center gap-2 transition-colors hover:bg-white/5"
+                style={{ background: active ? 'rgba(34,197,94,0.12)' : 'transparent' }}
+              >
+                <opt.Icon size={16} color={active ? '#22c55e' : '#cbd5e1'} strokeWidth={2.4} />
+                <span className="text-xs flex-1 text-left" style={{ color: active ? '#22c55e' : '#cbd5e1' }}>{opt.label}</span>
+                {active && <Check size={13} className="text-green-500" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

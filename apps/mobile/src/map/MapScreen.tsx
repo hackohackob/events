@@ -1526,6 +1526,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     });
   };
 
+  // `locationX` is only trustworthy on the initial grant, where the event is
+  // relative to the scrub surface itself. During a drag the move events can
+  // originate from sibling overlays (the cursor line, elevation segments) that
+  // sit on top of the surface — their `locationX` is relative to a ~2px child,
+  // so recalibrating from it would snap the origin to the finger and collapse
+  // the ratio to ~0 (the cursor jumping back to the start). For moves we use
+  // the absolute pageX against the origin calibrated at grant.
   const updateTrackProfileProgressFromPageX = (pageX: number, locationX?: number) => {
     if (typeof locationX === "number" && Number.isFinite(locationX)) {
       trackProfileChartPageXRef.current = pageX - locationX;
@@ -3455,27 +3462,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 </View>
               </View>
               <View ref={trackProfileChartRef} style={styles.profileGradientChart}>
-                <View
-                  style={styles.profileGradientScrubSurface}
-                  onLayout={(event) => {
-                    setTrackProfileWidth(event.nativeEvent.layout.width);
-                    measureTrackProfileChart();
-                  }}
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onResponderGrant={(event) => {
-                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
-                  }}
-                  onResponderMove={(event) => {
-                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
-                  }}
-                  onTouchStart={(event) => {
-                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
-                  }}
-                  onTouchMove={(event) => {
-                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
-                  }}
-                />
                 <View style={styles.profileGradientChartZeroLine} />
                 {focusedTrackElevationLinePoints.slice(0, -1).map((point, index) => {
                   const next = focusedTrackElevationLinePoints[index + 1];
@@ -3544,6 +3530,23 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     />
                   </>
                 ) : null}
+                {/* Transparent scrub surface on top so it always wins the
+                    responder and reports locationX relative to the chart. */}
+                <View
+                  style={styles.profileGradientScrubSurface}
+                  onLayout={(event) => {
+                    setTrackProfileWidth(event.nativeEvent.layout.width);
+                    measureTrackProfileChart();
+                  }}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={(event) => {
+                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
+                  }}
+                  onResponderMove={(event) => {
+                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX);
+                  }}
+                />
               </View>
 
               {trackSheetIndex >= 1 ? (

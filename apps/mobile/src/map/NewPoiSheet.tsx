@@ -12,8 +12,9 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { createPoi, type PoiDto } from "../ui/event-actions";
-import { PoiIcon } from "./poi-icons";
+import { PoiIcon, CUSTOM_POI_ICON_OPTIONS } from "./poi-icons";
 import { debugLog } from "../debug/debug-log";
 
 const POI_TYPES: Array<{ id: string; label: string; icon: string; color: string }> = [
@@ -43,6 +44,8 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
   const [type, setType] = useState("medical-point");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [customIcon, setCustomIcon] = useState(CUSTOM_POI_ICON_OPTIONS[0].key);
+  const [iconOpen, setIconOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Reset the form each time a fresh long-press opens it.
@@ -51,9 +54,14 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
       setType("medical-point");
       setName("");
       setDescription("");
+      setCustomIcon(CUSTOM_POI_ICON_OPTIONS[0].key);
+      setIconOpen(false);
       setSaving(false);
     }
   }, [pending]);
+
+  const selectedIcon =
+    CUSTOM_POI_ICON_OPTIONS.find((o) => o.key === customIcon) ?? CUSTOM_POI_ICON_OPTIONS[0];
 
   const submit = async () => {
     if (!pending || saving) return;
@@ -66,6 +74,7 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
         type,
         name: name.trim() || undefined,
         description: description.trim() || undefined,
+        icon: type === "custom" ? customIcon : undefined,
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onCreated(poi);
@@ -116,6 +125,53 @@ export function NewPoiSheet({ pending, onClose, onCreated }: Props) {
                 );
               })}
             </View>
+
+            {type === "custom" && (
+              <>
+                <Text style={styles.label}>ICON</Text>
+                <Pressable
+                  style={styles.iconSelect}
+                  onPress={() => {
+                    setIconOpen((o) => !o);
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <MaterialCommunityIcons name={selectedIcon.icon} size={18} color="#34d399" />
+                  <Text style={styles.iconSelectText}>{selectedIcon.label}</Text>
+                  <MaterialCommunityIcons
+                    name={iconOpen ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color="#64748b"
+                  />
+                </Pressable>
+                {iconOpen && (
+                  <View style={styles.iconMenu}>
+                    {CUSTOM_POI_ICON_OPTIONS.map((opt) => {
+                      const active = opt.key === customIcon;
+                      return (
+                        <Pressable
+                          key={opt.key}
+                          style={[styles.iconMenuItem, active && styles.iconMenuItemActive]}
+                          onPress={() => {
+                            setCustomIcon(opt.key);
+                            setIconOpen(false);
+                            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          }}
+                        >
+                          <MaterialCommunityIcons
+                            name={opt.icon}
+                            size={17}
+                            color={active ? "#34d399" : "#94a3b8"}
+                          />
+                          <Text style={[styles.iconMenuText, active && { color: "#34d399" }]}>{opt.label}</Text>
+                          {active && <MaterialCommunityIcons name="check" size={15} color="#34d399" />}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+              </>
+            )}
 
             <Text style={styles.label}>NAME</Text>
             <TextInput
@@ -197,6 +253,35 @@ const styles = StyleSheet.create({
   },
   typeIcon: { fontSize: 14 },
   typeText: { color: "#94a3b8", fontSize: 12.5, fontWeight: "800" },
+  iconSelect: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#101d32",
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(177,199,224,0.12)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  iconSelectText: { flex: 1, color: "#EFF6FF", fontSize: 14, fontWeight: "700" },
+  iconMenu: {
+    marginTop: 6,
+    backgroundColor: "#0c1626",
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(177,199,224,0.14)",
+    overflow: "hidden",
+  },
+  iconMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  iconMenuItemActive: { backgroundColor: "rgba(52,211,153,0.10)" },
+  iconMenuText: { flex: 1, color: "#cbd5e1", fontSize: 13.5, fontWeight: "700" },
   input: {
     backgroundColor: "#101d32",
     borderRadius: 13,

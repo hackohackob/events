@@ -143,6 +143,8 @@ export async function createPoi(input: {
   type?: string;
   name?: string;
   description?: string;
+  /** Custom glyph key for "custom" points; overrides the default type icon. */
+  icon?: string;
 }): Promise<PoiDto> {
   return apiFetch<PoiDto>(`/events/pois`, {
     method: "POST",

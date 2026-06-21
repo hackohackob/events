@@ -64,6 +64,25 @@ const LEGACY_EMOJI_TO_KEY: Record<string, string> = {
   "💧": "water",
 };
 
+/**
+ * Selectable custom glyphs, in display order. Keys & labels mirror the web
+ * `CUSTOM_POI_ICON_OPTIONS` so the same choice renders identically everywhere.
+ */
+export const CUSTOM_POI_ICON_OPTIONS: { key: string; label: string; icon: MciName }[] = [
+  { key: "danger", label: "Danger", icon: CUSTOM_KEY_ICON.danger },
+  { key: "star", label: "Star", icon: CUSTOM_KEY_ICON.star },
+  { key: "flag", label: "Flag", icon: CUSTOM_KEY_ICON.flag },
+  { key: "pin", label: "Pin", icon: CUSTOM_KEY_ICON.pin },
+  { key: "finish", label: "Finish", icon: CUSTOM_KEY_ICON.finish },
+  { key: "camp", label: "Camp", icon: CUSTOM_KEY_ICON.camp },
+  { key: "viewpoint", label: "Viewpoint", icon: CUSTOM_KEY_ICON.viewpoint },
+  { key: "obstacle", label: "Obstacle", icon: CUSTOM_KEY_ICON.obstacle },
+  { key: "contact", label: "Contact", icon: CUSTOM_KEY_ICON.contact },
+  { key: "search", label: "Search point", icon: CUSTOM_KEY_ICON.search },
+  { key: "rockfall", label: "Rockfall", icon: CUSTOM_KEY_ICON.rockfall },
+  { key: "water", label: "Water", icon: CUSTOM_KEY_ICON.water },
+];
+
 function resolveName(type?: string, icon?: string | null): MciName {
   if (icon) {
     if (CUSTOM_KEY_ICON[icon]) return CUSTOM_KEY_ICON[icon];
