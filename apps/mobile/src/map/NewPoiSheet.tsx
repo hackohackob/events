@@ -18,19 +18,14 @@ import { PoiIcon, CUSTOM_POI_ICON_OPTIONS } from "./poi-icons";
 import { debugLog } from "../debug/debug-log";
 
 const POI_TYPES: Array<{ id: string; label: string; icon: string; color: string }> = [
-  { id: "medical-point", label: "Medical", icon: "✚", color: "#ef4444" },
+  { id: "base-medical-camp", label: "Base Camp", icon: "🏥", color: "#ef4444" },
   { id: "ambulance", label: "Ambulance", icon: "🚑", color: "#ef4444" },
-  { id: "danger", label: "Danger", icon: "⚠️", color: "#f43f5e" },
-  { id: "road-crossing", label: "Crossing", icon: "🚧", color: "#f59e0b" },
+  { id: "medical-point", label: "Medical", icon: "✚", color: "#ef4444" },
   { id: "water-point", label: "Water", icon: "💧", color: "#3b82f6" },
-  { id: "food-point", label: "Food", icon: "🍌", color: "#22c55e" },
-  { id: "mechanical", label: "Mechanic", icon: "🔧", color: "#64748b" },
-  { id: "marshal", label: "Marshal", icon: "🚩", color: "#3b82f6" },
-  { id: "checkpoint", label: "Checkpoint", icon: "⏱️", color: "#a855f7" },
-  { id: "finish", label: "Finish", icon: "🏁", color: "#10b981" },
-  { id: "shelter", label: "Shelter", icon: "⛺", color: "#0ea5e9" },
   { id: "wc", label: "WC", icon: "🚻", color: "#8b5cf6" },
+  { id: "wardrobe", label: "Wardrobe", icon: "👕", color: "#f97316" },
   { id: "parking", label: "Parking", icon: "🅿️", color: "#f59e0b" },
+  { id: "mrs", label: "Mountain Rescue", icon: "⛰️", color: "#0ea5e9" },
   { id: "custom", label: "Other", icon: "★", color: "#94a3b8" },
 ];
 

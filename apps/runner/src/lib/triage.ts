@@ -7,9 +7,17 @@
  * route — it is intentionally simple and conservative, never a substitute for
  * professional care or calling emergency services.
  */
+/**
+ * Localized string for the guided-care triage tree. `bg` and `en` are always
+ * present; other UI languages may add their own key, otherwise the consumer
+ * falls back to English (see the `tr` helper in GuidedCare). The medical triage
+ * copy is only fully authored in bg/en — falling back to English is safer than
+ * shipping an unreviewed machine translation of clinical guidance.
+ */
 export interface LS {
   bg: string;
   en: string;
+  [lang: string]: string | undefined;
 }
 
 export type NodeTone = "normal" | "critical" | "good";

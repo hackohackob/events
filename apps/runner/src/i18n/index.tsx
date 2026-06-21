@@ -1,20 +1,35 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import bg from "./bg.json";
 import en from "./en.json";
+import uk from "./uk.json";
+import tr from "./tr.json";
+import ro from "./ro.json";
+import el from "./el.json";
+import de from "./de.json";
+import it from "./it.json";
+import ru from "./ru.json";
 
-export type Lang = "bg" | "en";
+export type Lang = "bg" | "en" | "uk" | "tr" | "ro" | "el" | "de" | "it" | "ru";
 type Dict = Record<string, string>;
-const DICTS: Record<Lang, Dict> = { bg, en };
+const DICTS: Record<Lang, Dict> = { bg, en, uk, tr, ro, el, de, it, ru };
 
-/** Languages shown in the picker. bg/en ship now; the rest are roadmap
- *  (structure supports them — see i18n README) and render disabled. */
+/** Languages shown in the picker. All ship with a full dictionary.
+ *  Ordered by how likely a speaker of each language is to be in Bulgaria for a
+ *  running event: the two primary languages first (bg, then en as lingua
+ *  franca), then large in-country / neighbouring / tourist communities — the
+ *  Turkish-speaking minority & Turkish visitors, Ukrainian-speaking residents,
+ *  neighbours (Romania, Greece), then German & Italian visitors. Russian is
+ *  kept last by request. */
 export const LANGUAGES: { code: Lang | string; flag: string; label: string; ready: boolean }[] = [
   { code: "bg", flag: "🇧🇬", label: "Български", ready: true },
   { code: "en", flag: "🇬🇧", label: "English", ready: true },
-  { code: "uk", flag: "🇺🇦", label: "Українська", ready: false },
-  { code: "it", flag: "🇮🇹", label: "Italiano", ready: false },
-  { code: "de", flag: "🇩🇪", label: "Deutsch", ready: false },
-  { code: "ro", flag: "🇷🇴", label: "Română", ready: false },
+  { code: "uk", flag: "🇺🇦", label: "Українська", ready: true },
+  { code: "tr", flag: "🇹🇷", label: "Türkçe", ready: true },
+  { code: "ro", flag: "🇷🇴", label: "Română", ready: true },
+  { code: "el", flag: "🇬🇷", label: "Ελληνικά", ready: true },
+  { code: "de", flag: "🇩🇪", label: "Deutsch", ready: true },
+  { code: "it", flag: "🇮🇹", label: "Italiano", ready: true },
+  { code: "ru", flag: "🇷🇺", label: "Русский", ready: true },
 ];
 
 const STORAGE_KEY = "pe_lang";
@@ -30,7 +45,7 @@ const I18nContext = createContext<I18nValue | null>(null);
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Lang | null;
-    return stored === "en" || stored === "bg" ? stored : "bg"; // BG default
+    return stored && stored in DICTS ? stored : "bg"; // BG default
   });
 
   useEffect(() => {

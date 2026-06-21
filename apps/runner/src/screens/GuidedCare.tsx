@@ -45,7 +45,9 @@ export function GuidedCare() {
   }, []);
 
   const node = TRIAGE[nodeId] ?? TRIAGE[TRIAGE_START];
-  const tr = (ls: { bg: string; en: string }) => ls[lang];
+  // The triage copy is authored in bg/en; for any other UI language fall back
+  // to English rather than showing nothing.
+  const tr = (ls: { bg: string; en: string; [k: string]: string | undefined }) => ls[lang] ?? ls.en;
 
   const etaLabel =
     eta.navigating && eta.etaMin != null
