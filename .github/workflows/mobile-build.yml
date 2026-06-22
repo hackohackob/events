@@ -78,6 +78,12 @@ jobs:
           fi
           eas whoami
 
+      # Workspace deps must be installed at the repo root so `eas build` can
+      # evaluate app.config.ts (it imports expo/config + expo/config-plugins)
+      # before the local build sandbox runs. Also applies the patch-package patch.
+      - name: Install project dependencies
+        run: npm ci
+
       - name: Build Android APK (local, no EAS credits)
         working-directory: apps/mobile
         run: |
