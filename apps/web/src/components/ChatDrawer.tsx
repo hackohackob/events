@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, Send, MessageCircle, AlertTriangle, Navigation, MapPin, FileText } from 'lucide-react'
+import { X, Send, MessageCircle, AlertTriangle, Navigation, MapPin } from 'lucide-react'
 import type { EventMessage, EventFeedType } from '@events/contracts'
 import { apiUrl } from '@/env'
+import VoiceMessage from './VoiceMessage'
 
 /** The dashboard's own user id, decoded from the session token (same as the API client). */
 function selfUserId(): string | null {
@@ -208,14 +209,8 @@ function Bubble({ msg, mine, showHeader }: { msg: EventMessage; mine: boolean; s
             : { background: '#142235', borderTopLeftRadius: 5 }}
         >
           {msg.audioUrl ? (
-            <div>
-              <audio controls preload="none" src={mediaSrc(msg.audioUrl)} style={{ height: 32, maxWidth: 220 }} />
-              {msg.transcript && (
-                <div className="flex gap-1.5 mt-1.5 text-xs italic" style={{ color: mine ? 'rgba(4,18,31,0.75)' : '#94a3b8' }}>
-                  <FileText className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                  <span>{msg.transcript}</span>
-                </div>
-              )}
+            <div style={{ minWidth: 180 }}>
+              <VoiceMessage src={mediaSrc(msg.audioUrl)} durationMs={msg.audioDurationMs} transcript={msg.transcript} mine={mine} />
             </div>
           ) : (
             <div className="text-sm leading-snug" style={{ color: mine ? '#04121f' : '#e6eef9', fontWeight: mine ? 500 : 400 }}>{msg.text}</div>

@@ -4,6 +4,7 @@ import { useRef, useCallback, useEffect, useState, useMemo, Fragment } from 'rea
 import MapGL, { Marker, Source, Layer, NavigationControl, Popup } from 'react-map-gl/maplibre'
 import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { MapPin } from 'lucide-react'
 import type { PointOfInterest, POIType } from '@/lib/types'
 import type { MedicState } from '@events/contracts'
 import { POI_CONFIGS } from '@/lib/constants'
@@ -171,19 +172,28 @@ function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string
           closeButton={false}
           onClose={() => setShowPopup(false)}
           className="poi-popup"
-          maxWidth="260px"
+          maxWidth="280px"
         >
-          <div className="px-1 py-0.5" style={{ minWidth: 160 }}>
-            <div className="flex items-center gap-2 mb-1">
-              <div className="flex items-center justify-center rounded-md flex-shrink-0" style={{ width: 22, height: 22, background: config.color }}>
-                <PoiIcon type={poi.type} icon={poi.icon} size={13} color="#fff" />
+          <div style={{ width: 230 }}>
+            {/* Coloured accent strip */}
+            <div style={{ height: 4, background: config.color }} />
+            <div className="px-3.5 pt-3 pb-3">
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: `${config.color}26`, border: `1px solid ${config.color}66` }}>
+                  <PoiIcon type={poi.type} icon={poi.icon} size={18} color={config.color} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[15px] font-bold leading-tight truncate" style={{ color: '#f1f6fc' }}>{poi.name || meta?.label || poi.type}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: config.color }}>{meta?.label ?? poi.type}</div>
+                </div>
               </div>
-              <div className="text-sm font-bold text-slate-100 leading-tight">{poi.name || meta?.label || poi.type}</div>
-            </div>
-            <div className="text-[11px] font-semibold mb-1" style={{ color: config.color }}>{meta?.label ?? poi.type}</div>
-            {poi.description ? <div className="text-xs text-slate-300 mb-1.5">{poi.description}</div> : null}
-            <div className="text-[10px] font-mono" style={{ color: '#64748b' }}>
-              {poi.coordinates[1].toFixed(5)}, {poi.coordinates[0].toFixed(5)}
+              {poi.description ? (
+                <div className="text-[13px] leading-snug mb-2.5 rounded-lg px-2.5 py-2" style={{ color: '#c3d0e0', background: 'rgba(255,255,255,0.04)' }}>{poi.description}</div>
+              ) : null}
+              <div className="flex items-center gap-1.5 text-[11px] font-mono" style={{ color: '#6b7f9a' }}>
+                <MapPin className="w-3 h-3 flex-shrink-0" />
+                {poi.coordinates[1].toFixed(5)}, {poi.coordinates[0].toFixed(5)}
+              </div>
             </div>
           </div>
         </Popup>
@@ -235,7 +245,7 @@ interface GoToModalProps {
 }
 
 function GoToModal({ medic, pois, incidents, onAssign, onClose }: GoToModalProps) {
-  const openIncidents = incidents.filter(i => i.status !== 'resolved')
+  const openIncidents = incidents.filter(i => i.status !== 'resolved' && i.status !== 'closed' && i.status !== 'archived')
   return (
     <div
       style={{
@@ -405,9 +415,15 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
   // Status visuals matched to the mobile app.
   const isResting = medic.status === 'rest'
   const isStationary = medic.status === 'stationary'
-  // Responding to an open incident → flashing blue lights (everyone sees it).
+  // Responding to an *active* incident → flashing blue lights (everyone sees it).
+  // A medic's route can stay tagged with an incident id after that incident is
+  // resolved/closed/archived, so the route-based check is gated on the incident
+  // still being open — otherwise the medic keeps flashing for a dead incident.
   const isResponding =
-    (openIncidents ?? []).some((i) => (i.responders ?? []).includes(medic.medicId)) || Boolean(medic.route?.incidentId)
+    (openIncidents ?? []).some((i) => (i.responders ?? []).includes(medic.medicId)) ||
+    (medic.route?.incidentId
+      ? (openIncidents ?? []).some((i) => i.id === medic.route!.incidentId)
+      : false)
   const isGoingTo = medic.status === 'going_to'
   const isGoingToPoint = !isResponding && isGoingTo
   const flashing = isResponding && online
@@ -1230,7 +1246,7 @@ export default function MapClient({
           medic={m}
           onAssign={onMedicAssign}
           availablePois={availablePois}
-          openIncidents={liveIncidents.filter(i => i.status !== 'resolved')}
+          openIncidents={liveIncidents.filter(i => i.status !== 'resolved' && i.status !== 'closed' && i.status !== 'archived')}
           onSelect={onMedicClick ? () => { focusOn(m.lng, m.lat); onMedicClick(m.medicId) } : undefined}
         />
       ))}

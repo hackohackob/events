@@ -119,3 +119,23 @@ input[type='date']::-webkit-calendar-picker-indicator {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
+/* POI map popup — dark, readable, themed to match the dashboard (the default
+   maplibre popup is white, which made the light text unreadable). */
+.poi-popup .maplibregl-popup-content {
+  background: #0a1320;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+.poi-popup .maplibregl-popup-tip {
+  border-top-color: #0a1320 !important;
+  border-bottom-color: #0a1320 !important;
+}
+.poi-popup .maplibregl-popup-close-button {
+  color: #94a3b8;
+  font-size: 18px;
+  padding: 2px 7px;
+}

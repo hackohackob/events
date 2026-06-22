@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -8,6 +8,7 @@ import { startLocationLoop } from "../location/location-tracker";
 export function SettingsScreen({ onClose }: { onClose: () => void }) {
   const locationIntervalMs = useSettingsStore((s) => s.locationIntervalMs);
   const setLocationIntervalMs = useSettingsStore((s) => s.setLocationIntervalMs);
+  const [intervalOpen, setIntervalOpen] = useState(false);
   const trackOffsetEnabled = useSettingsStore((s) => s.trackOffsetEnabled);
   const setTrackOffsetEnabled = useSettingsStore((s) => s.setTrackOffsetEnabled);
   const trackGradientEnabled = useSettingsStore((s) => s.trackGradientEnabled);
@@ -78,20 +79,39 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
             <Text style={styles.rowTitle}>Update frequency</Text>
             <Text style={styles.rowSub}>How often your location is sent to the command centre.</Text>
           </View>
-          <View style={styles.optionsWrap}>
-            {LOCATION_INTERVAL_OPTIONS.map((opt) => {
-              const active = opt.ms === locationIntervalMs;
-              return (
-                <Pressable
-                  key={opt.ms}
-                  onPress={() => pickInterval(opt.ms)}
-                  style={[styles.optionPill, active && styles.optionPillActive]}
-                >
-                  <Text style={[styles.optionText, active && styles.optionTextActive]}>{opt.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {/* Compact dropdown instead of a long row of pills. */}
+          <Pressable
+            style={styles.dropdownButton}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setIntervalOpen((o) => !o);
+            }}
+          >
+            <Text style={styles.dropdownValue}>
+              {LOCATION_INTERVAL_OPTIONS.find((o) => o.ms === locationIntervalMs)?.label ?? "—"}
+            </Text>
+            <Feather name={intervalOpen ? "chevron-up" : "chevron-down"} size={18} color="#7e90a8" />
+          </Pressable>
+          {intervalOpen ? (
+            <View style={styles.dropdownMenu}>
+              {LOCATION_INTERVAL_OPTIONS.map((opt) => {
+                const active = opt.ms === locationIntervalMs;
+                return (
+                  <Pressable
+                    key={opt.ms}
+                    onPress={() => {
+                      pickInterval(opt.ms);
+                      setIntervalOpen(false);
+                    }}
+                    style={[styles.dropdownItem, active && styles.dropdownItemActive]}
+                  >
+                    <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>{opt.label}</Text>
+                    {active ? <Feather name="check" size={15} color="#34d399" /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           <Text style={styles.note}>
             Lower frequencies save battery. A persistent notification keeps tracking alive in the background.
           </Text>
@@ -158,5 +178,35 @@ const styles = StyleSheet.create({
   optionPillActive: { borderColor: "#34d399", backgroundColor: "rgba(34,197,94,0.16)" },
   optionText: { color: "#94a3b8", fontSize: 13, fontWeight: "800" },
   optionTextActive: { color: "#34d399" },
-  note: { color: "#475569", fontSize: 11.5, fontWeight: "500", lineHeight: 16 },
+  dropdownButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  dropdownValue: { color: "#e7eef8", fontSize: 14.5, fontWeight: "800" },
+  dropdownMenu: {
+    marginTop: 6,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.14)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    overflow: "hidden",
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  dropdownItemActive: { backgroundColor: "rgba(52,211,153,0.1)" },
+  dropdownItemText: { color: "#cbd5e1", fontSize: 14, fontWeight: "700" },
+  dropdownItemTextActive: { color: "#34d399" },
+  note: { color: "#475569", fontSize: 11.5, fontWeight: "500", lineHeight: 16, marginTop: 12 },
 });

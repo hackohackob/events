@@ -58,18 +58,12 @@ const styles = StyleSheet.create({
     textShadowRadius: 2,
     textShadowOffset: { width: 0, height: 1 },
   },
+  // Classic ruler "U-bracket": a baseline with upward end ticks.
   bar: {
-    height: 3,
-    backgroundColor: "rgba(233,242,255,0.85)",
-    borderRadius: 1,
-    borderLeftWidth: 2,
-    borderRightWidth: 2,
-    borderColor: "rgba(233,242,255,0.85)",
-    // little end-caps via bottom border feel
-    borderBottomWidth: 0,
-    shadowColor: "#000",
-    shadowOpacity: 0.5,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
+    height: 6,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderBottomWidth: 1.5,
+    borderColor: "rgba(233,242,255,0.92)",
   },
 });

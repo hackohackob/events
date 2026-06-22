@@ -226,6 +226,9 @@ async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<v
       (location) => {
         // Skip anything the task fallback (or a previous watch) already sent.
         if (location.timestamp <= lastDeliveredFixTimestamp) return;
+        // Skip a stale OS-cached fix delivered on unlock (the position from when
+        // the screen locked) — a current fix follows within the watch interval.
+        if (Date.now() - location.timestamp > 25_000) return;
         lastDeliveredFixTimestamp = location.timestamp;
         lastDeliveredAt = Date.now();
         void sendLocation(location);
@@ -296,9 +299,17 @@ export async function sendCurrentLocationNow(): Promise<void> {
       debugLog("location", "warn", "one-shot send skipped — no foreground permission");
       return;
     }
-    const location =
-      (await ExpoLocation.getLastKnownPositionAsync()) ??
-      (await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced }));
+    // Prefer the OS-cached fix only when it's actually fresh. On unlock the
+    // last-known position is the one captured when the screen locked (possibly
+    // far behind, after travelling locked), so sending it teleports the medic to
+    // the lock spot before the real position arrives. If the cache is stale, get
+    // a current fix instead.
+    const FRESH_ENOUGH_MS = 20_000;
+    const lastKnown = await ExpoLocation.getLastKnownPositionAsync();
+    const fresh = lastKnown && Date.now() - lastKnown.timestamp <= FRESH_ENOUGH_MS;
+    const location = fresh
+      ? lastKnown
+      : await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced });
     if (location) {
       await sendLocation(location);
     }

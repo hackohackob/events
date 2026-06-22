@@ -63,15 +63,16 @@ export function ActiveNavOverlay() {
         ) : null}
       </View>
 
-      {/* End navigation — compact glassy pill, bottom-right above the status bar. */}
+      {/* End navigation — bold red action, bottom-right above the status bar. */}
       <Pressable
         style={({ pressed }) => [styles.endButton, pressed && styles.endButtonPressed]}
         onPress={() => {
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           stop();
         }}
+        hitSlop={8}
       >
-        <Feather name="x" size={16} color="#fecaca" />
+        <View style={styles.endStopIcon} />
         <Text style={styles.endText}>End</Text>
       </Pressable>
 
@@ -216,22 +217,23 @@ const styles = StyleSheet.create({
     bottom: NAV_BOTTOM_INSET + STATUS_BAR_HEIGHT + 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 15,
-    borderRadius: 999,
-    backgroundColor: "rgba(40,12,14,0.92)",
+    gap: 9,
+    paddingVertical: 12,
+    paddingHorizontal: 19,
+    borderRadius: 17,
+    backgroundColor: "#ef4444",
     borderWidth: 1,
-    borderColor: "rgba(248,113,113,0.55)",
-    shadowColor: "#000",
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 12,
+    borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#ef4444",
+    shadowOpacity: 0.55,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 14,
     zIndex: 30,
   },
-  endButtonPressed: { backgroundColor: "rgba(127,29,29,0.95)" },
-  endText: { color: "#fecaca", fontSize: 14, fontWeight: "900", letterSpacing: 0.3 },
+  endButtonPressed: { backgroundColor: "#dc2626", transform: [{ scale: 0.96 }] },
+  endStopIcon: { width: 13, height: 13, borderRadius: 3.5, backgroundColor: "#fff" },
+  endText: { color: "#ffffff", fontSize: 15, fontWeight: "900", letterSpacing: 0.4 },
   statusWrap: {
     position: "absolute",
     left: 12,

@@ -250,6 +250,13 @@ export const useNavStore = create<NavState>((set, get) => ({
     const route = state.routes.find((r) => r.id === state.selectedRouteId);
     if (!route || route.geometry.length < 2) return;
 
+    // Drop stale / out-of-order fixes. When the screen locks, the OS buffers GPS
+    // updates and replays the whole backlog on unlock; with real fix timestamps
+    // those are all older than what we've already processed, so we skip them and
+    // keep only the newest — no second-by-second catch-up animation.
+    const fixAt = fix.at ?? Date.now();
+    if (state.lastFix && fixAt <= state.lastFix.at) return;
+
     const here: LatLng = { lat: fix.lat, lng: fix.lng };
     const snap = snapToPolyline(here, route.geometry);
     if (!snap) return;
@@ -267,7 +274,7 @@ export const useNavStore = create<NavState>((set, get) => ({
     const bearing = bearingDegrees(toLatLng(route.geometry[snap.segmentIndex]), toLatLng(route.geometry[aheadIndex]));
 
     // Speed from successive fixes.
-    const now = fix.at ?? Date.now();
+    const now = fixAt;
     let speedMps: number | null = state.progress?.speedMps ?? null;
     if (state.lastFix) {
       const dt = (now - state.lastFix.at) / 1000;

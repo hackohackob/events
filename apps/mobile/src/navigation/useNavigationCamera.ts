@@ -5,6 +5,7 @@ import type { CameraRef } from "@maplibre/maplibre-react-native";
 import { useNavStore } from "./nav-store";
 import { useLocationStatus } from "../debug/location-status";
 import { sendNavLocationFix } from "../location/location-tracker";
+import { distanceMeters } from "./geo";
 import { debugLog } from "../debug/debug-log";
 
 const SCREEN_H = Dimensions.get("window").height;
@@ -30,6 +31,7 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
   const fix = useLocationStatus((s) => s.lastFix);
   const enteredActive = useRef(false);
   const lastCenter = useRef<[number, number] | null>(null);
+  const lastCameraAt = useRef(0);
 
   // High-frequency foreground watcher while navigating. The background task
   // reports on the configured interval (30s+) — fine for the dashboard, useless
@@ -51,7 +53,10 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
           lat: location.coords.latitude,
           lng: location.coords.longitude,
           accuracy: location.coords.accuracy ?? undefined,
-          at: Date.now(),
+          // Real GPS fix time (not Date.now): on unlock the OS replays a backlog
+          // of buffered fixes, and only the real timestamps let the nav store
+          // recognise and skip the stale ones instead of animating through them.
+          at: location.timestamp,
         });
         sendNavLocationFix(location);
       },
@@ -79,10 +84,25 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
   // user re-centers.
   useEffect(() => {
     if (phase !== "active" || !progress) return;
-    lastCenter.current = [progress.snapped.lng, progress.snapped.lat];
+    const center: [number, number] = [progress.snapped.lng, progress.snapped.lat];
     const northUp = navCameraMode === "north";
+
+    // Adaptive easing: glide over roughly the gap since the last camera move, so
+    // movement stays continuous whether fixes arrive every 1s or every 4s
+    // (instead of easing 1s then stalling). A big positional jump — e.g. the
+    // single catch-up fix after the screen was locked for a while — snaps fast
+    // rather than flying across the map for seconds.
+    const now = Date.now();
+    const gap = lastCameraAt.current ? now - lastCameraAt.current : 1000;
+    const jumpM = lastCenter.current
+      ? distanceMeters({ lng: lastCenter.current[0], lat: lastCenter.current[1] }, { lng: center[0], lat: center[1] })
+      : 0;
+    const duration = jumpM > 80 ? 350 : Math.min(4000, Math.max(700, gap));
+    lastCameraAt.current = now;
+    lastCenter.current = center;
+
     cameraRef.current?.easeTo({
-      center: [progress.snapped.lng, progress.snapped.lat],
+      center,
       zoom: navZoomOverride ?? NAV_ZOOM,
       pitch: northUp ? 0 : NAV_PITCH,
       bearing: northUp ? 0 : progress.bearing,
@@ -91,9 +111,7 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
       padding: northUp
         ? { top: 0, bottom: 0, left: 0, right: 0 }
         : { top: Math.round(SCREEN_H * 0.46), bottom: 120, left: 0, right: 0 },
-      // Match the GPS cadence (~1 fix/s) so the camera glides continuously
-      // instead of easing for 700ms then stalling until the next fix.
-      duration: 1000,
+      duration,
     });
   }, [phase, progress, navCameraMode, navZoomOverride, recenterTick, cameraRef]);
 

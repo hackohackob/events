@@ -48,6 +48,7 @@ import { MedicDot } from "./MedicDot";
 import { SelectionPulse } from "./SelectionPulse";
 import { ScaleBar } from "./ScaleBar";
 import { EventChatScreen } from "../chat/EventChatScreen";
+import { ChatTabBadge } from "../chat/ChatTabBadge";
 import { useEventChatStore } from "../chat/event-chat-store";
 import type { EventMessageDto } from "../chat/event-chat-api";
 import { AssignDestinationBar } from "./AssignDestinationBar";
@@ -258,6 +259,7 @@ interface LayerVisibility {
   participantsHeatmap: boolean;
   paramedics: boolean;
   incidents: boolean;
+  pois: boolean;
 }
 
 /** Participants display: hidden, individual dots, or aggregated heatmap. */
@@ -1479,6 +1481,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     participantsHeatmap: false,
     paramedics: true,
     incidents: true,
+    pois: true,
   });
   const [trackVisibility, setTrackVisibility] = useState<TrackVisibility>({});
   const [heatWeightScale, setHeatWeightScale] = useState(0.12);
@@ -2031,10 +2034,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         if (marker.type === "incident") {
           return layerVisibility.incidents;
         }
-        // infrastructure (POIs) — always visible
-        return true;
+        // infrastructure (POIs)
+        return layerVisibility.pois;
       }),
-    [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, nonCurrentMarkers, navPhase, sessionUserId],
+    [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, layerVisibility.pois, nonCurrentMarkers, navPhase, sessionUserId],
   );
   const orderedVisibleMarkers = useMemo(
     () =>
@@ -3425,6 +3428,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             </View>
           </Pressable>
 
+          <Pressable style={styles.layerRow} onPress={() => toggleLayer("pois")}>
+            <Text style={styles.layerLabel}>Points of interest</Text>
+            <View style={[styles.switchTrack, layerVisibility.pois ? styles.switchTrackOn : null]}>
+              <View style={[styles.switchKnob, layerVisibility.pois ? styles.switchKnobOn : null]} />
+            </View>
+          </Pressable>
+
           {/* Participants — compact 3-state, inline under overlays. */}
           <View style={styles.layerRow}>
             <Text style={styles.layerLabel}>Participants</Text>
@@ -4001,18 +4011,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             { tab: "chat", label: "Chat", icon: "message-circle" },
           ] as const).map(({ tab, label, icon }) => {
             const active = activeTab === tab;
+            const hasUnread = tab === "chat" && chatUnread > 0;
             return (
               <Pressable key={tab} style={styles.bottomMenuItem} onPress={() => setActiveTab(tab)}>
                 <View style={[styles.bottomMenuAccent, active && styles.bottomMenuAccentActive]} />
                 <View>
-                  <Feather name={icon} size={20} color={active ? "#34d399" : "#5b6b80"} />
-                  {tab === "chat" && chatUnread > 0 ? (
-                    <View style={styles.chatBadge}>
-                      <Text style={styles.chatBadgeText}>{chatUnread > 9 ? "9+" : chatUnread}</Text>
-                    </View>
-                  ) : null}
+                  <Feather name={icon} size={20} color={active ? "#34d399" : hasUnread ? "#67e8c0" : "#5b6b80"} />
+                  {hasUnread ? <ChatTabBadge count={chatUnread} /> : null}
                 </View>
-                <Text style={[styles.bottomMenuText, active && styles.bottomMenuTextActive]}>{label}</Text>
+                <Text style={[styles.bottomMenuText, active && styles.bottomMenuTextActive, !active && hasUnread && styles.bottomMenuTextUnread]}>{label}</Text>
               </Pressable>
             );
           })}
@@ -4145,7 +4152,8 @@ const styles = StyleSheet.create({
   scaleBar: {
     position: "absolute",
     left: 14,
-    bottom: BOTTOM_BAR_HEIGHT + 18,
+    // Sit above the offline-download button (bottom-left) so they don't overlap.
+    bottom: BOTTOM_BAR_HEIGHT + 64,
   },
   clearDestBtn: {
     flexDirection: "row",
@@ -5312,6 +5320,9 @@ const styles = StyleSheet.create({
   },
   bottomMenuTextActive: {
     color: "#34d399",
+  },
+  bottomMenuTextUnread: {
+    color: "#67e8c0",
   },
   chatBadge: {
     position: "absolute",
