@@ -550,5 +550,485 @@
     ],
     "id": "e345f07d-7290-4084-bac2-33560b2ddb2c",
     "updatedAt": "2026-06-11T06:36:40.293Z"
+  },
+  {
+    "title": "Dehydration",
+    "category": "metabolic",
+    "keywords": [
+      "thirst",
+      "dry mouth",
+      "dark urine",
+      "dizzy",
+      "fatigue",
+      "headache",
+      "cramps",
+      "fluid"
+    ],
+    "summary": "Thirst, dark urine, fatigue and dizziness — rehydrate gradually.",
+    "signs": [
+      "Dry mouth/lips, intense thirst",
+      "Dark, scant urine",
+      "Dizziness, headache, fatigue",
+      "Fast pulse"
+    ],
+    "actions": [
+      "Move to shade, stop activity, sit/lie down",
+      "Sip oral rehydration / electrolyte fluids gradually",
+      "Cool the skin; loosen clothing",
+      "Recheck in 15–20 min; escalate if not improving"
+    ],
+    "redFlags": [
+      "Confusion or fainting",
+      "No urine output",
+      "Vomiting everything back up"
+    ],
+    "id": "625bb45c-6c3f-432e-80ee-325359e56ec8",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Exercise-associated muscle cramps",
+    "category": "metabolic",
+    "keywords": [
+      "cramp",
+      "muscle cramp",
+      "calf",
+      "spasm",
+      "charley horse",
+      "twinge",
+      "tight muscle"
+    ],
+    "summary": "Sudden painful muscle spasm — stretch, hydrate, replace salts.",
+    "signs": [
+      "Sudden, visible/palpable muscle knot",
+      "Severe localized pain",
+      "Often calves/hamstrings/quads"
+    ],
+    "actions": [
+      "Gently stretch and hold the affected muscle",
+      "Light massage once the spasm eases",
+      "Rehydrate with electrolyte fluids",
+      "Rest before returning to activity"
+    ],
+    "redFlags": [
+      "Whole-body cramping",
+      "Dark 'cola' urine (rhabdo)",
+      "Cramps with confusion (check sodium/heat)"
+    ],
+    "id": "384df164-678b-45bf-948c-70f356fdf84e",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Fainting (vasovagal syncope)",
+    "category": "neuro",
+    "keywords": [
+      "faint",
+      "passed out",
+      "collapse",
+      "lightheaded",
+      "dizzy",
+      "blacked out",
+      "pale",
+      "syncope"
+    ],
+    "summary": "Brief LOC with quick recovery — lay flat, raise the legs.",
+    "signs": [
+      "Sudden brief collapse",
+      "Pale, sweaty, slow pulse beforehand",
+      "Rapid recovery once supine"
+    ],
+    "actions": [
+      "Lay flat, raise legs ~30 cm",
+      "Loosen tight clothing, ensure fresh air",
+      "Keep down until fully recovered, then sit slowly",
+      "Give fluids once alert; find/treat the cause"
+    ],
+    "redFlags": [
+      "No recovery within 1–2 min",
+      "Chest pain or palpitations before",
+      "Injury from the fall / head strike"
+    ],
+    "id": "34009317-f001-4278-948e-3340227330a8",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Hyperventilation / panic attack",
+    "category": "airway",
+    "keywords": [
+      "hyperventilate",
+      "panic",
+      "anxiety",
+      "tingling",
+      "rapid breathing",
+      "can't breathe",
+      "pins and needles"
+    ],
+    "summary": "Fast breathing, tingling, anxiety — calm and slow the breathing.",
+    "signs": [
+      "Very rapid, shallow breathing",
+      "Tingling in hands/around mouth",
+      "Chest tightness, fear, dizziness"
+    ],
+    "actions": [
+      "Reassure calmly; move away from the crowd",
+      "Coach slow breathing (in 4s, out 6s)",
+      "Rule out asthma/cardiac/allergic cause first",
+      "Stay until breathing and pulse settle"
+    ],
+    "redFlags": [
+      "Known asthmatic or cardiac history",
+      "Blue lips, true shortness of breath",
+      "Doesn't settle with coaching"
+    ],
+    "id": "24e4b8b9-8f4b-4bda-b35d-39ed446dd6c6",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Nosebleed (epistaxis)",
+    "category": "trauma",
+    "keywords": [
+      "nosebleed",
+      "nose bleed",
+      "epistaxis",
+      "bleeding nose",
+      "blood from nose"
+    ],
+    "summary": "Pinch the soft nose, lean forward, 10–15 min.",
+    "signs": [
+      "Bleeding from one/both nostrils",
+      "Often after a knock or in dry heat"
+    ],
+    "actions": [
+      "Sit up, head tipped slightly forward",
+      "Pinch the soft part of the nose firmly for 10–15 min",
+      "Breathe through the mouth; don't release early",
+      "Apply a cold pack to the bridge of the nose"
+    ],
+    "redFlags": [
+      "Bleeding >20–30 min despite pressure",
+      "Heavy bleed after head/face trauma",
+      "On blood thinners"
+    ],
+    "id": "7b27a047-a327-4c97-bd20-6e51aafa2a4e",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Sprain / strain",
+    "category": "trauma",
+    "keywords": [
+      "sprain",
+      "strain",
+      "twisted",
+      "rolled ankle",
+      "pulled muscle",
+      "swelling",
+      "joint",
+      "wrist",
+      "knee"
+    ],
+    "summary": "Joint/muscle injury — rest, ice, compression, elevation.",
+    "signs": [
+      "Pain, swelling, bruising around a joint/muscle",
+      "Reduced movement",
+      "Tender to touch"
+    ],
+    "actions": [
+      "Rest — stop activity, protect the limb",
+      "Ice 15–20 min (cloth between ice and skin)",
+      "Compress with a bandage (not too tight)",
+      "Elevate above heart level; review weight-bearing"
+    ],
+    "redFlags": [
+      "Obvious deformity (suspect fracture)",
+      "Cannot bear weight / use the limb",
+      "Numb, cold or blue beyond the injury"
+    ],
+    "id": "55fa068b-b674-4ccd-aa68-f0a15f8abdd5",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Dislocated shoulder",
+    "category": "trauma",
+    "keywords": [
+      "dislocation",
+      "shoulder",
+      "out of socket",
+      "arm stuck",
+      "deformity",
+      "joint"
+    ],
+    "summary": "Arm held away from body, squared-off shoulder — immobilize, don't force.",
+    "signs": [
+      "Severe shoulder pain after fall/throw",
+      "Arm held slightly out, resists movement",
+      "Squared-off / flat shoulder shape"
+    ],
+    "actions": [
+      "Support the arm in the position found",
+      "Do NOT attempt to relocate it in the field",
+      "Pad and sling/immobilize; cold pack for pain",
+      "Arrange transport for reduction + X-ray"
+    ],
+    "redFlags": [
+      "Numb/cold hand, weak pulse at wrist",
+      "Suspected fracture too",
+      "Repeated dislocations"
+    ],
+    "id": "8ec532c7-bac7-4db8-adc3-75ad1349ee13",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Eye injury / foreign body",
+    "category": "trauma",
+    "keywords": [
+      "eye",
+      "foreign body",
+      "grit",
+      "dust",
+      "scratch",
+      "vision",
+      "chemical",
+      "splash"
+    ],
+    "summary": "Irritation or trauma to the eye — flush, don't rub, cover.",
+    "signs": [
+      "Pain, watering, redness",
+      "Sensation of something in the eye",
+      "Blurred vision, light sensitivity"
+    ],
+    "actions": [
+      "Loose grit/chemical: flush with clean water/saline 10+ min",
+      "Don't rub; don't remove an embedded object",
+      "Cover both eyes lightly to rest movement",
+      "Refer for chemical, penetrating, or vision-loss injuries"
+    ],
+    "redFlags": [
+      "Penetrating object — leave in place",
+      "Vision loss",
+      "Chemical splash"
+    ],
+    "id": "4e6c3222-d406-470c-a2b5-b67f70b4b0ac",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Sunburn",
+    "category": "environmental",
+    "keywords": [
+      "sunburn",
+      "burn",
+      "red skin",
+      "uv",
+      "blisters",
+      "sun"
+    ],
+    "summary": "Red, hot, sore skin from sun — cool, hydrate, cover.",
+    "signs": [
+      "Red, warm, tender skin",
+      "Possible blistering",
+      "Often with mild heat illness"
+    ],
+    "actions": [
+      "Get out of the sun, cool the skin (cool water/compress)",
+      "Hydrate; give simple analgesia if appropriate",
+      "Cover with light clothing; don't burst blisters",
+      "Aftersun / aloe for comfort"
+    ],
+    "redFlags": [
+      "Widespread blistering",
+      "Signs of heat exhaustion/stroke",
+      "Fever or feeling very unwell"
+    ],
+    "id": "8ed8ecb8-f038-48d8-a73a-26babe37b002",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Insect sting / bite",
+    "category": "allergy",
+    "keywords": [
+      "sting",
+      "bite",
+      "bee",
+      "wasp",
+      "hornet",
+      "swelling",
+      "itch",
+      "insect"
+    ],
+    "summary": "Local pain/swelling — remove sting, cool; watch for allergy.",
+    "signs": [
+      "Sharp pain then local swelling/redness",
+      "Itching at the site"
+    ],
+    "actions": [
+      "Scrape out a bee sting (don't squeeze the sac)",
+      "Wash the area; apply a cold pack",
+      "Antihistamine for itch if available/appropriate",
+      "Watch 15–30 min for spreading/allergic signs"
+    ],
+    "redFlags": [
+      "Facial/lip/tongue swelling or wheeze → treat as anaphylaxis",
+      "Stung in the mouth/throat",
+      "Many stings"
+    ],
+    "id": "66ef5231-4b42-4c5d-ab19-b0ac705ab5b0",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Diabetic high blood sugar (hyperglycemia)",
+    "category": "metabolic",
+    "keywords": [
+      "hyperglycemia",
+      "high blood sugar",
+      "diabetic",
+      "thirsty",
+      "frequent urination",
+      "drowsy",
+      "fruity breath",
+      "dka"
+    ],
+    "summary": "Thirst, drowsiness, fruity breath in a diabetic — needs medical care.",
+    "signs": [
+      "Very thirsty, frequent urination",
+      "Drowsy/confused, warm dry skin",
+      "Deep breathing, fruity-smelling breath"
+    ],
+    "actions": [
+      "Do NOT give sugar (opposite of a hypo)",
+      "Encourage water if alert and able to swallow",
+      "Let them take their own insulin if they can",
+      "Arrange urgent transport — can deteriorate fast"
+    ],
+    "redFlags": [
+      "Drowsy/unresponsive",
+      "Vomiting",
+      "Deep rapid breathing (DKA)"
+    ],
+    "id": "437d2637-6552-496a-b0fa-3472c7e577b0",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Abdominal pain / side stitch",
+    "category": "other",
+    "keywords": [
+      "stomach",
+      "abdominal",
+      "stitch",
+      "side pain",
+      "cramp",
+      "belly",
+      "gut"
+    ],
+    "summary": "Most stitches are benign — but screen for serious abdominal pain.",
+    "signs": [
+      "Stitch: sharp upper-side pain on exertion, eases with rest",
+      "Serious: constant/worsening pain, tenderness, vomiting"
+    ],
+    "actions": [
+      "Stitch: slow down, deep breathe, stretch the side, press the area",
+      "Rest and rehydrate",
+      "Serious pain: keep nil by mouth, position of comfort",
+      "Escalate persistent, severe, or localized pain"
+    ],
+    "redFlags": [
+      "Rigid/very tender abdomen",
+      "Pain with fainting or blood",
+      "Pain after abdominal trauma"
+    ],
+    "id": "1b7ca660-662d-4f92-b133-6ca4a1ca4505",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Frostbite / cold injury",
+    "category": "environmental",
+    "keywords": [
+      "frostbite",
+      "cold",
+      "numb",
+      "white fingers",
+      "frozen",
+      "extremities",
+      "chilblains"
+    ],
+    "summary": "Numb, white/waxy skin on extremities — rewarm gently, don't rub.",
+    "signs": [
+      "Numb, hard, white/waxy skin",
+      "Fingers, toes, ears, nose",
+      "Pain/blisters on rewarming"
+    ],
+    "actions": [
+      "Get into shelter/warmth; remove wet/tight items",
+      "Rewarm gently with body heat or warm (not hot) water",
+      "Do NOT rub the area or use direct heat",
+      "Don't rewarm if refreezing is possible; protect and transport"
+    ],
+    "redFlags": [
+      "Blisters or blackened skin",
+      "Whole-body cold (hypothermia)",
+      "Cannot keep the part thawed"
+    ],
+    "id": "a120532e-a162-40b6-b998-5332016b5272",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Knocked-out tooth (dental)",
+    "category": "trauma",
+    "keywords": [
+      "tooth",
+      "dental",
+      "knocked out",
+      "mouth",
+      "avulsed",
+      "broken tooth",
+      "lip"
+    ],
+    "summary": "Handle by the crown, keep moist, see a dentist fast.",
+    "signs": [
+      "Tooth fully out of socket after impact",
+      "Bleeding gum / lip injury"
+    ],
+    "actions": [
+      "Hold the tooth by the crown, never the root",
+      "If clean, reinsert gently; otherwise store in milk/saliva",
+      "Bite on gauze to control bleeding",
+      "Seek dental care within ~30–60 min for best result"
+    ],
+    "redFlags": [
+      "Suspected jaw fracture",
+      "Inhaled/swallowed tooth",
+      "Heavy uncontrolled bleeding"
+    ],
+    "id": "f5c3403e-d648-4dca-abfd-6e94d68b9b44",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
+  },
+  {
+    "title": "Minor wound / laceration",
+    "category": "trauma",
+    "keywords": [
+      "cut",
+      "graze",
+      "laceration",
+      "wound",
+      "abrasion",
+      "scrape",
+      "bleeding",
+      "road rash"
+    ],
+    "summary": "Clean, control bleeding, dress — decide if it needs closure.",
+    "signs": [
+      "Break in the skin with minor bleeding",
+      "Grit/debris in grazes"
+    ],
+    "actions": [
+      "Direct pressure to stop bleeding",
+      "Clean with water/saline once bleeding controlled",
+      "Cover with a clean non-stick dressing",
+      "Refer for stitches if deep, gaping, or over a joint"
+    ],
+    "redFlags": [
+      "Spurting/uncontrolled bleeding → treat as severe bleeding",
+      "Deep wound to hand/face/joint",
+      "Signs of infection later"
+    ],
+    "id": "466c76c5-a1c2-4c57-ab5b-984d2e2cbbb3",
+    "updatedAt": "2026-06-21T22:07:41.175Z"
   }
 ]

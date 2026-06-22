@@ -3,6 +3,7 @@ import { ConfigModule } from "@nestjs/config";
 import { AssignmentsModule } from "./assignments/assignments.module";
 import { AuthModule } from "./auth/auth.module";
 import { CommonModule } from "./common/common.module";
+import { EventChatModule } from "./event-chat/event-chat.module";
 import { ExampleDataModule } from "./example-data/example-data.module";
 import { EventsModule } from "./events/events.module";
 import { FieldGuideModule } from "./field-guide/field-guide.module";
@@ -29,6 +30,7 @@ import { UsersModule } from "./users/users.module";
     InfraModule,
     HealthModule,
     AuthModule,
+    EventChatModule,
     EventsModule,
     FieldGuideModule,
     EventUsersModule,

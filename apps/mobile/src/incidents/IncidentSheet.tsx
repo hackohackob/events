@@ -610,17 +610,24 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                     <View key={m.id} style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
                       {!mine ? <Text style={styles.bubbleAuthor}>{m.authorName}</Text> : null}
                       {m.audioUrl ? (
-                        <Pressable style={styles.voiceRow} onPress={() => toggleVoicePlayback(m.id, m.audioUrl!)}>
-                          <View style={[styles.voicePlayBtn, playing && styles.voicePlayBtnActive]}>
-                            <Feather name={playing ? "pause" : "play"} size={13} color="#04121f" />
-                          </View>
-                          <View style={styles.voiceWave}>
-                            {[7, 12, 9, 14, 8, 12, 6, 10, 13, 8].map((h, i) => (
-                              <View key={i} style={[styles.voiceWaveBar, { height: h }, playing && styles.voiceWaveBarActive]} />
-                            ))}
-                          </View>
-                          <Text style={styles.voiceDuration}>{formatVoiceDuration(m.audioDurationMs)}</Text>
-                        </Pressable>
+                        <>
+                          <Pressable style={styles.voiceRow} onPress={() => toggleVoicePlayback(m.id, m.audioUrl!)}>
+                            <View style={[styles.voicePlayBtn, playing && styles.voicePlayBtnActive]}>
+                              <Feather name={playing ? "pause" : "play"} size={13} color="#04121f" />
+                            </View>
+                            <View style={styles.voiceWave}>
+                              {[7, 12, 9, 14, 8, 12, 6, 10, 13, 8].map((h, i) => (
+                                <View key={i} style={[styles.voiceWaveBar, { height: h }, playing && styles.voiceWaveBarActive]} />
+                              ))}
+                            </View>
+                            <Text style={styles.voiceDuration}>{formatVoiceDuration(m.audioDurationMs)}</Text>
+                          </Pressable>
+                          {m.transcript ? (
+                            <Text style={styles.voiceTranscript}>
+                              <Feather name="file-text" size={10} color="#64748b" /> {m.transcript}
+                            </Text>
+                          ) : null}
+                        </>
                       ) : (
                         <Text style={styles.bubbleText}>{m.text}</Text>
                       )}
@@ -931,6 +938,7 @@ const styles = StyleSheet.create({
   voiceWaveBar: { width: 3, borderRadius: 2, backgroundColor: "rgba(148,163,184,0.55)" },
   voiceWaveBarActive: { backgroundColor: "#34d399" },
   voiceDuration: { color: "#9fb3cc", fontSize: 11, fontWeight: "800" },
+  voiceTranscript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic", marginTop: 6, maxWidth: 230 },
   composer: { flexDirection: "row", gap: 8, alignItems: "center" },
   composerInput: {
     flex: 1,

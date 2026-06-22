@@ -37,23 +37,37 @@ export class FieldGuideService implements OnModuleInit {
   private cases: FieldGuideCase[] = [];
 
   async onModuleInit() {
+    let existing: FieldGuideCase[] = [];
     try {
       const raw = await fs.readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as FieldGuideCase[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        this.cases = parsed;
-        return;
-      }
+      if (Array.isArray(parsed)) existing = parsed;
     } catch {
-      // missing or corrupt → fall through to seed
+      // missing or corrupt → start from the seed only
     }
-    this.cases = SEED_FIELD_GUIDE.map((entry) => ({
+
+    // Merge in any seed cases not already present (matched by normalized title).
+    // The list is JSON-file-backed and may already exist in production, so a
+    // plain "use the file if present" would never surface newly-added reference
+    // content. Hand-edited cases are preserved; only genuinely new ones append.
+    const haveTitles = new Set(existing.map((c) => c.title.trim().toLowerCase()));
+    const additions = SEED_FIELD_GUIDE.filter(
+      (entry) => !haveTitles.has(entry.title.trim().toLowerCase()),
+    ).map((entry) => ({
       ...entry,
       id: randomUUID(),
       updatedAt: new Date().toISOString(),
     }));
-    await this.persist();
-    this.logger.log(`Seeded field guide with ${this.cases.length} cases`);
+
+    this.cases = [...existing, ...additions];
+    if (existing.length === 0 || additions.length > 0) {
+      await this.persist();
+      this.logger.log(
+        existing.length === 0
+          ? `Seeded field guide with ${this.cases.length} cases`
+          : `Merged ${additions.length} new field-guide case(s); ${this.cases.length} total`,
+      );
+    }
   }
 
   private async persist(): Promise<void> {

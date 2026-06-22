@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { ForbiddenException, Inject, Injectable, NotFoundException, OnModuleInit, forwardRef } from "@nestjs/common";
 import { IncidentStatus, UserRole, IncidentCategory, INCIDENT_CATEGORY_SEVERITY } from "@events/contracts";
 import { DbService } from "../infra/db.service";
+import { EventChatService } from "../event-chat/event-chat.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { MedicsService } from "../medics/medics.service";
@@ -58,6 +59,8 @@ export interface IncidentMessageRecord {
   /** Voice message attachment (server-relative URL). */
   audioUrl?: string;
   audioDurationMs?: number;
+  /** Speech-to-text transcript of a voice note, when available. */
+  transcript?: string;
   createdAt: string;
 }
 
@@ -143,6 +146,7 @@ export class IncidentsService implements OnModuleInit {
     private readonly db: DbService,
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
+    private readonly eventChat: EventChatService,
     // forwardRef: MedicsModule already imports IncidentsModule (its controller
     // needs IncidentsService), so the two modules reference each other.
     @Inject(forwardRef(() => MedicsService)) private readonly medicsService: MedicsService,
@@ -228,6 +232,7 @@ export class IncidentsService implements OnModuleInit {
     `);
     await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS audio_url TEXT`);
     await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER`);
+    await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS transcript TEXT`);
 
     // Legacy PostGIS `location` geometry column may exist with a NOT NULL
     // constraint from an older schema. No current code populates it, so relax
@@ -398,6 +403,19 @@ export class IncidentsService implements OnModuleInit {
     });
 
     void this.systemMessage(eventId, id, `🚨 Reported by ${reporterName}`);
+
+    // Event feed: surface the new incident in the shared team chat.
+    void this.eventChat
+      .postSystem(eventId, "incident", `${incident.name} — ${incident.type}`, {
+        incidentId: incident.id,
+        incidentName: incident.name,
+        incidentType: incident.type,
+        severity: incident.severity,
+        reporterName,
+        lat: incident.lat,
+        lng: incident.lng,
+      })
+      .catch(() => undefined);
 
     // Alarm: every device registered to the event (medics + dashboard) gets pinged.
     void this.notificationsService.sendToEvent(
@@ -664,6 +682,17 @@ export class IncidentsService implements OnModuleInit {
 
     void this.resolveReporterName(eventId, paramedicId).then((medicName) => {
       void this.systemMessage(eventId, incidentId, `🚑 ${medicName} dispatched to the incident`);
+      // Event feed: surface the response in the shared team chat.
+      void this.eventChat
+        .postSystem(eventId, "response", `${medicName} responding to ${incident.name}`, {
+          incidentId: incident.id,
+          incidentName: incident.name,
+          medicId: paramedicId,
+          medicName,
+          lat: incident.lat,
+          lng: incident.lng,
+        })
+        .catch(() => undefined);
     });
     // Broadcast the full record so every client refreshes the responders list.
     await this.redisService.publish(`event:${eventId}:incidents`, {
@@ -904,6 +933,7 @@ export class IncidentsService implements OnModuleInit {
       photo_url: string | null;
       audio_url: string | null;
       audio_duration_ms: number | null;
+      transcript: string | null;
       created_at: string;
     }>(
       `SELECT * FROM incident_messages WHERE incident_id = $1 AND event_id = $2 ORDER BY created_at ASC`,
@@ -919,6 +949,7 @@ export class IncidentsService implements OnModuleInit {
       photoUrl: r.photo_url ?? undefined,
       audioUrl: r.audio_url ?? undefined,
       audioDurationMs: r.audio_duration_ms ?? undefined,
+      transcript: r.transcript ?? undefined,
       createdAt: toIso(r.created_at) ?? new Date().toISOString(),
     }));
   }
@@ -927,7 +958,7 @@ export class IncidentsService implements OnModuleInit {
     eventId: string,
     incidentId: string,
     authorId: string,
-    input: { text: string; photoUrl?: string; audioUrl?: string; audioDurationMs?: number },
+    input: { text: string; photoUrl?: string; audioUrl?: string; audioDurationMs?: number; transcript?: string },
   ): Promise<IncidentMessageRecord> {
     const { rows: incidentRows } = await this.db.query<{ id: string }>(
       `SELECT id FROM incidents WHERE id = $1 AND event_id = $2`,
@@ -948,9 +979,9 @@ export class IncidentsService implements OnModuleInit {
     const id = randomUUID();
     const now = new Date().toISOString();
     await this.db.query(
-      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, audio_url, audio_duration_ms, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, input.audioUrl ?? null, input.audioDurationMs ?? null, now],
+      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, audio_url, audio_duration_ms, transcript, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, input.audioUrl ?? null, input.audioDurationMs ?? null, input.transcript ?? null, now],
     );
 
     const message: IncidentMessageRecord = {
@@ -963,6 +994,7 @@ export class IncidentsService implements OnModuleInit {
       photoUrl: input.photoUrl,
       audioUrl: input.audioUrl,
       audioDurationMs: input.audioDurationMs,
+      transcript: input.transcript,
       createdAt: now,
     };
 

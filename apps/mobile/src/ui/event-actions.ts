@@ -59,6 +59,8 @@ export interface IncidentMessageDto {
   /** Voice note attachment (server-relative URL) and its length. */
   audioUrl?: string;
   audioDurationMs?: number;
+  /** Speech-to-text transcript of a voice note, when available. */
+  transcript?: string;
   createdAt: string;
 }
 

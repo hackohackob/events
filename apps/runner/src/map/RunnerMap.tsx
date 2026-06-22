@@ -44,6 +44,11 @@ interface Props {
   editablePin?: [number, number] | null;
   pinMaxMeters?: number;
   onPinMove?: (lngLat: [number, number]) => void;
+  /** When false the pin is shown but not draggable (static preview). */
+  pinDraggable?: boolean;
+  /** Clamp centre for the drag radius — defaults to the pin's start position.
+   *  Pass the original GPS fix so re-adjusting still clamps from the true point. */
+  pinClampCenter?: [number, number] | null;
 }
 
 function poiVisual(type: string): { bg: string; glyph: string } | null {
@@ -96,6 +101,8 @@ export function RunnerMap({
   editablePin,
   pinMaxMeters = 500,
   onPinMove,
+  pinDraggable = true,
+  pinClampCenter,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -248,14 +255,15 @@ export function RunnerMap({
     const map = mapRef.current;
     if (!map || !editablePin) return;
     if (!pinMarkerRef.current) {
-      pinOriginRef.current = editablePin; // fixed clamp centre (original capture)
+      // Clamp from the original GPS point when given, else from the start pin.
+      pinOriginRef.current = pinClampCenter ?? editablePin;
       const el = document.createElement("div");
       el.style.width = "30px";
       el.style.height = "40px";
       el.innerHTML = `<svg width="30" height="40" viewBox="0 0 30 40" style="filter:drop-shadow(0 3px 5px rgba(0,0,0,0.5))">
         <path d="M15 1C7.8 1 2 6.6 2 13.6 2 23 15 39 15 39s13-16 13-25.4C28 6.6 22.2 1 15 1Z" fill="#E63946" stroke="#fff" stroke-width="2"/>
         <circle cx="15" cy="14" r="5" fill="#fff"/></svg>`;
-      const marker = new maplibregl.Marker({ element: el, anchor: "bottom", draggable: true })
+      const marker = new maplibregl.Marker({ element: el, anchor: "bottom", draggable: pinDraggable })
         .setLngLat(editablePin)
         .addTo(map);
       marker.on("drag", () => {
@@ -277,11 +285,11 @@ export function RunnerMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editablePin]);
 
-  // Allowed-radius circle for the editable pin
+  // Allowed-radius circle for the editable pin (only while it's draggable).
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready || !editablePin) return;
-    const circle = circlePolygon(editablePin, pinMaxMeters);
+    if (!map || !ready || !editablePin || !pinDraggable) return;
+    const circle = circlePolygon(pinClampCenter ?? editablePin, pinMaxMeters);
     const src = map.getSource("pin-radius") as maplibregl.GeoJSONSource | undefined;
     if (src) {
       src.setData(circle);

@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
+import { EventChatService } from "../event-chat/event-chat.service";
 import { ExampleDataService } from "../example-data/example-data.service";
 import { CreateEventDto } from "./dto/create-event.dto";
 
@@ -167,6 +168,7 @@ export class EventsService implements OnModuleInit {
     private readonly exampleDataService: ExampleDataService,
     private readonly db: DbService,
     private readonly redisService: RedisService,
+    private readonly eventChat: EventChatService,
   ) {}
 
   private events: EventRecord[] = [];
@@ -426,6 +428,16 @@ export class EventsService implements OnModuleInit {
     event.days[0].pois.push(poi);
     await this.persist();
     await this.redisService.publish(`event:${eventId}:map`, { type: "poi.created", payload: poi });
+    // Event feed: surface the new POI in the shared team chat.
+    void this.eventChat
+      .postSystem(eventId, "poi", poi.name ? `${poi.name}` : `New ${poi.type.replace(/-/g, " ")}`, {
+        poiId: poi.id,
+        poiType: poi.type,
+        name: poi.name,
+        lat: poi.lat,
+        lng: poi.lng,
+      })
+      .catch(() => undefined);
     return poi;
   }
 

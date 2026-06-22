@@ -81,12 +81,38 @@ export function FieldGuideScreen({ onClose }: { onClose: () => void }) {
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return cases.filter((c) => {
-      if (category && c.category !== category) return false;
-      if (!q) return true;
-      const haystack = [c.title, c.summary, c.category, ...c.keywords, ...c.signs].join(" ").toLowerCase();
-      return q.split(/\s+/).every((word) => haystack.includes(word));
-    });
+    const words = q.split(/\s+/).filter(Boolean);
+    return cases
+      .map((c) => {
+        if (category && c.category !== category) return null;
+        if (!q) return { c, score: 0 };
+        // Search across everything a symptom might be phrased as — title,
+        // summary, keywords, signs, actions and red flags — so one symptom term
+        // surfaces every relevant case. Every typed word must hit somewhere.
+        const title = c.title.toLowerCase();
+        const keywords = c.keywords.join(" ").toLowerCase();
+        const haystack = [
+          title,
+          c.summary,
+          c.category,
+          keywords,
+          ...c.signs,
+          ...c.actions,
+          ...c.redFlags,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!words.every((w) => haystack.includes(w))) return null;
+        // Rank: title/keyword hits first, then the rest.
+        const score = words.reduce(
+          (s, w) => s + (title.includes(w) ? 3 : 0) + (keywords.includes(w) ? 2 : 0) + 1,
+          0,
+        );
+        return { c, score };
+      })
+      .filter((x): x is { c: FieldGuideCase; score: number } => x !== null)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.c);
   }, [cases, query, category]);
 
   return (

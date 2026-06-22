@@ -10,9 +10,10 @@ export async function requestRoute(
   profile: RouteProfile,
   points: LngLat[],
   alternatives = 3,
+  avoidIncomingTraffic = false,
 ): Promise<RouteResponse> {
   return apiFetch<RouteResponse>("/routing/route", {
     method: "POST",
-    body: JSON.stringify({ profile, points, alternatives }),
+    body: JSON.stringify({ profile, points, alternatives, avoidIncomingTraffic }),
   });
 }

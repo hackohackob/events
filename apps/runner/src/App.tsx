@@ -10,6 +10,7 @@ import { GuidedCare } from "./screens/GuidedCare";
 import { Terms } from "./screens/Terms";
 import { Medical } from "./screens/Medical";
 import { OfflineBanner } from "./components/OfflineBanner";
+import { LocationGate } from "./components/LocationGate";
 
 // Map-heavy screens pull in maplibre-gl — lazy-load them so the onboarding and
 // emergency-report path stay tiny and load instantly on weak signal.
@@ -22,9 +23,10 @@ export function App() {
   const onboarded = Boolean(profile?.selectedTrackId);
 
   return (
-    <Suspense fallback={<div style={{ position: "fixed", inset: 0, background: "var(--bg-base)" }} />}>
-      <OfflineBanner />
-      <Routes>
+    <LocationGate>
+      <Suspense fallback={<div style={{ position: "fixed", inset: 0, background: "var(--bg-base)" }} />}>
+        <OfflineBanner />
+        <Routes>
         <Route path="/" element={onboarded ? <Navigate to="/map" replace /> : <Navigate to="/onboarding" replace />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/map" element={<MapScreen />} />
@@ -38,7 +40,8 @@ export function App() {
         <Route path="/terms" element={<Terms />} />
         <Route path="/medical" element={<Medical />} />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+    </LocationGate>
   );
 }

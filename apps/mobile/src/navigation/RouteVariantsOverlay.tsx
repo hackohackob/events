@@ -20,6 +20,8 @@ export function RouteVariantsOverlay() {
   const cancel = useNavStore((s) => s.cancel);
   const loading = useNavStore((s) => s.loading);
   const error = useNavStore((s) => s.error);
+  const avoidIncomingTraffic = useNavStore((s) => s.avoidIncomingTraffic);
+  const setAvoidIncomingTraffic = useNavStore((s) => s.setAvoidIncomingTraffic);
 
   if (phase !== "variants") return null;
 
@@ -65,6 +67,25 @@ export function RouteVariantsOverlay() {
       <View style={styles.actionBar}>
         {/* Transport stays changeable here — switching re-routes for the new mode. */}
         <CompactTransportRow style={styles.transportRow} />
+
+        {/* Avoid the live race course (off the runners' oncoming flow). */}
+        <Pressable
+          style={styles.avoidRow}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            setAvoidIncomingTraffic(!avoidIncomingTraffic);
+          }}
+        >
+          <View style={[styles.avoidCheck, avoidIncomingTraffic && styles.avoidCheckOn]}>
+            {avoidIncomingTraffic ? <Feather name="check" size={13} color="#04121f" /> : null}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.avoidLabel}>Avoid incoming race traffic</Text>
+            <Text style={styles.avoidHint}>Route off the live course where roads allow</Text>
+          </View>
+          {loading && avoidIncomingTraffic ? <ActivityIndicator size="small" color="#34d399" /> : null}
+        </Pressable>
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <View style={styles.actionRow}>
           <Pressable style={styles.secondaryButton} onPress={cancel}>
@@ -177,6 +198,30 @@ const styles = StyleSheet.create({
     zIndex: 60,
   },
   transportRow: { marginBottom: 12 },
+  avoidRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    borderRadius: 13,
+    backgroundColor: "#111d31",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.16)",
+    marginBottom: 12,
+  },
+  avoidCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: "rgba(148,163,184,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avoidCheckOn: { backgroundColor: "#34d399", borderColor: "#34d399" },
+  avoidLabel: { color: "#e7eef8", fontSize: 13.5, fontWeight: "800" },
+  avoidHint: { color: "#7e90a8", fontSize: 11, fontWeight: "600", marginTop: 1 },
   error: { color: "#f87171", fontSize: 12.5, fontWeight: "700", marginBottom: 10, textAlign: "center" },
   actionRow: { flexDirection: "row", gap: 10 },
   secondaryButton: {

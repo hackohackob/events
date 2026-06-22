@@ -1,5 +1,7 @@
 import { BadGatewayException, BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { EventsService } from "../events/events.service";
 import { RESCUE_4X4_CUSTOM_MODEL } from "./rescue-custom-model";
+import { buildCorridorModel, mergeCustomModel, type CorridorModel } from "./race-corridor";
 import { buildSegments, classifyPoints, type PathDetails } from "./surface-classification";
 import type {
   LngLat,
@@ -86,6 +88,8 @@ export class RoutingService {
   private readonly baseUrl = (process.env.GRAPHHOPPER_URL ?? "http://localhost:8989").replace(/\/$/, "");
   private readonly apiKey = process.env.GRAPHHOPPER_API_KEY?.trim();
 
+  constructor(private readonly eventsService: EventsService) {}
+
   isValidProfile(profile: string): profile is RouteProfile {
     return (PROFILES as string[]).includes(profile);
   }
@@ -102,15 +106,18 @@ export class RoutingService {
     profile: RouteProfile,
     points: LngLat[],
     maxAlternatives: number,
+    opts: { eventId?: string; avoidIncomingTraffic?: boolean } = {},
   ): Promise<RouteResponse> {
     if (points.length < 2) {
       throw new BadRequestException("At least two points are required to build a route.");
     }
 
+    const corridor = await this.resolveCorridor(opts);
+
     const wantAlternatives = maxAlternatives > 1 && points.length === 2;
     const variants = wantAlternatives
-      ? await this.fetchWithAlternatives(profile, points, maxAlternatives)
-      : await this.fetchVariationFallback(profile, points, maxAlternatives);
+      ? await this.fetchWithAlternatives(profile, points, maxAlternatives, corridor)
+      : await this.fetchVariationFallback(profile, points, maxAlternatives, corridor);
 
     return {
       profile,
@@ -119,13 +126,41 @@ export class RoutingService {
     };
   }
 
+  /**
+   * Load the event's race tracks and turn them into a corridor-avoidance custom
+   * model fragment. Returns null when not requested or when the event has no
+   * usable tracks (in which case routing proceeds normally — no avoidance).
+   */
+  private async resolveCorridor(opts: {
+    eventId?: string;
+    avoidIncomingTraffic?: boolean;
+  }): Promise<CorridorModel | null> {
+    if (!opts.avoidIncomingTraffic || !opts.eventId) return null;
+    try {
+      const tracks = await this.eventsService.listTracksForEvent(opts.eventId);
+      const lines = tracks
+        .map((t) => t.points.map((p): LngLat => [p.lng, p.lat]))
+        .filter((line) => line.length >= 2);
+      const model = buildCorridorModel(lines);
+      if (!model) {
+        this.logger.warn(`avoid-incoming-traffic requested but event ${opts.eventId} has no usable tracks`);
+      }
+      return model;
+    } catch (err) {
+      // Avoidance is best-effort — never fail the route because of it.
+      this.logger.warn(`failed to build race corridor for event ${opts.eventId}: ${String(err)}`);
+      return null;
+    }
+  }
+
   /** Native GraphHopper alternative_route algorithm (best for 2-point routes). */
   private async fetchWithAlternatives(
     profile: RouteProfile,
     points: LngLat[],
     maxAlternatives: number,
+    corridor: CorridorModel | null,
   ): Promise<Omit<RouteVariant, "id">[]> {
-    const body = this.baseRequest(profile, points);
+    const body = this.baseRequest(profile, points, corridor);
     body["algorithm"] = "alternative_route";
     body["alternative_route.max_paths"] = Math.min(4, Math.max(2, maxAlternatives));
     body["alternative_route.max_weight_factor"] = 1.8;
@@ -144,13 +179,14 @@ export class RoutingService {
     profile: RouteProfile,
     points: LngLat[],
     maxAlternatives: number,
+    corridor: CorridorModel | null,
   ): Promise<Omit<RouteVariant, "id">[]> {
     const influences = [null, 15, 120].slice(0, Math.max(1, Math.min(3, maxAlternatives)));
     const collected: Omit<RouteVariant, "id">[] = [];
     const seen = new Set<number>();
 
     for (const influence of influences) {
-      const body = this.baseRequest(profile, points);
+      const body = this.baseRequest(profile, points, corridor);
       if (influence !== null) {
         const model = (body["custom_model"] as Record<string, unknown> | undefined) ?? {};
         body["custom_model"] = { ...model, distance_influence: influence };
@@ -173,7 +209,11 @@ export class RoutingService {
     return collected;
   }
 
-  private baseRequest(profile: RouteProfile, points: LngLat[]): Record<string, unknown> {
+  private baseRequest(
+    profile: RouteProfile,
+    points: LngLat[],
+    corridor: CorridorModel | null = null,
+  ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       profile: graphhopperProfile(profile),
       points,
@@ -190,6 +230,12 @@ export class RoutingService {
     // send the rescue shaping as an inline custom model instead.
     if (profile === "rescue_4x4" && process.env.GRAPHHOPPER_NATIVE_RESCUE !== "true") {
       body["custom_model"] = { ...RESCUE_4X4_CUSTOM_MODEL };
+    }
+    // "Avoid incoming traffic": merge the race-corridor penalty into whatever
+    // custom model is already on the request (rescue inline, or none). A custom
+    // model requires ch.disable, which is always set above.
+    if (corridor) {
+      body["custom_model"] = mergeCustomModel(body["custom_model"] as Record<string, unknown> | undefined, corridor);
     }
     return body;
   }

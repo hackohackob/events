@@ -1,5 +1,7 @@
 import { BadRequestException, Body, Controller, Post, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "../common/guards/auth.guard";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
+import { RequestUser } from "../common/types/request-user.type";
 import { RouteRequestDto } from "./dto/route-request.dto";
 import { RoutingService } from "./routing.service";
 import type { LngLat, RouteResponse } from "./routing.types";
@@ -15,9 +17,12 @@ export class RoutingController {
    * always receives ready-to-draw segments + maneuver instructions.
    */
   @Post("route")
-  async route(@Body() dto: RouteRequestDto): Promise<RouteResponse> {
+  async route(@CurrentUser() user: RequestUser, @Body() dto: RouteRequestDto): Promise<RouteResponse> {
     const points = dto.points.map(validatePoint);
-    return this.routingService.route(dto.profile, points, dto.alternatives ?? 3);
+    return this.routingService.route(dto.profile, points, dto.alternatives ?? 3, {
+      eventId: user.eventId,
+      avoidIncomingTraffic: dto.avoidIncomingTraffic,
+    });
   }
 }
 

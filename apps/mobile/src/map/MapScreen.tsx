@@ -47,6 +47,9 @@ import { MedicStatusControl } from "./MedicStatusControl";
 import { MedicDot } from "./MedicDot";
 import { SelectionPulse } from "./SelectionPulse";
 import { ScaleBar } from "./ScaleBar";
+import { EventChatScreen } from "../chat/EventChatScreen";
+import { useEventChatStore } from "../chat/event-chat-store";
+import type { EventMessageDto } from "../chat/event-chat-api";
 import { AssignDestinationBar } from "./AssignDestinationBar";
 import { IncidentSheet } from "../incidents/IncidentSheet";
 import * as Haptics from "expo-haptics";
@@ -1417,6 +1420,7 @@ function buildAccuracyCircle(
 export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const eventTitle = useSessionStore((state) => state.eventTitle);
   const sessionUserId = useSessionStore((state) => state.userId);
+  const chatUnread = useEventChatStore((s) => s.unread);
   const clearSession = useSessionStore((state) => state.clear);
   const sessionToken = useSessionStore((state) => state.token);
   const markers = useMapStore((state) => state.markers);
@@ -1446,7 +1450,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Unread-comment tracking for the incident pin indicator.
   const incidentLastReadAt = useIncidentReadsStore((s) => s.lastReadAt);
   const incidentLatestMessageAt = useIncidentReadsStore((s) => s.latestMessageAt);
-  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "location" | "debug" | "settings" | "profile" | "guide">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "chat" | "location" | "debug" | "settings" | "profile" | "guide">("map");
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2479,6 +2483,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
     return () => sub.remove();
   }, [radialAnchor, menuOpen, layersOpen, activeTab, selectedMarkerId, navPhase]);
+
+  // Team-chat unread badge: count incoming messages (not my own) while the chat
+  // tab isn't open. Opening the tab clears it.
+  useEffect(() => {
+    if (activeTab === "chat") {
+      useEventChatStore.getState().reset();
+      return;
+    }
+    const socket = getSocket();
+    const onChatMessage = (msg: EventMessageDto) => {
+      if (msg.authorId && msg.authorId === sessionUserId) return;
+      useEventChatStore.getState().bump();
+    };
+    socket.on("event.message", onChatMessage);
+    return () => {
+      socket.off("event.message", onChatMessage);
+    };
+  }, [activeTab, sessionUserId]);
 
   // Broadcast my active navigation path to the whole team when navigation starts,
   // and clear it when it ends — so everyone + the dashboard sees the route + ETA.
@@ -3960,6 +3982,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <FieldGuideScreen onClose={() => setActiveTab("map")} />
         </View>
       ) : null}
+      {activeTab === "chat" ? (
+        <View style={styles.tabOverlay}>
+          <EventChatScreen onClose={() => setActiveTab("map")} />
+        </View>
+      ) : null}
 
       <PendingIncidentsSheet visible={pendingSheetOpen} onClose={() => setPendingSheetOpen(false)} />
 
@@ -3971,12 +3998,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           {([
             { tab: "map", label: "Map", icon: "map" },
             { tab: "tracks", label: "Tracks", icon: "git-merge" },
+            { tab: "chat", label: "Chat", icon: "message-circle" },
           ] as const).map(({ tab, label, icon }) => {
             const active = activeTab === tab;
             return (
               <Pressable key={tab} style={styles.bottomMenuItem} onPress={() => setActiveTab(tab)}>
                 <View style={[styles.bottomMenuAccent, active && styles.bottomMenuAccentActive]} />
-                <Feather name={icon} size={20} color={active ? "#34d399" : "#5b6b80"} />
+                <View>
+                  <Feather name={icon} size={20} color={active ? "#34d399" : "#5b6b80"} />
+                  {tab === "chat" && chatUnread > 0 ? (
+                    <View style={styles.chatBadge}>
+                      <Text style={styles.chatBadgeText}>{chatUnread > 9 ? "9+" : chatUnread}</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={[styles.bottomMenuText, active && styles.bottomMenuTextActive]}>{label}</Text>
               </Pressable>
             );
@@ -5278,4 +5313,19 @@ const styles = StyleSheet.create({
   bottomMenuTextActive: {
     color: "#34d399",
   },
+  chatBadge: {
+    position: "absolute",
+    top: -6,
+    right: -10,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: "#ef4444",
+    borderWidth: 1.5,
+    borderColor: "#020b18",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chatBadgeText: { color: "#fff", fontSize: 9.5, fontWeight: "900" },
 });

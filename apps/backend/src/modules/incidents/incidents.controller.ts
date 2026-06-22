@@ -28,6 +28,7 @@ import { IncidentActionDto } from "./dto/incident-action.dto";
 import { SendIncidentMessageDto } from "./dto/incident-message.dto";
 import { UpdateIncidentDetailsDto } from "./dto/update-incident-details.dto";
 import { IncidentsService } from "./incidents.service";
+import { TranscriptionService } from "./transcription.service";
 
 const UPLOADS_DIR = join(process.cwd(), "uploads", "incidents");
 if (!existsSync(UPLOADS_DIR)) {
@@ -37,7 +38,10 @@ if (!existsSync(UPLOADS_DIR)) {
 @Controller("incidents")
 @UseGuards(AuthGuard, RolesGuard)
 export class IncidentsController {
-  constructor(private readonly incidentsService: IncidentsService) {}
+  constructor(
+    private readonly incidentsService: IncidentsService,
+    private readonly transcription: TranscriptionService,
+  ) {}
 
   @Post()
   create(@CurrentUser() user: RequestUser, @Body() body: CreateIncidentDto) {
@@ -172,12 +176,18 @@ export class IncidentsController {
   ) {
     const url = `/uploads/incidents/${file.filename}`;
     const parsedDuration = Number(durationMs);
+    // Best-effort speech-to-text. Returns null unless a provider is configured,
+    // and never throws — a failed transcription must not lose the voice note.
+    const transcript = await this.transcription
+      .transcribe(file.path, file.mimetype)
+      .catch(() => null);
     // A voice note is just a chat message with an audio attachment — it lands
     // in the incident chat and is broadcast like any other message.
     return this.incidentsService.addMessage(user.eventId, incidentId, user.userId, {
       text: "",
       audioUrl: url,
       audioDurationMs: Number.isFinite(parsedDuration) && parsedDuration > 0 ? Math.round(parsedDuration) : undefined,
+      transcript: transcript ?? undefined,
     });
   }
 }

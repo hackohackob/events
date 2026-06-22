@@ -68,6 +68,8 @@ interface NavState {
   /** Zoom the user pinched to during active nav — keeps location updates from
    *  snapping the camera back to the default nav zoom. Null = default. */
   navZoomOverride: number | null;
+  /** "Avoid incoming traffic": route off the live race course where possible. */
+  avoidIncomingTraffic: boolean;
 
   openTransport: (destination: LatLng & { label: string }, incidentId?: string | null) => void;
   cancel: () => void;
@@ -84,6 +86,7 @@ interface NavState {
   /** Compass press while navigating: re-center, toggling follow ↔ north-up. */
   toggleNavCamera: () => void;
   setNavZoomOverride: (zoom: number | null) => void;
+  setAvoidIncomingTraffic: (value: boolean) => void;
   stop: () => void;
 }
 
@@ -106,6 +109,7 @@ export const useNavStore = create<NavState>((set, get) => ({
   navCameraMode: "follow",
   recenterTick: 0,
   navZoomOverride: null,
+  avoidIncomingTraffic: false,
   destinationIncidentId: null,
 
   openTransport: (destination, incidentId = null) =>
@@ -195,7 +199,7 @@ export const useNavStore = create<NavState>((set, get) => ({
     const alternatives = vias.length === 0 ? 3 : 1;
 
     try {
-      const response = await requestRoute(profile, points, alternatives);
+      const response = await requestRoute(profile, points, alternatives, get().avoidIncomingTraffic);
       if (get().requestSeq !== seq) return; // superseded by a newer request
       const selected =
         get().selectedRouteId && response.routes.some((r) => r.id === get().selectedRouteId)
@@ -233,6 +237,13 @@ export const useNavStore = create<NavState>((set, get) => ({
     })),
 
   setNavZoomOverride: (navZoomOverride) => set({ navZoomOverride }),
+
+  setAvoidIncomingTraffic: (value) => {
+    if (get().avoidIncomingTraffic === value) return;
+    set({ avoidIncomingTraffic: value });
+    // Re-run the current route with/without corridor avoidance if we have one.
+    if (get().origin && get().destination && get().profile) void get().recalculate();
+  },
 
   updateProgress: (fix) => {
     const state = get();

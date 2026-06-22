@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsIn, IsInt, IsOptional, Max, Min } from "class-validator";
+import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from "class-validator";
 import type { LngLat, RouteProfile } from "../routing.types";
 
 const PROFILES: RouteProfile[] = ["foot", "mtb", "car", "rescue_4x4"];
@@ -21,4 +21,13 @@ export class RouteRequestDto {
   @Min(1)
   @Max(4)
   alternatives?: number;
+
+  /**
+   * "Avoid incoming traffic": discourage routing along the event's race course
+   * so medics stay off the live racing line. Resolved server-side from the
+   * authenticated event's tracks.
+   */
+  @IsOptional()
+  @IsBoolean()
+  avoidIncomingTraffic?: boolean;
 }

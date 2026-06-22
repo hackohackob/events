@@ -11,6 +11,7 @@ export function Confirm() {
   const { draft, patchDraft, profile } = useApp();
   const { t } = useT();
   const [confirming, setConfirming] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
   const voice = useVoiceRecorder();
@@ -60,7 +61,8 @@ export function Confirm() {
         </button>
       </div>
 
-      {/* GPS thumbnail with a draggable, radius-clamped incident pin */}
+      {/* GPS thumbnail — static preview of the captured location (no accidental
+          drag). Adjusting happens in a dedicated full-screen step below. */}
       <div style={{ position: "relative", height: 190, borderRadius: 16, overflow: "hidden", border: "1px solid var(--border-subtle)", marginTop: 16, background: "#0E1A28" }}>
         {draft.fix ? (
           <RunnerMap
@@ -69,9 +71,8 @@ export function Confirm() {
             medics={[]}
             pois={[]}
             fix={null}
-            editablePin={pinOrigin}
-            pinMaxMeters={500}
-            onPinMove={([lng, lat]) => draft.fix && patchDraft({ fix: { ...draft.fix, lng, lat } })}
+            editablePin={[draft.fix.lng, draft.fix.lat]}
+            pinDraggable={false}
           />
         ) : null}
         {draft.fix && (
@@ -84,7 +85,24 @@ export function Confirm() {
         {draft.fix ? t("confirm.gpsLock") : t("confirm.gpsAcquiring")}
       </div>
       {draft.fix && (
-        <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>{t("confirm.adjustPin")}</div>
+        <button
+          onClick={() => setAdjusting(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 10,
+            padding: "9px 13px",
+            borderRadius: 12,
+            border: "1px solid var(--border-mid)",
+            background: "var(--bg-input)",
+            color: "var(--text-secondary)",
+            fontWeight: 700,
+            fontSize: 13,
+          }}
+        >
+          📍 {t("confirm.fixLocation")}
+        </button>
       )}
 
       {/* Description + voice note (during creation) */}
@@ -174,6 +192,76 @@ export function Confirm() {
       {confirming && (
         <ConfirmDialog onCancel={() => setConfirming(false)} onConfirm={() => navigate("/sending")} />
       )}
+
+      {adjusting && draft.fix && pinOrigin && (
+        <AdjustLocation
+          start={[draft.fix.lng, draft.fix.lat]}
+          origin={pinOrigin}
+          maxMeters={Math.round(draft.fix.accuracy) + 300}
+          onMove={([lng, lat]) => draft.fix && patchDraft({ fix: { ...draft.fix, lng, lat } })}
+          onDone={() => setAdjusting(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Full-screen step for fine-tuning the incident pin. The pin starts at the
+ * current location and can be dragged anywhere within (GPS accuracy + 300 m) of
+ * the originally captured GPS point — the dashed circle shows the allowed area.
+ */
+function AdjustLocation({
+  start,
+  origin,
+  maxMeters,
+  onMove,
+  onDone,
+}: {
+  start: [number, number];
+  origin: [number, number];
+  maxMeters: number;
+  onMove: (lngLat: [number, number]) => void;
+  onDone: () => void;
+}) {
+  const { t } = useT();
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "var(--bg-base)", zIndex: 80, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, position: "relative" }}>
+        <RunnerMap
+          coords={null}
+          routeColor="#2BE3A0"
+          medics={[]}
+          pois={[]}
+          fix={null}
+          editablePin={start}
+          pinClampCenter={origin}
+          pinMaxMeters={maxMeters}
+          onPinMove={onMove}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: 16,
+            left: 16,
+            right: 16,
+            padding: "10px 14px",
+            borderRadius: 14,
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border-mid)",
+            backdropFilter: "blur(8px)",
+            textAlign: "center",
+          }}
+        >
+          <div className="archivo" style={{ fontWeight: 800, fontSize: 15 }}>{t("confirm.fixLocation")}</div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
+            {t("confirm.fixHint", { meters: maxMeters })}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "12px 16px calc(16px + env(safe-area-inset-bottom))", background: "var(--bg-surface)", borderTop: "1px solid var(--border-subtle)" }}>
+        <button className="btn-primary" onClick={onDone}>{t("confirm.fixDone")}</button>
+      </div>
     </div>
   );
 }

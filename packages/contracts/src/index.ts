@@ -310,12 +310,41 @@ export interface IncidentMessage {
   /** Voice note attachment (server-relative URL) and its length. */
   audioUrl?: string;
   audioDurationMs?: number;
+  /** Speech-to-text transcript of a voice note, when available. */
+  transcript?: string;
   createdAt: string;
 }
 
 export interface SendIncidentMessageRequest {
   text: string;
   photoUrl?: string;
+}
+
+/** Event-wide team chat. `system` messages are the live feed (incident / response / POI). */
+export type EventMessageKind = "text" | "voice" | "system";
+export type EventFeedType = "incident" | "response" | "poi";
+
+export interface EventMessage {
+  id: string;
+  eventId: string;
+  /** Null for system feed messages. */
+  authorId: string | null;
+  authorName: string;
+  kind: EventMessageKind;
+  /** Set when kind === "system". */
+  feedType?: EventFeedType;
+  text?: string;
+  /** Voice note attachment (server-relative URL), length, and transcript. */
+  audioUrl?: string;
+  audioDurationMs?: number;
+  transcript?: string;
+  /** Structured context for system feed messages (incidentId / poiId / coords / severity …). */
+  meta?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SendEventMessageRequest {
+  text: string;
 }
 
 export type IncidentActionType = "going" | "arrived" | "need_backup" | "resolved" | "stand_down";

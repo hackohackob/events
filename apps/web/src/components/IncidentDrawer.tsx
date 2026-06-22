@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check } from 'lucide-react'
+import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, FileText } from 'lucide-react'
 import type { IncidentMessage } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
 import { apiUrl } from '@/env'
@@ -352,14 +352,22 @@ export default function IncidentDrawer({
                       <span className="text-[10px]" style={{ color: '#475569' }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                     {m.audioUrl ? (
-                      <div className="flex items-center gap-2 mt-1">
-                        <audio controls preload="none" src={photoSrc(m.audioUrl)} className="w-full" style={{ height: 34 }} />
-                        {m.audioDurationMs ? (
-                          <span className="text-[10px] flex-shrink-0" style={{ color: '#64748b' }}>
-                            {Math.round(m.audioDurationMs / 1000)}s
-                          </span>
+                      <>
+                        <div className="flex items-center gap-2 mt-1">
+                          <audio controls preload="none" src={photoSrc(m.audioUrl)} className="w-full" style={{ height: 34 }} />
+                          {m.audioDurationMs ? (
+                            <span className="text-[10px] flex-shrink-0" style={{ color: '#64748b' }}>
+                              {Math.round(m.audioDurationMs / 1000)}s
+                            </span>
+                          ) : null}
+                        </div>
+                        {m.transcript ? (
+                          <div className="flex gap-1.5 mt-1.5 text-xs italic" style={{ color: '#94a3b8' }}>
+                            <FileText className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                            <span>{m.transcript}</span>
+                          </div>
                         ) : null}
-                      </div>
+                      </>
                     ) : (
                       <div className="text-sm text-slate-300">{m.text}</div>
                     )}
