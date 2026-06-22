@@ -3984,7 +3984,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ) : null}
       {activeTab === "chat" ? (
         <View style={styles.tabOverlay}>
-          <EventChatScreen onClose={() => setActiveTab("map")} />
+          <EventChatScreen onClose={() => setActiveTab("map")} bottomInset={BOTTOM_BAR_HEIGHT} />
         </View>
       ) : null}
 

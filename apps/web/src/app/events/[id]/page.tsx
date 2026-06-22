@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   ChevronRight, Calendar, MapPin, Users, Activity,
   Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
-  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check
+  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check, MessageCircle
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
@@ -15,6 +15,8 @@ import MapWrapper from '@/components/map/MapWrapper'
 import BroadcastModal from '@/components/BroadcastModal'
 import IncidentDrawer from '@/components/IncidentDrawer'
 import MedicDrawer from '@/components/MedicDrawer'
+import ChatDrawer from '@/components/ChatDrawer'
+import { useEventChat } from '@/hooks/useEventChat'
 import { POI_CONFIGS } from '@/lib/constants'
 import { fetchGpxCoordinates } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
@@ -277,6 +279,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
   const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const chat = useEventChat({ eventId: id, enabled: isActive })
   const [roster, setRoster] = useState<EventMedic[]>([])
   const [alarmInc, setAlarmInc] = useState<{ name?: string; type: string } | null>(null)
 
@@ -471,6 +475,22 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
               {connected ? 'Live' : 'Reconnecting…'}
             </div>
+          )}
+          {/* Team chat launcher (active events) */}
+          {isActive && (
+            <button
+              onClick={() => { setChatOpen(true); chat.markRead() }}
+              className="relative flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399' }}
+            >
+              <MessageCircle className="w-4 h-4" />
+              Chat
+              {chat.unread > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white" style={{ background: '#ef4444' }}>
+                  {chat.unread > 9 ? '9+' : chat.unread}
+                </span>
+              )}
+            </button>
           )}
           {/* Broadcast button (active events) */}
           {isActive && (
@@ -1146,6 +1166,15 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           onClose={() => setSelectedMedicId(null)}
           onAssignToIncident={(medicId, incidentId) => assignIncident(incidentId, medicId)}
           onClearDestination={(medicId) => void assignDestination(medicId, null)}
+        />
+      )}
+
+      {chatOpen && (
+        <ChatDrawer
+          messages={chat.messages}
+          loading={chat.loading}
+          onSend={chat.send}
+          onClose={() => { setChatOpen(false); chat.setOpen(false) }}
         />
       )}
 

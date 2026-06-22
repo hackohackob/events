@@ -38,17 +38,22 @@ export default function MedicDrawer({ medic, incidents, onClose, onAssignToIncid
   const openIncidents = incidents.filter(i => i.status !== 'resolved' && i.status !== 'closed')
 
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex flex-col" style={{ width: 'min(92vw, 380px)', background: 'rgba(8,14,26,0.98)', borderLeft: '1px solid rgba(148,163,184,0.12)', boxShadow: '-12px 0 40px rgba(0,0,0,0.5)' }}>
-      <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: '1px solid rgba(148,163,184,0.1)' }}>
-        <div className="flex items-center justify-center rounded-full text-white font-bold" style={{ width: 38, height: 38, fontSize: 13, background: st.color }}>
-          {initials(medic.name)}
+    <div className="fixed inset-y-0 right-0 z-40 flex flex-col" style={{ width: 'min(92vw, 400px)', background: 'rgba(8,15,28,0.99)', borderLeft: '1px solid rgba(148,163,184,0.12)', boxShadow: '-24px 0 80px rgba(0,0,0,0.6)' }}>
+      {/* Status accent bar */}
+      <div style={{ height: 4, background: st.color }} />
+      <div className="flex items-center gap-3 px-5 pt-4 pb-4" style={{ borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
+        <div className="relative flex-shrink-0">
+          <div className="flex items-center justify-center rounded-2xl text-white font-bold" style={{ width: 44, height: 44, fontSize: 14, background: st.color }}>
+            {initials(medic.name)}
+          </div>
+          <span className="absolute -right-1 -bottom-1 w-3.5 h-3.5 rounded-full" style={{ background: st.color, border: '2px solid #08111c' }} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold text-slate-100 truncate">{medic.name}</div>
-          <div className="text-xs font-semibold" style={{ color: st.color }}>{st.label}</div>
+          <div className="text-[16px] font-bold text-slate-100 truncate leading-tight">{medic.name}</div>
+          <div className="text-xs font-semibold mt-0.5" style={{ color: st.color }}>{st.label}</div>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-          <X className="w-4 h-4 text-slate-400" />
+        <button onClick={onClose} className="p-2 rounded-xl flex-shrink-0" style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)' }}>
+          <X className="w-5 h-5" />
         </button>
       </div>
 

@@ -20,6 +20,26 @@ function photoSrc(url?: string) {
   return `${apiUrl.replace(/\/api$/, '')}${url}`
 }
 
+function timeAgo(iso?: string): string {
+  if (!iso) return '—'
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+  if (s < 60) return `${s}s ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+
+const SEVERITY_STYLE: Record<string, { label: string; color: string }> = {
+  critical: { label: 'Critical', color: '#ef4444' },
+  high:     { label: 'High',     color: '#f97316' },
+  moderate: { label: 'Moderate', color: '#f59e0b' },
+  medium:   { label: 'Medium',   color: '#f59e0b' },
+  low:      { label: 'Low',      color: '#22c55e' },
+  minor:    { label: 'Minor',    color: '#22c55e' },
+}
+
 interface Props {
   incident: LiveIncident
   messages: IncidentMessage[]
@@ -68,6 +88,7 @@ export default function IncidentDrawer({
   }
 
   const st = STATUS_STYLE[incident.status] ?? STATUS_STYLE.open
+  const sev = incident.severity ? SEVERITY_STYLE[incident.severity.toLowerCase()] : undefined
   const isClosed = incident.status === 'closed'
 
   useEffect(() => { void loadMessages(incident.id) }, [incident.id, loadMessages])
@@ -114,31 +135,46 @@ export default function IncidentDrawer({
         className="absolute top-0 right-0 h-full flex flex-col pointer-events-auto"
         style={{ width: 440, maxWidth: '95vw', background: 'rgba(8,15,28,0.99)', borderLeft: '1px solid rgba(148,163,184,0.12)', boxShadow: '-24px 0 80px rgba(0,0,0,0.6)' }}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 px-5 py-4 flex-shrink-0" style={{ borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: st.bg, border: `1px solid ${st.color}40` }}>
-              <AlertTriangle className="w-5 h-5" style={{ color: st.color }} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-base font-bold text-slate-100 truncate">{incident.name ?? 'Incident'}</div>
-              <div className="text-xs capitalize" style={{ color: '#64748b' }}>{incident.type}</div>
-            </div>
+        {/* Severity / status accent bar */}
+        <div className="flex-shrink-0" style={{ height: 4, background: sev?.color ?? st.color }} />
+
+        {/* Hero header */}
+        <div className="flex items-center gap-3 px-5 pt-4 pb-3 flex-shrink-0">
+          <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: st.bg, border: `1px solid ${st.color}55` }}>
+            <AlertTriangle className="w-[22px] h-[22px]" style={{ color: st.color }} />
           </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[17px] font-bold text-slate-100 truncate leading-tight">{incident.name ?? 'Incident'}</div>
+            <div className="text-xs capitalize mt-0.5" style={{ color: '#64748b' }}>{incident.type}</div>
+          </div>
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full flex-shrink-0" style={{ background: st.bg, color: st.color }}>{st.label}</span>
           <button onClick={onClose} className="p-2 rounded-xl flex-shrink-0" style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)' }}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Status + tabs */}
-        <div className="flex items-center justify-between px-5 py-3 flex-shrink-0">
-          <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: st.bg, color: st.color }}>{st.label}</span>
+        {/* Stat tiles */}
+        <div className="grid grid-cols-3 gap-2 px-5 pb-3 flex-shrink-0">
+          {[
+            { label: 'Reported', value: timeAgo(incident.createdAt) },
+            { label: 'Responders', value: String((incident.responders ?? []).length) },
+            { label: 'Severity', value: sev?.label ?? '—', color: sev?.color },
+          ].map((s) => (
+            <div key={s.label} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(148,163,184,0.08)' }}>
+              <div className="text-[10px] font-bold tracking-wide" style={{ color: '#5b6b80' }}>{s.label.toUpperCase()}</div>
+              <div className="text-[15px] font-bold mt-0.5 truncate" style={{ color: s.color ?? '#e2e8f0' }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Segmented tabs */}
+        <div className="px-5 pb-3 flex-shrink-0">
           <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
             {(['details', 'chat'] as const).map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
                 style={{ background: tab === t ? 'rgba(34,197,94,0.15)' : 'transparent', color: tab === t ? '#22c55e' : '#64748b' }}
               >
                 {t === 'details' ? <ClipboardList className="w-3.5 h-3.5" /> : <MessageSquare className="w-3.5 h-3.5" />}
@@ -225,21 +261,26 @@ export default function IncidentDrawer({
                   <div className="text-[10px] font-bold tracking-widest mb-1.5" style={{ color: '#475569' }}>RESPONDERS</div>
                   {(incident.responders ?? []).length > 0 ? (
                     <div className="flex flex-wrap gap-1.5 mb-2">
-                      {(incident.responders ?? []).map(id => (
-                        <span key={id} className="inline-flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded-lg" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>
-                          {medicNameById[id] ?? id.slice(0, 6)}
-                          {onUnassignResponder && (
-                            <button
-                              onClick={() => onUnassignResponder(incident.id, id)}
-                              title="Unassign medic"
-                              className="flex items-center justify-center w-4 h-4 rounded hover:bg-white/10 transition-colors"
-                              style={{ color: '#22c55e' }}
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          )}
-                        </span>
-                      ))}
+                      {(incident.responders ?? []).map(id => {
+                        const nm = medicNameById[id] ?? id.slice(0, 6)
+                        const inits = nm.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('')
+                        return (
+                          <span key={id} className="inline-flex items-center gap-1.5 text-xs pl-1 pr-1 py-1 rounded-lg" style={{ background: 'rgba(34,197,94,0.12)', color: '#34d399', border: '1px solid rgba(34,197,94,0.25)' }}>
+                            <span className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: '#0f6e56' }}>{inits}</span>
+                            <span className="font-semibold">{nm}</span>
+                            {onUnassignResponder && (
+                              <button
+                                onClick={() => onUnassignResponder(incident.id, id)}
+                                title="Unassign medic"
+                                className="flex items-center justify-center w-4 h-4 rounded hover:bg-white/10 transition-colors"
+                                style={{ color: '#34d399' }}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </span>
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className="text-xs mb-2" style={{ color: '#64748b' }}>No responders yet.</div>

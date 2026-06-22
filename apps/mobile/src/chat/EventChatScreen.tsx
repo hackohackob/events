@@ -4,7 +4,7 @@ import {
   Animated,
   Easing,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -80,13 +80,35 @@ interface Row {
 
 const MIN_VOICE_MS = 800;
 
-export function EventChatScreen({ onClose }: { onClose: () => void }) {
+export function EventChatScreen({ onClose, bottomInset = 0 }: { onClose: () => void; bottomInset?: number }) {
   const myId = useSessionStore((s) => s.userId);
   const [messages, setMessages] = useState<EventMessageDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
   const listRef = useRef<FlatList<Row>>(null);
+
+  // The screen lives in an absolutely-positioned overlay, so KeyboardAvoidingView
+  // can't shrink it. Track the keyboard height and lift the composer above it.
+  // The overlay already sits `bottomInset` px above the screen bottom (the tab
+  // bar), so only the part of the keyboard that overlaps the overlay matters.
+  useEffect(() => {
+    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvt, (e) =>
+      setKbHeight(Math.max(0, (e.endCoordinates?.height ?? 0) - bottomInset)),
+    );
+    const hide = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [bottomInset]);
+
+  useEffect(() => {
+    if (kbHeight > 0) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  }, [kbHeight]);
 
   // ── Load history + live updates ────────────────────────────────────────────
   useEffect(() => {
@@ -138,11 +160,7 @@ export function EventChatScreen({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={0}
-    >
+    <View style={[styles.root, { paddingBottom: kbHeight }]}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.iconBtn} onPress={onClose} hitSlop={8}>
@@ -183,7 +201,7 @@ export function EventChatScreen({ onClose }: { onClose: () => void }) {
       <Composer draft={draft} setDraft={setDraft} onSend={send} sending={sending} onVoice={(m) =>
         setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]))
       } />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

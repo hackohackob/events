@@ -143,7 +143,13 @@ export class RoutingService {
         .filter((line) => line.length >= 2);
       const model = buildCorridorModel(lines);
       if (!model) {
-        this.logger.warn(`avoid-incoming-traffic requested but event ${opts.eventId} has no usable tracks`);
+        this.logger.warn(
+          `avoid-incoming-traffic requested but event ${opts.eventId} has no usable tracks (${tracks.length} track(s) loaded)`,
+        );
+      } else {
+        this.logger.log(
+          `avoid-incoming-traffic: ${model.areas.features.length} corridor area(s) from ${lines.length} track(s) for event ${opts.eventId}`,
+        );
       }
       return model;
     } catch (err) {

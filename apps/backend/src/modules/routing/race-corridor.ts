@@ -20,7 +20,7 @@ import type { LngLat } from "./routing.types";
  */
 
 export interface CorridorModel {
-  priority: Array<{ if: string; multiply_by: string }>;
+  priority: Array<{ if: string; multiply_by: number }>;
   areas: {
     type: "FeatureCollection";
     features: Array<{
@@ -80,9 +80,13 @@ function segmentQuad(a: LngLat, b: LngLat, bufferMeters: number): number[][] | n
  * when there's nothing usable to avoid.
  */
 export function buildCorridorModel(tracks: LngLat[][], options: CorridorOptions = {}): CorridorModel | null {
-  const bufferMeters = options.bufferMeters ?? 25;
-  const multiplyBy = options.multiplyBy ?? 0.12;
-  const maxAreas = options.maxAreas ?? 90;
+  // Wider buffer: a GPX line is often offset from the OSM road centreline by a
+  // good few metres, and the corridor polygon must actually contain the edge
+  // GraphHopper routes on or the penalty is a no-op. Stronger multiplier so the
+  // router meaningfully prefers parallel roads. Tunable via env without a deploy.
+  const bufferMeters = options.bufferMeters ?? Number(process.env.AVOID_CORRIDOR_BUFFER_M ?? 40);
+  const multiplyBy = options.multiplyBy ?? Number(process.env.AVOID_CORRIDOR_MULTIPLY ?? 0.03);
+  const maxAreas = options.maxAreas ?? 120;
 
   const usable = tracks.filter((t) => t.length >= 2);
   if (usable.length === 0) return null;
@@ -100,7 +104,7 @@ export function buildCorridorModel(tracks: LngLat[][], options: CorridorOptions 
       if (!ring) continue;
       const id = `race_${features.length}`;
       features.push({ type: "Feature", id, properties: {}, geometry: { type: "Polygon", coordinates: [ring] } });
-      priority.push({ if: `in_${id}`, multiply_by: String(multiplyBy) });
+      priority.push({ if: `in_${id}`, multiply_by: multiplyBy });
     }
   }
 
