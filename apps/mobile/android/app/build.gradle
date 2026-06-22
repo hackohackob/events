@@ -87,6 +87,14 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    // Release lint (lintVitalRelease) isn't needed to produce the APK and its
+    // analyzer workers run out of JVM Metaspace on CI runners. Skip it so the
+    // build doesn't fail on lint. (CI: eas build --local.)
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
     namespace 'com.a.atanasov.paramediceventapp'
     defaultConfig {
         applicationId 'com.a.atanasov.paramediceventapp'
