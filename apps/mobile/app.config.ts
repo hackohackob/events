@@ -39,10 +39,16 @@ const withNotifeeLocationForegroundService: ConfigPlugin = (expoConfig) =>
 // the package; register it so Gradle can resolve app.notifee:core.
 const notifeeMavenRepo = path.resolve(__dirname, "../../node_modules/@notifee/react-native/android/libs");
 
+// Single source of truth for the user-facing app version: apps/mobile/package.json.
+// Bump it (and tag a release build) with `npm run release:mobile [patch|minor|major]`.
+const appVersion = (
+  JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8")) as { version: string }
+).version;
+
 const config: ExpoConfig = {
   name: "Paramedic Event App",
   slug: "paramedic-event-app",
-  version: "0.1.0",
+  version: appVersion,
   updates: {
     url: "https://u.expo.dev/ffe5d9fa-a192-4b34-be11-5a43598959c3",
   },

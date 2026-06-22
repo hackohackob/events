@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - master
+    # The native mobile app isn't part of the Docker stack — a mobile-only push
+    # (e.g. a `release(mobile)` version bump) shouldn't trigger a backend/web
+    # redeploy. It ships via EAS / the mobile-build workflow instead.
+    paths-ignore:
+      - 'apps/mobile/**'
 
 env:
   API_IMAGE: hackohackob1/events-api
