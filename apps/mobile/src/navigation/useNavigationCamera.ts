@@ -84,7 +84,10 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
   // user re-centers.
   useEffect(() => {
     if (phase !== "active" || !progress) return;
-    const center: [number, number] = [progress.snapped.lng, progress.snapped.lat];
+    // Follow the real position when off-route (so the puck stays on-screen),
+    // else the snapped point on the line.
+    const focus = progress.offRoute ? progress.raw : progress.snapped;
+    const center: [number, number] = [focus.lng, focus.lat];
     const northUp = navCameraMode === "north";
 
     // Adaptive easing: glide over roughly the gap since the last camera move, so

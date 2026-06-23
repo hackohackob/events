@@ -54,8 +54,12 @@ export function NavigationMapLayers() {
   const alternatives = routes.filter((r) => r.id !== selected?.id);
   const isActive = phase === "active";
 
-  // Glide the puck between GPS fixes (≈1/s) instead of teleporting.
-  const smoothedPuck = useSmoothedPosition(isActive ? progress?.snapped : null);
+  // Glide the puck between GPS fixes (≈1/s) instead of teleporting. When the user
+  // strays > 30 m from the line, show their REAL position (not the snap) so the
+  // puck reflects where they actually are; the route clip below still uses the
+  // snapped point so the travelled portion stays on the road.
+  const puckTarget = isActive && progress ? (progress.offRoute ? progress.raw : progress.snapped) : null;
+  const smoothedPuck = useSmoothedPosition(puckTarget);
 
   // During active navigation, hide the part of the route already travelled —
   // the line is drawn from the snapped puck position forward only.

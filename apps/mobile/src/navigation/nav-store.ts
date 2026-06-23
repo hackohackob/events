@@ -36,8 +36,12 @@ export interface NavProgress {
   /** Ground speed in m/s (from successive fixes), or null until known. */
   speedMps: number | null;
   surface: SurfaceClass;
-  /** Snapped position on the route — what the puck renders at. */
+  /** Snapped position on the route — used for the path-clip / progress. */
   snapped: LatLng;
+  /** The real GPS position. The puck renders here when off-route, else snapped. */
+  raw: LatLng;
+  /** Perpendicular distance from the route line, metres. */
+  offRouteMeters: number;
 }
 
 interface NavState {
@@ -70,6 +74,12 @@ interface NavState {
   navZoomOverride: number | null;
   /** "Avoid incoming traffic": route off the live race course where possible. */
   avoidIncomingTraffic: boolean;
+  /** Wall-clock ms when the user first went off-route (null while on-route). */
+  offRouteSince: number | null;
+  /** Last auto-reroute time, to rate-limit re-routing. */
+  lastRerouteAt: number;
+  /** True while an off-route auto-reroute request is in flight. */
+  rerouting: boolean;
 
   openTransport: (destination: LatLng & { label: string }, incidentId?: string | null) => void;
   cancel: () => void;
@@ -81,6 +91,8 @@ interface NavState {
   placePoint: (point: LatLng) => Promise<void>;
   removeWaypoint: (index: number) => Promise<void>;
   recalculate: () => Promise<void>;
+  /** Recompute the route from a new origin (off-route auto-reroute). */
+  reroute: (from: LatLng) => Promise<void>;
   startNavigation: () => void;
   updateProgress: (fix: { lat: number; lng: number; at?: number }) => void;
   /** Compass press while navigating: re-center, toggling follow ↔ north-up. */
@@ -90,7 +102,13 @@ interface NavState {
   stop: () => void;
 }
 
-const OFF_ROUTE_THRESHOLD_M = 45;
+// Past this perpendicular distance from the route the puck shows the real GPS
+// position (not the snap) and the "return to path" prompt flashes.
+const OFF_ROUTE_THRESHOLD_M = 30;
+// How long continuously off-route before a fresh route is computed from the
+// user's actual position, and the minimum gap between auto-reroutes.
+const REROUTE_AFTER_MS = 12_000;
+const REROUTE_COOLDOWN_MS = 15_000;
 
 export const useNavStore = create<NavState>((set, get) => ({
   phase: "idle",
@@ -110,6 +128,9 @@ export const useNavStore = create<NavState>((set, get) => ({
   recenterTick: 0,
   navZoomOverride: null,
   avoidIncomingTraffic: false,
+  offRouteSince: null,
+  lastRerouteAt: 0,
+  rerouting: false,
   destinationIncidentId: null,
 
   openTransport: (destination, incidentId = null) =>
@@ -143,6 +164,8 @@ export const useNavStore = create<NavState>((set, get) => ({
       pendingInsertIndex: null,
       lastFix: null,
       navZoomOverride: null,
+      offRouteSince: null,
+      rerouting: false,
     }),
 
   selectProfile: async (profile, origin) => {
@@ -213,6 +236,19 @@ export const useNavStore = create<NavState>((set, get) => ({
     }
   },
 
+  reroute: async (from) => {
+    const { destination, profile } = get();
+    if (!destination || !profile) return;
+    debugLog("location", "info", "off-route — recomputing navigation path", { from });
+    // Fresh route from the user's actual position; drop any prior via-points.
+    set({ origin: from, vias: [], offRouteSince: null, rerouting: true });
+    try {
+      await get().recalculate();
+    } finally {
+      set({ rerouting: false });
+    }
+  },
+
   startNavigation: () => {
     if (!get().selectedRouteId && get().routes[0]) {
       set({ selectedRouteId: get().routes[0].id });
@@ -225,6 +261,9 @@ export const useNavStore = create<NavState>((set, get) => ({
       navCameraMode: "follow",
       navZoomOverride: null,
       recenterTick: get().recenterTick + 1,
+      offRouteSince: null,
+      lastRerouteAt: 0,
+      rerouting: false,
     });
   },
 
@@ -287,21 +326,42 @@ export const useNavStore = create<NavState>((set, get) => ({
 
     const surface = surfaceAtAlong(route, snap.alongMeters);
 
+    const offRoute = snap.distanceMeters > OFF_ROUTE_THRESHOLD_M;
+    // Track how long we've been off-route so we can recompute a fresh path.
+    const offRouteSince = offRoute ? (state.offRouteSince ?? now) : null;
+
     set({
       lastFix: { lat: fix.lat, lng: fix.lng, at: now },
+      offRouteSince,
       progress: {
         alongMeters: snap.alongMeters,
         remainingMeters,
         remainingMs,
         toManeuverMeters,
         instructionIndex: index,
-        offRoute: snap.distanceMeters > OFF_ROUTE_THRESHOLD_M,
+        offRoute,
         bearing,
         speedMps,
         surface,
         snapped: snap.point,
+        raw: here,
+        offRouteMeters: snap.distanceMeters,
       },
     });
+
+    // After a sustained spell off the line, recompute navigation from where the
+    // user actually is (rate-limited so it can't thrash).
+    if (
+      offRoute &&
+      offRouteSince &&
+      now - offRouteSince > REROUTE_AFTER_MS &&
+      !state.loading &&
+      !state.rerouting &&
+      now - state.lastRerouteAt > REROUTE_COOLDOWN_MS
+    ) {
+      set({ lastRerouteAt: now });
+      void get().reroute(here);
+    }
 
     void instruction; // (kept for future re-route triggers)
   },

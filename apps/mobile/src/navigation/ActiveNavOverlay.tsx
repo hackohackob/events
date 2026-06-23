@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, Dimensions, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useNavStore } from "./nav-store";
@@ -21,6 +21,7 @@ export function ActiveNavOverlay() {
   const routes = useNavStore((s) => s.routes);
   const selectedRouteId = useNavStore((s) => s.selectedRouteId);
   const progress = useNavStore((s) => s.progress);
+  const rerouting = useNavStore((s) => s.rerouting);
   const stop = useNavStore((s) => s.stop);
 
   if (phase !== "active") return null;
@@ -55,11 +56,8 @@ export function ActiveNavOverlay() {
         <View style={styles.maneuverTrack}>
           <View style={[styles.maneuverFill, { width: `${barFill * 100}%` }]} />
         </View>
-        {progress?.offRoute ? (
-          <View style={styles.offRoutePill}>
-            <Feather name="alert-triangle" size={11} color="#fca5a5" />
-            <Text style={styles.offRouteText}>Off route — rejoin the line</Text>
-          </View>
+        {progress?.offRoute || rerouting ? (
+          <OffRoutePrompt meters={progress?.offRouteMeters ?? 0} rerouting={rerouting} />
         ) : null}
       </View>
 
@@ -78,6 +76,30 @@ export function ActiveNavOverlay() {
 
       <NavStatusBar />
     </View>
+  );
+}
+
+/** Flashing "return to path" prompt shown when the user strays off the route. */
+function OffRoutePrompt({ meters, rerouting }: { meters: number; rerouting: boolean }) {
+  const flash = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flash, { toValue: 0.35, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(flash, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [flash]);
+
+  return (
+    <Animated.View style={[styles.offRoutePill, { opacity: flash }]}>
+      <Feather name={rerouting ? "refresh-cw" : "alert-triangle"} size={12} color="#fecaca" />
+      <Text style={styles.offRouteText}>
+        {rerouting ? "Finding a new route…" : `Return to path · ${Math.round(meters)} m off`}
+      </Text>
+    </Animated.View>
   );
 }
 
@@ -202,15 +224,20 @@ const styles = StyleSheet.create({
   offRoutePill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 7,
     marginTop: 9,
     alignSelf: "flex-start",
-    backgroundColor: "rgba(248,113,113,0.14)",
+    backgroundColor: "rgba(239,68,68,0.92)",
     borderRadius: 999,
-    paddingVertical: 4,
-    paddingHorizontal: 9,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    shadowColor: "#ef4444",
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
   },
-  offRouteText: { color: "#fca5a5", fontSize: 11, fontWeight: "800" },
+  offRouteText: { color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.2 },
   endButton: {
     position: "absolute",
     right: 14,
