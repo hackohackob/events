@@ -8,10 +8,11 @@ import el from "./el.json";
 import de from "./de.json";
 import it from "./it.json";
 import ru from "./ru.json";
+import sr from "./sr.json";
 
-export type Lang = "bg" | "en" | "uk" | "tr" | "ro" | "el" | "de" | "it" | "ru";
+export type Lang = "bg" | "en" | "uk" | "tr" | "ro" | "el" | "de" | "it" | "ru" | "sr";
 type Dict = Record<string, string>;
-const DICTS: Record<Lang, Dict> = { bg, en, uk, tr, ro, el, de, it, ru };
+const DICTS: Record<Lang, Dict> = { bg, en, uk, tr, ro, el, de, it, ru, sr };
 
 /** Languages shown in the picker. All ship with a full dictionary.
  *  Ordered by how likely a speaker of each language is to be in Bulgaria for a
@@ -26,6 +27,7 @@ export const LANGUAGES: { code: Lang | string; flag: string; label: string; read
   { code: "uk", flag: "🇺🇦", label: "Українська", ready: true },
   { code: "tr", flag: "🇹🇷", label: "Türkçe", ready: true },
   { code: "ro", flag: "🇷🇴", label: "Română", ready: true },
+  { code: "sr", flag: "🇷🇸", label: "Srpski", ready: true },
   { code: "el", flag: "🇬🇷", label: "Ελληνικά", ready: true },
   { code: "de", flag: "🇩🇪", label: "Deutsch", ready: true },
   { code: "it", flag: "🇮🇹", label: "Italiano", ready: true },

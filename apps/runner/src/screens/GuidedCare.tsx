@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
-import { fetchMyIncidents } from "../api";
 import { COMMAND_PHONE } from "../lib/config";
 import { TRIAGE, TRIAGE_START, type OptionTone } from "../lib/triage";
 import { CprMode } from "../components/CprMode";
@@ -11,63 +10,21 @@ export function GuidedCare() {
   const { t, lang } = useT();
   const [nodeId, setNodeId] = useState(TRIAGE_START);
   const [showCpr, setShowCpr] = useState(false);
-  const [eta, setEta] = useState<{ navigating: boolean; assigned: boolean; etaMin: number | null }>({
-    navigating: false,
-    assigned: false,
-    etaMin: null,
-  });
-
-  // Real medic status for the header (no hardcoded ETA).
-  useEffect(() => {
-    let alive = true;
-    const tick = () =>
-      fetchMyIncidents()
-        .then((list) => {
-          if (!alive) return;
-          const inc = list.find((i) => i.status !== "resolved" && i.status !== "closed") ?? list[0];
-          if (!inc) return;
-          const navigating = Boolean(inc.assignedMedicNavigating);
-          const assigned = (inc.responders?.length ?? 0) > 0;
-          let etaMin: number | null = null;
-          if (navigating && inc.assignedMedicEtaIso) {
-            const m = Math.round((new Date(inc.assignedMedicEtaIso).getTime() - Date.now()) / 60000);
-            etaMin = Number.isFinite(m) ? Math.max(1, m) : null;
-          }
-          setEta({ navigating, assigned, etaMin });
-        })
-        .catch(() => undefined);
-    tick();
-    const id = setInterval(tick, 10000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
 
   const node = TRIAGE[nodeId] ?? TRIAGE[TRIAGE_START];
   // The triage copy is authored in bg/en; for any other UI language fall back
   // to English rather than showing nothing.
   const tr = (ls: { bg: string; en: string; [k: string]: string | undefined }) => ls[lang] ?? ls.en;
 
-  const etaLabel =
-    eta.navigating && eta.etaMin != null
-      ? t("guided.enRoute", { eta: eta.etaMin })
-      : eta.assigned
-        ? t("guided.assigned")
-        : t("guided.awaiting");
-
   const accent =
     node.tone === "critical" ? "var(--critical)" : node.tone === "good" ? "var(--primary)" : "var(--border-strong)";
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "var(--bg-base)", display: "flex", flexDirection: "column", padding: "44px 18px 20px" }}>
-      {/* Header: live medic status + close */}
+      {/* Header: screen title + close */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "rgba(43,227,160,0.12)", border: "1px solid rgba(43,227,160,0.35)", fontSize: 11, fontWeight: 800, color: "var(--primary)" }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--primary)", animation: "pulseDot 2s infinite" }} />
-          {etaLabel}
-        </span>
-        <button onClick={() => navigate("/map")} style={{ color: "var(--text-muted)", fontSize: 13 }}>{t("guided.title")}</button>
+        <span className="archivo" style={{ fontWeight: 900, fontSize: 18 }}>{t("guided.title")}</span>
+        <button onClick={() => navigate("/map")} style={{ width: 38, height: 38, borderRadius: 12, background: "var(--bg-input)", border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontSize: 18 }}>✕</button>
       </div>
 
       {/* Call Race Command — always available */}

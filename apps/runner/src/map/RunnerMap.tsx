@@ -328,9 +328,14 @@ export function RunnerMap({
         onPinMove?.([ll.lng, ll.lat]);
       });
       pinMarkerRef.current = marker;
+    } else if (!pinDraggable) {
+      // Static preview (Confirm thumbnail): when the pin is re-positioned (after
+      // "fix location"), move the marker AND re-centre so the image updates.
+      pinMarkerRef.current.setLngLat(editablePin);
+      map.setCenter(editablePin);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editablePin]);
+  }, [editablePin, pinDraggable]);
 
   // Allowed-radius circle for the editable pin (only while it's draggable).
   useEffect(() => {
@@ -363,6 +368,15 @@ export function RunnerMap({
     } else {
       scrubMarkerRef.current.setLngLat(scrubPoint);
     }
+    // Keep the scrubbed point visible: if it falls outside the current viewport,
+    // zoom out (fit the current view extended to include it) rather than yanking
+    // the camera off the runner. Padded for the header + sheet so it lands in the
+    // visible area.
+    if (!map.getBounds().contains(scrubPoint)) {
+      const bounds = map.getBounds().extend(scrubPoint);
+      map.fitBounds(bounds, { padding: fitPad(), duration: 300, maxZoom: map.getZoom() });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrubPoint]);
 
   // Recenter ONLY when the button is pressed (recenterSignal changes) — not on

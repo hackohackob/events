@@ -3,28 +3,22 @@ import { formatDistance } from "../lib/geo";
 
 export interface DockNearest {
   distanceMeters: number;
-  bearingDeg: number;
-}
-export interface DockActive {
-  navigating: boolean;
-  assigned: boolean;
-  etaMin: number | null;
 }
 
 /**
  * The bottom "safety dock" — a single frosted-glass panel that unifies the
- * nearest-medic radar, the report action, and (when an alert is live) the
- * view-your-signal status. Idle → report is primary; active → the live alert is
- * primary and reporting another is secondary.
+ * nearest-medic radar, the report action, and (when an alert is live) a link
+ * back to the runner's own signal. Idle → report is primary; with a live alert
+ * the view-your-signal link is primary and reporting another is secondary.
  */
 export function SafetyDock({
   nearest,
-  active,
+  hasActiveAlert,
   onReport,
   onViewAlert,
 }: {
   nearest: DockNearest | null;
-  active: DockActive | null;
+  hasActiveAlert: boolean;
   onReport: () => void;
   onViewAlert: () => void;
 }) {
@@ -48,9 +42,9 @@ export function SafetyDock({
       }}
     >
       <MedicRadar nearest={nearest} />
-      {active ? (
+      {hasActiveAlert ? (
         <>
-          <ViewAlertButton active={active} onClick={onViewAlert} />
+          <ViewAlertButton onClick={onViewAlert} />
           <button
             onClick={onReport}
             style={{
@@ -90,6 +84,8 @@ function MedicRadar({ nearest }: { nearest: DockNearest | null }) {
             animation: "dockRing 2.4s ease-out infinite",
           }}
         />
+        {/* Static shield — no directional arrow (it read like a compass and
+            misled people about which way a medic actually was). */}
         <div
           style={{
             position: "absolute",
@@ -102,22 +98,7 @@ function MedicRadar({ nearest }: { nearest: DockNearest | null }) {
             fontSize: 18,
           }}
         >
-          {nearest ? (
-            <span
-              style={{
-                display: "inline-block",
-                color: "var(--primary)",
-                fontSize: 20,
-                fontWeight: 900,
-                transform: `rotate(${nearest.bearingDeg}deg)`,
-                transition: "transform 0.5s ease",
-              }}
-            >
-              ↑
-            </span>
-          ) : (
-            "🛡️"
-          )}
+          🛡️
         </div>
       </div>
 
@@ -128,7 +109,7 @@ function MedicRadar({ nearest }: { nearest: DockNearest | null }) {
         {nearest ? (
           <div className="archivo" style={{ fontWeight: 800, fontSize: 18, color: "var(--text-primary)" }}>
             {formatDistance(nearest.distanceMeters)}{" "}
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("dock.ahead")}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("dock.away")}</span>
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, color: "var(--text-secondary)", fontSize: 13, fontWeight: 600 }}>
@@ -189,14 +170,8 @@ function ReportButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function ViewAlertButton({ active, onClick }: { active: DockActive; onClick: () => void }) {
+function ViewAlertButton({ onClick }: { onClick: () => void }) {
   const { t } = useT();
-  const status =
-    active.navigating && active.etaMin != null
-      ? t("sent.dispatched", { eta: active.etaMin })
-      : active.assigned
-        ? t("sent.assigned")
-        : t("sent.pending");
 
   return (
     <button
@@ -226,7 +201,7 @@ function ViewAlertButton({ active, onClick }: { active: DockActive; onClick: () 
           <span className="section-label" style={{ color: "var(--primary)", fontSize: 10 }}>{t("dock.sosActive")}</span>
         </span>
         <span className="archivo" style={{ display: "block", fontWeight: 800, fontSize: 15, color: "var(--text-primary)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {status}
+          {t("dock.viewAlert")}
         </span>
         <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>{t("dock.tapView")}</span>
       </span>

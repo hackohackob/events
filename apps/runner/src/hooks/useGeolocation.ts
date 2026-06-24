@@ -23,15 +23,26 @@ const DEV_SEED: Fix = {
   timestamp: new Date().toISOString(),
 };
 
+/** Accuracy (m) at or below which a fix is "good" — we then poll lazily. */
+const GOOD_ACCURACY_METERS = 50;
+/** Poll cadence once we have a good fix (battery-friendly). */
+const POLL_GOOD_MS = 45_000;
+/** Poll cadence while accuracy is still poor (or we have no fix yet). */
+const POLL_POOR_MS = 12_000;
+
 /**
- * Continuous high-accuracy geolocation. Grabs a one-shot fix immediately for a
- * fast first position, then watches for updates. Always keeps the latest fix so
- * "you" is visible and an SOS can snapshot instantly.
+ * Adaptive-interval high-accuracy geolocation. Grabs a one-shot fix immediately
+ * for a fast first position, then *polls* (rather than continuously watching) so
+ * the browser isn't hammered with location requests while the map is open. Once
+ * a good fix lands we slow to ~45 s; while accuracy is poor we poll faster.
+ * Always keeps the latest fix so "you" is visible and an SOS can snapshot
+ * instantly.
  */
 export function useGeolocation(onStream?: (fix: Fix) => void, streamEveryMs = 180_000) {
   const [fix, setFix] = useState<Fix | null>(import.meta.env.DEV ? DEV_SEED : null);
   const [denied, setDenied] = useState(false);
   const lastStreamRef = useRef(0);
+  const lastAccuracyRef = useRef(Infinity);
   const streamRef = useRef(onStream);
   streamRef.current = onStream;
 
@@ -40,7 +51,17 @@ export function useGeolocation(onStream?: (fix: Fix) => void, streamEveryMs = 18
       if (!import.meta.env.DEV) setDenied(true);
       return;
     }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const schedule = () => {
+      if (cancelled) return;
+      const delay = lastAccuracyRef.current <= GOOD_ACCURACY_METERS ? POLL_GOOD_MS : POLL_POOR_MS;
+      timer = setTimeout(poll, delay);
+    };
+
     const onPos = (pos: GeolocationPosition) => {
+      if (cancelled) return;
       setDenied(false);
       const next: Fix = {
         lat: pos.coords.latitude,
@@ -49,29 +70,33 @@ export function useGeolocation(onStream?: (fix: Fix) => void, streamEveryMs = 18
         heading: Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
         timestamp: new Date(pos.timestamp).toISOString(),
       };
+      lastAccuracyRef.current = next.accuracy;
       setFix(next);
       const now = Date.now();
       if (streamRef.current && now - lastStreamRef.current >= streamEveryMs) {
         lastStreamRef.current = now;
         streamRef.current(next);
       }
+      schedule();
     };
     const onErr = () => {
       if (!import.meta.env.DEV) setDenied(true); // keep the dev seed usable locally
+      schedule();
     };
 
-    // Fast first fix, then keep watching.
-    navigator.geolocation.getCurrentPosition(onPos, onErr, {
-      enableHighAccuracy: true,
-      maximumAge: 10_000,
-      timeout: 15_000,
-    });
-    const id = navigator.geolocation.watchPosition(onPos, onErr, {
-      enableHighAccuracy: true,
-      maximumAge: 5_000,
-      timeout: 20_000,
-    });
-    return () => navigator.geolocation.clearWatch(id);
+    const poll = () =>
+      navigator.geolocation.getCurrentPosition(onPos, onErr, {
+        enableHighAccuracy: true,
+        maximumAge: 10_000,
+        timeout: 15_000,
+      });
+
+    // Fast first fix, then poll on an adaptive cadence.
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [streamEveryMs]);
 
   return { fix, denied };

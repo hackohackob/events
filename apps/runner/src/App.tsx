@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useApp } from "./state/AppContext";
 import { Onboarding } from "./screens/Onboarding";
-import { ReportSheet } from "./screens/ReportSheet";
+import { WhoFor } from "./screens/WhoFor";
 import { ReportFullScreen } from "./screens/ReportFullScreen";
 import { Sending } from "./screens/Sending";
 import { SosSent } from "./screens/SosSent";
@@ -19,8 +19,11 @@ const TracksScreen = lazy(() => import("./screens/TracksScreen").then((m) => ({ 
 const Confirm = lazy(() => import("./screens/Confirm").then((m) => ({ default: m.Confirm })));
 
 export function App() {
-  const { profile } = useApp();
-  const onboarded = Boolean(profile?.selectedTrackId);
+  const { profile, eventId } = useApp();
+  // Onboarded only when the runner has a track selected FOR THE CURRENT EVENT.
+  // A selection made for a different event doesn't count (BIB/track aren't
+  // carried across events), so they're sent back to onboarding to choose again.
+  const onboarded = Boolean(profile?.selectedTrackId && profile.eventId === eventId);
 
   return (
     <LocationGate>
@@ -29,10 +32,13 @@ export function App() {
         <Routes>
         <Route path="/" element={onboarded ? <Navigate to="/map" replace /> : <Navigate to="/onboarding" replace />} />
         <Route path="/onboarding" element={<Onboarding />} />
-        <Route path="/map" element={<MapScreen />} />
-        <Route path="/tracks" element={<TracksScreen />} />
-        <Route path="/report" element={<ReportSheet />} />
-        <Route path="/report/full" element={<ReportFullScreen />} />
+        {/* Map & tracks require an onboarded profile for this event — otherwise
+            there's no runner identity/track to render, so bounce to onboarding. */}
+        <Route path="/map" element={onboarded ? <MapScreen /> : <Navigate to="/onboarding" replace />} />
+        <Route path="/tracks" element={onboarded ? <TracksScreen /> : <Navigate to="/onboarding" replace />} />
+        {/* Report flow: step 1 = who is it for, step 2 = what's happening. */}
+        <Route path="/report" element={<WhoFor />} />
+        <Route path="/report/what" element={<ReportFullScreen />} />
         <Route path="/confirm" element={<Confirm />} />
         <Route path="/sending" element={<Sending />} />
         <Route path="/sent" element={<SosSent />} />

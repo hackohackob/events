@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type GateState = "checking" | "prompting" | "granted" | "denied" | "unsupported";
 
@@ -10,6 +10,13 @@ type GateState = "checking" | "prompting" | "granted" | "denied" | "unsupported"
  */
 export function LocationGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<GateState>(import.meta.env.DEV ? "granted" : "checking");
+  // Latest state, read by the focus handler so it never acts on a stale closure
+  // (the bug that re-requested permission on every blur/focus — e.g. when the
+  // camera/file picker stole focus — and could flip a granted app to a blocking
+  // "Location is blocked" screen on a transient timeout, ejecting an in-flight
+  // incident report).
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const request = useCallback(() => {
     if (!("geolocation" in navigator)) {
@@ -20,8 +27,9 @@ export function LocationGate({ children }: { children: React.ReactNode }) {
     navigator.geolocation.getCurrentPosition(
       () => setState("granted"),
       (err) => {
-        // PERMISSION_DENIED (1) → blocked; other errors (timeout/unavailable)
-        // still mean we don't have a fix, so keep gating with a retry.
+        // Once granted, a later transient failure (timeout/unavailable) must NOT
+        // re-gate the app — only a real denial before we ever granted does.
+        if (stateRef.current === "granted") return;
         setState("denied");
         void err;
       },
@@ -32,8 +40,9 @@ export function LocationGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (import.meta.env.DEV) return;
     // If the Permissions API already reports "granted", skip straight through;
-    // otherwise trigger the prompt. Re-check on focus so flipping the OS/browser
-    // setting and returning recovers without a manual reload.
+    // otherwise trigger the prompt. Re-check on focus ONLY while still blocked,
+    // so flipping the OS/browser setting and returning recovers — but a normal
+    // blur/focus (or camera picker) on an already-granted app does nothing.
     let cancelled = false;
     const start = async () => {
       try {
@@ -50,7 +59,9 @@ export function LocationGate({ children }: { children: React.ReactNode }) {
     };
     void start();
     const onFocus = () => {
-      if (!cancelled && state !== "granted") request();
+      if (!cancelled && (stateRef.current === "denied" || stateRef.current === "unsupported")) {
+        request();
+      }
     };
     window.addEventListener("focus", onFocus);
     return () => {

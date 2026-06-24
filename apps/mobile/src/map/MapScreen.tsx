@@ -200,6 +200,7 @@ function incidentToMarker(incident: IncidentResponse) {
     photoUrl: incident.photoUrl,
     photoUrls: incident.photoUrls,
     reportedBy: incident.reportedBy,
+    createdBy: incident.createdBy,
     createdAt: incident.createdAt,
   };
 }

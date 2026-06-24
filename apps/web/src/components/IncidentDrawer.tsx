@@ -253,7 +253,10 @@ export default function IncidentDrawer({
 
               <div>
                 <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: '#475569' }}>REPORTED BY</div>
-                <div className="text-sm text-slate-300">{incident.reportedBy ?? 'Unknown'}</div>
+                <div className="text-sm text-slate-300">
+                  {incident.reportedBy ?? 'Unknown'}
+                  <span className="text-slate-500"> ({incident.createdBy?.startsWith('runner_') ? 'Participant' : 'Medic'})</span>
+                </div>
               </div>
 
               {/* Responders + assign */}

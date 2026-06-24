@@ -61,6 +61,14 @@ function statusMeta(status?: string) {
   return STATUS_META[status ?? "open"] ?? STATUS_META.open;
 }
 
+/** Derive the reporter's role from their user id. Runners (from the participant
+ *  PWA) have `runner_*` ids; everyone else reporting today is a medic.
+ *  Organizer is reserved for a later role and isn't detected yet. */
+function reporterRole(createdBy?: string): string {
+  if (createdBy?.startsWith("runner_")) return "Participant";
+  return "Medic";
+}
+
 function timeAgo(iso?: string): string | null {
   if (!iso) return null;
   const ms = Date.now() - new Date(iso).getTime();
@@ -429,10 +437,9 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
               <View style={[styles.statusDot, { backgroundColor: status.color }]} />
               <Text style={[styles.statusPillText, { color: status.color }]}>{status.label}</Text>
             </View>
-            <Text style={styles.headerMeta} numberOfLines={1}>
-              {type.label}
-              {distanceKm != null ? ` · ${distanceKm.toFixed(1)} km away` : ""}
-            </Text>
+            {distanceKm != null ? (
+              <Text style={styles.headerMeta} numberOfLines={1}>{distanceKm.toFixed(1)} km away</Text>
+            ) : null}
           </View>
         </View>
         {/* Tap to start, tap again (or tap the red bar) to send — straight into chat. */}
@@ -472,28 +479,23 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
           />
         ) : null}
 
-        {/* ── Report meta ── */}
-        <View style={styles.metaRow}>
-          <View style={styles.metaCell}>
-            <Feather name="clock" size={13} color="#64748b" />
-            <Text style={styles.metaValue} numberOfLines={1}>{reportedAgo ?? "Unknown"}</Text>
-            <Text style={styles.metaLabel}>REPORTED</Text>
+        {/* ── Category (prominent) + who reported it ── */}
+        <View style={styles.reportBlock}>
+          <View style={styles.categoryRow}>
+            <Text style={styles.categoryIcon}>{type.icon}</Text>
+            <Text style={styles.categoryBig} numberOfLines={2}>{type.label}</Text>
           </View>
-          <View style={styles.metaDivider} />
-          <View style={styles.metaCell}>
-            <Feather name="user" size={13} color="#64748b" />
-            <Text style={styles.metaValue} numberOfLines={1}>{incident.reportedBy ?? "Unknown"}</Text>
-            <Text style={styles.metaLabel}>BY</Text>
-          </View>
-          <View style={styles.metaDivider} />
-          <View style={styles.metaCell}>
-            <Feather name="users" size={13} color="#64748b" />
-            <Text style={styles.metaValue}>{responders.length}</Text>
-            <Text style={styles.metaLabel}>RESPONDING</Text>
+          <View style={styles.reportedRow}>
+            <Feather name="user" size={12} color="#64748b" />
+            <Text style={styles.reportedByText} numberOfLines={1}>
+              Reported by {incident.reportedBy ?? "Unknown"} ({reporterRole(incident.createdBy)})
+              {reportedAgo ? ` · ${reportedAgo}` : ""}
+            </Text>
           </View>
         </View>
 
-        {/* ── Notes ── */}
+        {/* ── Notes (may include the patient's medical info, then the
+            reporter's own description) ── */}
         <View style={styles.section}>
           <Text style={styles.sectionKicker}>NOTES</Text>
           <View style={styles.card}>
@@ -533,7 +535,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
         {/* ── Responders ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionKicker}>RESPONDERS</Text>
+            <Text style={styles.sectionKicker}>RESPONDERS{responders.length ? ` (${responders.length})` : ""}</Text>
             {amCoordinator && !isClosed ? (
               <Pressable style={styles.assignBtn} onPress={() => setAssignOpen(true)}>
                 <Feather name="plus" size={13} color="#34d399" />
@@ -809,7 +811,22 @@ const styles = StyleSheet.create({
   // bar at the 42% snap, so without it the archive button gets clipped.
   bodyContent: { paddingHorizontal: 18, paddingBottom: 120, gap: 16 },
 
-  // Meta strip
+  // Category + reporter block
+  reportBlock: {
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.1)",
+    padding: 14,
+    gap: 8,
+  },
+  categoryRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  categoryIcon: { fontSize: 24 },
+  categoryBig: { flex: 1, color: "#f4f8ff", fontSize: 20, fontWeight: "900", letterSpacing: 0.2 },
+  reportedRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  reportedByText: { flex: 1, color: "#8da3bd", fontSize: 12.5, fontWeight: "700" },
+
+  // Meta strip (legacy)
   metaRow: {
     flexDirection: "row",
     alignItems: "stretch",

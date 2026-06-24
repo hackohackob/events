@@ -21,6 +21,9 @@ export interface RunnerProfile {
   selectedTrackId: string | null;
   selectedTrackLabel: string | null;
   selectedTrackColor: string | null;
+  /** Event this BIB + track selection belongs to. BIB and track are NOT carried
+   *  over to a different event (they must be chosen again per event). */
+  eventId: string | null;
 }
 
 /** Event identity + selectable tracks, fetched from the API on open. */
@@ -30,7 +33,9 @@ export interface EventInfo {
   tracks: TrackChoice[];
 }
 
-/** Optional medical / ICE profile, kept on-device and attached to any SOS. */
+/** Optional medical / ICE profile, kept on-device and attached to any SOS.
+ *  The `no*` flags record an explicit "No" answer to a yes/no question (distinct
+ *  from "unanswered") so negatives can be surfaced to medics too. */
 export interface MedicalInfo {
   bloodType: string;
   allergies: string;
@@ -38,23 +43,33 @@ export interface MedicalInfo {
   conditions: string;
   emergencyName: string;
   emergencyPhone: string;
+  noAllergies?: boolean;
+  noConditions?: boolean;
+  noMedications?: boolean;
 }
 
 export const BLOOD_TYPES = ["", "A+", "A−", "B+", "B−", "AB+", "AB−", "0+", "0−"];
 
-/** True when the profile has any field filled. */
+/** True when the runner has answered anything — a filled field OR an explicit "No". */
 export function hasMedicalInfo(m: MedicalInfo | null): boolean {
-  return !!m && Object.values(m).some((v) => v.trim() !== "");
+  if (!m) return false;
+  const texts = [m.bloodType, m.allergies, m.medications, m.conditions, m.emergencyName, m.emergencyPhone];
+  if (texts.some((v) => (v ?? "").trim() !== "")) return true;
+  return Boolean(m.noAllergies || m.noConditions || m.noMedications);
 }
 
-/** One-line summary for attaching to an incident report. */
+/** One-line summary for attaching to an incident report. Includes explicit
+ *  negatives ("No allergies") — a confirmed "no" is clinically useful. */
 export function medicalSummary(m: MedicalInfo | null): string {
   if (!hasMedicalInfo(m)) return "";
   const parts: string[] = [];
   if (m!.bloodType) parts.push(`Blood ${m!.bloodType}`);
   if (m!.allergies) parts.push(`Allergies: ${m!.allergies}`);
-  if (m!.medications) parts.push(`Meds: ${m!.medications}`);
+  else if (m!.noAllergies) parts.push("No allergies");
   if (m!.conditions) parts.push(`Conditions: ${m!.conditions}`);
+  else if (m!.noConditions) parts.push("No conditions");
+  if (m!.medications) parts.push(`Meds: ${m!.medications}`);
+  else if (m!.noMedications) parts.push("No medications");
   if (m!.emergencyName || m!.emergencyPhone)
     parts.push(`ICE: ${m!.emergencyName} ${m!.emergencyPhone}`.trim());
   return parts.join(" · ");

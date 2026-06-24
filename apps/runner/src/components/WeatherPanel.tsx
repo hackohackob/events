@@ -48,7 +48,7 @@ export function WeatherPanel({
 
   const hours = forecast?.primary.hours ?? [];
   const cur = hours[scrubIndex];
-  const glyph = cur ? weatherGlyph(cur.code, cur.cloudPct) : { icon: "⏳", label: "" };
+  const glyph = cur ? weatherGlyph(cur.code, cur.cloudPct, cur.isDay) : { icon: "⏳", label: "" };
   const relative = scrubIndex === 0 ? t("weather.now") : `+${scrubIndex}h`;
 
   return (

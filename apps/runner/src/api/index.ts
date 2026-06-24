@@ -27,6 +27,17 @@ export async function fetchEvent(eventId: string) {
   return apiGet<EventRecordLike>(`/events/${encodeURIComponent(eventId)}`);
 }
 
+export interface EventSummaryLike {
+  id: string;
+  title: string;
+  status: "draft" | "active" | "closed";
+}
+
+/** List all events (used to offer a dropdown of *active* events on onboarding). */
+export async function fetchEvents() {
+  return apiGet<EventSummaryLike[]>("/events");
+}
+
 export async function fetchTracks(eventId?: string) {
   // The /events/tracks route scopes by the x-event-id header. Pass it
   // explicitly so onboarding (pre-join, no token) and event switches resolve

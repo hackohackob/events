@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
-import { fetchMyIncidents, updateIncidentDetails, uploadIncidentPhoto } from "../api";
-import type { IncidentRecordLike } from "../api/contracts-shim";
+import { fetchMyIncidents, updateIncidentDetails, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
+import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
+import { AttachmentEditor } from "../components/AttachmentEditor";
 import { COMMAND_PHONE } from "../lib/config";
 
 export function SosSent() {
@@ -10,75 +11,55 @@ export function SosSent() {
   const { t } = useT();
   const location = useLocation();
   const state = (location.state ?? {}) as { incidentId?: string; queued?: boolean };
-  const [incident, setIncident] = useState<IncidentRecordLike | null>(null);
-  const [note, setNote] = useState("");
-  const [noteSaved, setNoteSaved] = useState(false);
-  const [photoCount, setPhotoCount] = useState(0);
-  const photoRef = useRef<HTMLInputElement>(null);
   const incidentId = state.incidentId;
 
-  async function saveNote() {
-    if (!incidentId || !note.trim()) return;
-    try {
-      await updateIncidentDetails(incidentId, { description: note.trim() });
-      setNoteSaved(true);
-      setTimeout(() => setNoteSaved(false), 2000);
-    } catch {
-      /* ignore */
-    }
-  }
+  const [note, setNote] = useState("");
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
+  const voice = useVoiceRecorder();
+  // The description already on the incident (medical summary + the report's
+  // original note) — kept so an after-the-fact note is appended, not overwritten.
+  const baseDesc = useRef<string>("");
 
-  async function addPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !incidentId) return;
-    try {
-      await uploadIncidentPhoto(incidentId, file);
-      setPhotoCount((c) => c + 1);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // Poll my own incidents to surface the dispatch status + assigned medic.
   useEffect(() => {
-    if (state.queued) return;
-    let alive = true;
-    const tick = () => {
-      fetchMyIncidents()
-        .then((list) => {
-          if (!alive) return;
-          const found = state.incidentId ? list.find((i) => i.id === state.incidentId) : list[0];
-          if (found) setIncident(found);
-        })
-        .catch(() => undefined);
-    };
-    tick();
-    const id = setInterval(tick, 5000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, [state.incidentId, state.queued]);
+    if (!incidentId) return;
+    fetchMyIncidents()
+      .then((list) => {
+        const inc = list.find((i) => i.id === incidentId);
+        if (inc?.description) baseDesc.current = inc.description;
+      })
+      .catch(() => undefined);
+  }, [incidentId]);
 
-  const assigned = (incident?.responders?.length ?? 0) > 0;
-  const navigating = Boolean(incident?.assignedMedicNavigating);
-  const etaMin = (() => {
-    if (!navigating || !incident?.assignedMedicEtaIso) return null;
-    const mins = Math.round((new Date(incident.assignedMedicEtaIso).getTime() - Date.now()) / 60000);
-    return Number.isFinite(mins) ? Math.max(1, mins) : null;
-  })();
+  // Persist the after-the-fact note (debounced), appended to the base. Only when
+  // there's actually a note — never PATCH an empty value (that would wipe the
+  // medical summary already on the incident, e.g. before the base has loaded).
+  useEffect(() => {
+    const trimmed = note.trim();
+    if (!incidentId || !trimmed) return;
+    const id = setTimeout(() => {
+      const description = [baseDesc.current, trimmed].filter(Boolean).join("\n");
+      void updateIncidentDetails(incidentId, { description }).catch(() => undefined);
+    }, 800);
+    return () => clearTimeout(id);
+  }, [note, incidentId]);
 
-  // Status line: navigating with an ETA → show it; only assigned → "Medic is
-  // assigned"; nobody yet → awaiting assignment.
-  const statusText =
-    navigating && etaMin != null
-      ? t("sent.dispatched", { eta: etaMin })
-      : assigned
-        ? t("sent.assigned")
-        : t("sent.pending");
-  // No "preparing to head out" line — a medic may respond without navigating.
-  const subText = navigating ? t("sent.movingToYou") : assigned ? "" : t("map.noMedic");
+  function addPhoto(file: File) {
+    setPhotos((p) => [...p, file]);
+    if (incidentId) void uploadIncidentPhoto(incidentId, file).catch(() => undefined);
+  }
+
+  async function toggleVoice() {
+    if (voice.recording) {
+      const res = await voice.stop();
+      if (res) {
+        setVoiceBlob(res.blob);
+        if (incidentId) void uploadIncidentVoice(incidentId, res.blob, res.durationMs).catch(() => undefined);
+      }
+    } else {
+      await voice.start().catch(() => undefined);
+    }
+  }
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "linear-gradient(180deg,#08231A 0%,#0A1118 42%)", display: "flex", flexDirection: "column", alignItems: "center", padding: "60px 20px 28px", overflowY: "auto" }}>
@@ -89,59 +70,25 @@ export function SosSent() {
       <h1 className="archivo" style={{ fontWeight: 900, fontSize: 34, color: "#fff", margin: 0 }}>{t("sent.title")}</h1>
       <p style={{ color: "#A9F2D6", fontSize: 14, fontWeight: 700, textAlign: "center", margin: "8px 0 24px" }}>{t("sent.sub")}</p>
 
-      <div style={{ width: "100%", maxWidth: 420, background: "#101826", borderRadius: 18, padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ width: 36, height: 36, borderRadius: 10, background: "var(--primary-bg)", display: "grid", placeItems: "center" }}>🛡️</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--primary)" }}>{statusText}</div>
-            {subText && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{subText}</div>}
-          </div>
-          {navigating && <span style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--primary)", animation: "pulseDot 2s infinite" }} />}
-        </div>
-      </div>
-
-      <div style={{ width: "100%", maxWidth: 420, background: "rgba(255,176,32,0.10)", border: "1px solid rgba(255,176,32,0.4)", borderRadius: 14, padding: "12px 14px", marginTop: 14, color: "var(--caution)", fontSize: 12.5, fontWeight: 600 }}>
+      <div style={{ width: "100%", maxWidth: 420, background: "rgba(255,176,32,0.10)", border: "1px solid rgba(255,176,32,0.4)", borderRadius: 14, padding: "12px 14px", color: "var(--caution)", fontSize: 12.5, fontWeight: 600 }}>
         {t("sent.stay")}
       </div>
 
-      {/* Add details after the alert is out (description + photos) */}
+      {/* Optional add-ons once the alert is out — note / photo / voice. */}
       {incidentId && (
         <div style={{ width: "100%", maxWidth: 420, marginTop: 18 }}>
           <div className="section-label" style={{ marginBottom: 8 }}>{t("sent.addDetails")}</div>
-          <textarea
-            value={note}
-            placeholder={t("sent.notePlaceholder")}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
-            style={{
-              width: "100%",
-              padding: "12px 14px",
-              borderRadius: 13,
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-mid)",
-              color: "var(--text-primary)",
-              fontSize: 14,
-              fontFamily: "Manrope",
-              resize: "none",
-              outline: "none",
-            }}
+          <AttachmentEditor
+            note={note}
+            onNoteChange={setNote}
+            notePlaceholder={t("sent.notePlaceholder")}
+            photos={photos}
+            onAddPhoto={addPhoto}
+            voice={voiceBlob}
+            voiceSupported={voice.supported}
+            recording={voice.recording}
+            onToggleRecord={toggleVoice}
           />
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <button
-              onClick={saveNote}
-              disabled={!note.trim()}
-              style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px solid var(--border-mid)", background: "var(--bg-card)", color: "var(--text-secondary)", fontWeight: 700, fontSize: 13, opacity: note.trim() ? 1 : 0.5 }}
-            >
-              {noteSaved ? t("sent.noteSaved") : t("sent.saveNote")}
-            </button>
-            <button
-              onClick={() => photoRef.current?.click()}
-              style={{ flex: 1, padding: 12, borderRadius: 12, border: "1px dashed var(--border-strong)", color: "var(--text-secondary)", fontWeight: 700, fontSize: 13 }}
-            >
-              📷 {t("sent.addPhoto")}{photoCount > 0 ? ` (${photoCount})` : ""}
-            </button>
-          </div>
-          <input ref={photoRef} type="file" accept="image/*" capture="environment" hidden onChange={addPhoto} />
         </div>
       )}
 
@@ -154,7 +101,7 @@ export function SosSent() {
         </a>
         <button className="btn-primary" onClick={() => navigate("/guided")}>{t("sent.guided")}</button>
         <button onClick={() => navigate("/map")} style={{ width: "100%", marginTop: 12, padding: 14, borderRadius: 16, border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontWeight: 700 }}>
-          {t("sent.track")}
+          {t("sent.backToMap")}
         </button>
       </div>
     </div>

@@ -5,8 +5,10 @@ import { useT } from "../i18n";
 import { LanguageMenu } from "../components/LanguageMenu";
 import { hasEventQuery, prefillFromUrl, loadMedical, saveMedical } from "../lib/storage";
 import { ensureSession, refreshSession } from "../lib/session";
-import { BLOOD_TYPES, hasMedicalInfo, type MedicalInfo } from "../lib/types";
+import { hasMedicalInfo, type MedicalInfo } from "../lib/types";
 import type { TrackChoice } from "../lib/types";
+import { fetchEvents, type EventSummaryLike } from "../api";
+import { MedicalQuestions } from "../components/MedicalQuestions";
 
 const EMPTY_MEDICAL: MedicalInfo = {
   bloodType: "",
@@ -18,7 +20,7 @@ const EMPTY_MEDICAL: MedicalInfo = {
 };
 
 export function Onboarding() {
-  const { profile, saveProfile, eventInfo, eventStatus, validateEvent } = useApp();
+  const { profile, saveProfile, eventId, setEventId, eventInfo, eventStatus, validateEvent } = useApp();
   const { t } = useT();
   const navigate = useNavigate();
   const prefill = prefillFromUrl();
@@ -29,15 +31,19 @@ export function Onboarding() {
   const devBib = dev ? String(rand(1000, 9999)) : "";
   const devPhone = dev ? String(rand(10000, 99999)) : "";
 
+  // BIB & track belong to a specific event — only prefill them when the saved
+  // profile is for the event we're onboarding into now (no cross-event carryover).
+  const sameEvent = !!profile?.eventId && profile.eventId === eventId;
+
   // Two-step flow: the landing (event + terms + Register/SOS) and the
   // registration details (identity, track, optional medical).
   const [step, setStep] = useState<"landing" | "register">("landing");
 
   const [name, setName] = useState(profile?.runnerName ?? prefill.runnerName ?? devName);
-  const [bib, setBib] = useState(profile?.bibNumber ?? prefill.bibNumber ?? devBib);
+  const [bib, setBib] = useState(prefill.bibNumber ?? (sameEvent ? profile?.bibNumber ?? "" : "") ?? devBib);
   const [phone, setPhone] = useState(profile?.phone ?? prefill.phone ?? devPhone);
   const [track, setTrack] = useState<TrackChoice | null>(
-    profile?.selectedTrackId
+    sameEvent && profile?.selectedTrackId
       ? { id: profile.selectedTrackId, label: profile.selectedTrackLabel ?? "", color: profile.selectedTrackColor ?? "var(--primary)" }
       : null,
   );
@@ -46,10 +52,29 @@ export function Onboarding() {
   const [eventCode, setEventCode] = useState("");
   const [codeError, setCodeError] = useState(false);
 
+  // Active events offered as a dropdown; if there's exactly one, auto-select it.
+  const [activeEvents, setActiveEvents] = useState<EventSummaryLike[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchEvents()
+      .then((evs) => {
+        if (!alive) return;
+        const active = evs.filter((e) => e.status === "active");
+        setActiveEvents(active);
+        // Nothing chosen yet (and not arriving via a QR ?event= link) and only
+        // one event is live → pick it silently, no dropdown.
+        if (!eventId && !hasEventQuery() && active.length === 1) setEventId(active[0].id);
+      })
+      .catch(() => setActiveEvents([]));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Optional medical info, collapsed by default.
   const [medical, setMedical] = useState<MedicalInfo>(() => loadMedical() ?? EMPTY_MEDICAL);
   const [showMedical, setShowMedical] = useState(false);
-  const setMed = (k: keyof MedicalInfo, v: string) => setMedical((m) => ({ ...m, [k]: v }));
 
   // Drop a stale selection if it isn't among this event's tracks.
   useEffect(() => {
@@ -80,6 +105,7 @@ export function Onboarding() {
       selectedTrackId: track.id,
       selectedTrackLabel: track.label,
       selectedTrackColor: track.color,
+      eventId,
     };
     try {
       await refreshSession(p);
@@ -98,7 +124,7 @@ export function Onboarding() {
     } catch {
       /* emergency path must not block */
     }
-    navigate("/report/full");
+    navigate("/report");
   }
 
   return (
@@ -155,38 +181,70 @@ export function Onboarding() {
       ) : null}
 
       {step === "landing" && needsEventInput && (
-        <>
-          <div
+        (activeEvents?.length ?? 0) > 1 ? (
+          /* Multiple live events → choose from a dropdown. */
+          <select
+            value={eventId || ""}
+            onChange={(e) => e.target.value && setEventId(e.target.value)}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
+              appearance: "none",
+              WebkitAppearance: "none",
+              width: "100%",
               height: 48,
-              padding: "0 14px",
+              padding: "0 36px 0 14px",
               borderRadius: 13,
-              background: "var(--bg-input)",
-              border: `1px solid ${codeError ? "var(--critical)" : "var(--border-mid)"}`,
               marginTop: 10,
+              background:
+                "var(--bg-input) url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='2' fill='none' stroke-linecap='round'/></svg>\") no-repeat right 14px center",
+              border: "1px solid var(--border-mid)",
+              color: eventId ? "var(--text-primary)" : "var(--text-muted)",
+              fontSize: 15,
+              fontWeight: 700,
+              outline: "none",
             }}
           >
-            <span style={{ opacity: 0.7 }}>🎟️</span>
-            <input
-              value={eventCode}
-              placeholder={t("onboarding.eventCode")}
-              onChange={(e) => {
-                setEventCode(e.target.value);
-                setCodeError(false);
+            <option value="">{t("onboarding.chooseEvent")}</option>
+            {activeEvents!.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.title}
+              </option>
+            ))}
+          </select>
+        ) : (
+          /* No live events to list (or not loaded yet) → manual code entry. */
+          <>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                height: 48,
+                padding: "0 14px",
+                borderRadius: 13,
+                background: "var(--bg-input)",
+                border: `1px solid ${codeError ? "var(--critical)" : "var(--border-mid)"}`,
+                marginTop: 10,
               }}
-              onBlur={onEventBlur}
-              style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--text-primary)", fontSize: 15 }}
-            />
-          </div>
-          {codeError && (
-            <div style={{ color: "var(--critical)", fontSize: 12, fontWeight: 600, marginTop: 6 }}>
-              {t("onboarding.eventNotFound")}
+            >
+              <span style={{ opacity: 0.7 }}>🎟️</span>
+              <input
+                value={eventCode}
+                placeholder={t("onboarding.eventCode")}
+                onChange={(e) => {
+                  setEventCode(e.target.value);
+                  setCodeError(false);
+                }}
+                onBlur={onEventBlur}
+                style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--text-primary)", fontSize: 15 }}
+              />
             </div>
-          )}
-        </>
+            {codeError && (
+              <div style={{ color: "var(--critical)", fontSize: 12, fontWeight: 600, marginTop: 6 }}>
+                {t("onboarding.eventNotFound")}
+              </div>
+            )}
+          </>
+        )
       )}
 
       {step === "landing" ? (
@@ -320,34 +378,8 @@ export function Onboarding() {
           </button>
 
           {showMedical && (
-            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                {BLOOD_TYPES.filter((b) => b).map((b) => {
-                  const selected = medical.bloodType === b;
-                  return (
-                    <button
-                      key={b}
-                      onClick={() => setMed("bloodType", selected ? "" : b)}
-                      style={{
-                        padding: "7px 12px",
-                        borderRadius: 10,
-                        background: selected ? "var(--primary-bg)" : "var(--bg-input)",
-                        border: `1px solid ${selected ? "var(--primary)" : "var(--border-mid)"}`,
-                        color: "var(--text-primary)",
-                        fontWeight: 700,
-                        fontSize: 13,
-                      }}
-                    >
-                      {b}
-                    </button>
-                  );
-                })}
-              </div>
-              <Field icon="⚠️" placeholder={t("medical.allergiesPh")} value={medical.allergies} onChange={(v) => setMed("allergies", v)} />
-              <Field icon="💊" placeholder={t("medical.medicationsPh")} value={medical.medications} onChange={(v) => setMed("medications", v)} />
-              <Field icon="🩹" placeholder={t("medical.conditionsPh")} value={medical.conditions} onChange={(v) => setMed("conditions", v)} />
-              <Field icon="🧑" placeholder={t("medical.emergencyName")} value={medical.emergencyName} onChange={(v) => setMed("emergencyName", v)} />
-              <Field icon="📞" placeholder={t("medical.emergencyPhone")} value={medical.emergencyPhone} onChange={(v) => setMed("emergencyPhone", v)} type="tel" />
+            <div style={{ marginTop: 12 }}>
+              <MedicalQuestions value={medical} onChange={setMedical} />
             </div>
           )}
 

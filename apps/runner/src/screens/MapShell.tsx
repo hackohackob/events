@@ -7,7 +7,7 @@ import { useLiveMedics } from "../hooks/useLiveMedics";
 import { useTrackGeoJson } from "../hooks/useTrackGeoJson";
 import { LOW_ACCURACY_METERS } from "../hooks/useGeolocation";
 import { fetchMyIncidents, fetchPois, type PoiLike } from "../api";
-import { haversineMeters, cumulativeDistances, snapToRoute, pointAtKm, bearingDeg } from "../lib/geo";
+import { haversineMeters, cumulativeDistances, snapToRoute, pointAtKm } from "../lib/geo";
 import { SafetyDock } from "../components/SafetyDock";
 import { OfflineControlButton } from "../components/OfflineControlButton";
 import { WeatherPanel } from "../components/WeatherPanel";
@@ -75,10 +75,21 @@ export function MapShell({
     }
   }, [active]);
 
-  // When Track Studio opens, frame the whole course.
+  // When Track Studio opens, frame the whole course into the area left visible
+  // above the sheet. Wait until the sheet has reported its height (sheetInset>0)
+  // so the fit pads for it; fit once per track (not on every drag).
+  const fittedTrackRef = useRef<string | null>(null);
   useEffect(() => {
-    if (active === "tracks" && track) setFitSignal((s) => (s ?? 0) + 1);
-  }, [active, track]);
+    if (active !== "tracks") {
+      fittedTrackRef.current = null;
+      return;
+    }
+    const trackKey = profile?.selectedTrackId ?? null;
+    if (track && trackKey && sheetInset > 0 && fittedTrackRef.current !== trackKey) {
+      fittedTrackRef.current = trackKey;
+      setFitSignal((s) => (s ?? 0) + 1);
+    }
+  }, [active, track, sheetInset, profile?.selectedTrackId]);
 
   useEffect(() => {
     fetchPois(eventId)
@@ -109,27 +120,13 @@ export function MapShell({
 
   const nearest = useMemo(() => {
     if (!fix || medics.length === 0) return null;
-    let best: { distanceMeters: number; bearingDeg: number } | null = null;
+    let best: { distanceMeters: number } | null = null;
     for (const m of medics) {
       const d = haversineMeters(fix, { lng: m.lng, lat: m.lat });
-      if (!best || d < best.distanceMeters) {
-        best = { distanceMeters: d, bearingDeg: bearingDeg(fix, { lng: m.lng, lat: m.lat }) };
-      }
+      if (!best || d < best.distanceMeters) best = { distanceMeters: d };
     }
     return best;
   }, [fix, medics]);
-
-  const activeDock = useMemo(() => {
-    if (!activeIncident) return null;
-    const navigating = Boolean(activeIncident.assignedMedicNavigating);
-    const assigned = (activeIncident.responders?.length ?? 0) > 0;
-    let etaMin: number | null = null;
-    if (navigating && activeIncident.assignedMedicEtaIso) {
-      const m = Math.round((new Date(activeIncident.assignedMedicEtaIso).getTime() - Date.now()) / 60000);
-      etaMin = Number.isFinite(m) ? Math.max(1, m) : null;
-    }
-    return { navigating, assigned, etaMin };
-  }, [activeIncident]);
 
   const progress = useMemo(() => {
     if (!fix || !track) return { kmAlong: null as number | null, offsetMeters: null as number | null };
@@ -245,8 +242,9 @@ export function MapShell({
       <RunnerMap
         coords={track?.coords ?? null}
         routeColor={routeColor.startsWith("var") ? cssVar(routeColor) : routeColor}
-        medics={medics}
-        pois={pois}
+        // Declutter the weather view — hide medics & POIs so the radar/temps read.
+        medics={weatherOpen ? [] : medics}
+        pois={weatherOpen ? [] : pois}
         fix={fix}
         satellite={satellite}
         scrubPoint={scrubPoint}
@@ -398,7 +396,7 @@ export function MapShell({
       {active === "map" && !weatherOpen && (
         <SafetyDock
           nearest={nearest}
-          active={activeDock}
+          hasActiveAlert={!!activeIncident}
           onReport={() => navigate("/report")}
           onViewAlert={() => activeIncident && navigate("/sent", { state: { incidentId: activeIncident.id } })}
         />

@@ -28,9 +28,17 @@ export function Sending() {
       return;
     }
 
-    // Prepend the medical/ICE summary so medics see it on the alert.
-    const med = medicalSummary(loadMedical());
-    const description = [med && `🩺 ${med}`, draft.description].filter(Boolean).join("\n") || undefined;
+    // Build the notes: who it's for, the patient's medical summary, then the
+    // reporter's own description. For "me" we attach this device's medical info;
+    // for someone else we record their BIB (patient medical isn't on this device).
+    const med = draft.forSelf ? medicalSummary(loadMedical()) : "";
+    const subjectLine = draft.forSelf
+      ? undefined
+      : draft.patientBib
+        ? `👤 ${t("who.notesForBib", { bib: draft.patientBib })}`
+        : `👤 ${t("who.notesForOther")}`;
+    const description =
+      [subjectLine, med && `🩺 ${med}`, draft.description].filter(Boolean).join("\n") || undefined;
 
     const payload: CreateIncidentRequest = {
       eventId: "",

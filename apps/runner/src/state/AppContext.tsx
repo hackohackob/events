@@ -18,6 +18,16 @@ export interface IncidentDraft {
   photos: File[];
   description: string;
   voice: Blob | null;
+  /** True when the report is for the runner themselves. */
+  forSelf: boolean;
+  /** BIB of the patient when reporting for someone else (optional). */
+  patientBib: string | null;
+}
+
+/** Who the incident is being reported for, captured in step 1 of the flow. */
+export interface ReportSubject {
+  forSelf: boolean;
+  patientBib: string | null;
 }
 
 interface AppValue {
@@ -34,7 +44,7 @@ interface AppValue {
   queued: number;
   refreshQueued: () => void;
   draft: IncidentDraft | null;
-  startDraft: (category: IncidentCategory) => void;
+  startDraft: (category: IncidentCategory, subject?: ReportSubject) => void;
   patchDraft: (patch: Partial<IncidentDraft>) => void;
   clearDraft: () => void;
 }
@@ -144,8 +154,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const startDraft = useCallback(
-    (category: IncidentCategory) =>
-      setDraft({ category, fix, photos: [], description: "", voice: null }),
+    (category: IncidentCategory, subject?: ReportSubject) =>
+      setDraft({
+        category,
+        fix,
+        photos: [],
+        description: "",
+        voice: null,
+        forSelf: subject?.forSelf ?? true,
+        patientBib: subject?.patientBib ?? null,
+      }),
     [fix],
   );
   const patchDraft = useCallback(

@@ -45,6 +45,8 @@ interface Marker {
   photoUrls?: string[];
   /** Display name of whoever reported the incident. */
   reportedBy?: string;
+  /** User id of whoever created the incident (used to derive their role). */
+  createdBy?: string;
   /** ISO timestamp of when an incident was reported. */
   createdAt?: string;
 }

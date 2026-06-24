@@ -77,6 +77,8 @@ export interface HourPoint {
   precipProb: number;
   cloudPct: number;
   code: number;
+  /** True when the sun is up at this hour (drives sun vs moon icons). */
+  isDay: boolean;
 }
 
 export interface SamplePoint {
@@ -104,6 +106,7 @@ interface MeteoHourly {
   precipitation_probability: number[];
   cloud_cover: number[];
   weather_code: number[];
+  is_day: number[];
 }
 interface MeteoResult {
   latitude: number;
@@ -123,7 +126,7 @@ export async function fetchForecast(points: Array<{ lat: number; lng: number }>)
   const lng = pts.map((p) => p.lng.toFixed(4)).join(",");
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
-    `&hourly=temperature_2m,precipitation,precipitation_probability,cloud_cover,weather_code` +
+    `&hourly=temperature_2m,precipitation,precipitation_probability,cloud_cover,weather_code,is_day` +
     `&forecast_days=2&timeformat=unixtime&timezone=GMT`;
   try {
     const res = await fetch(url);
@@ -151,6 +154,7 @@ export async function fetchForecast(points: Array<{ lat: number; lng: number }>)
           precipProb: h.precipitation_probability[idx] ?? 0,
           cloudPct: h.cloud_cover[idx] ?? 0,
           code: h.weather_code[idx] ?? 0,
+          isDay: (h.is_day?.[idx] ?? 1) === 1,
         };
       });
       return { lat: pts[i]?.lat ?? r.latitude, lng: pts[i]?.lng ?? r.longitude, hours };
@@ -164,10 +168,14 @@ export async function fetchForecast(points: Array<{ lat: number; lng: number }>)
 
 // ─── Presentation helpers ─────────────────────────────────────────────────────
 
-/** WMO weather code → emoji + short label. */
-export function weatherGlyph(code: number, cloudPct = 0): { icon: string; label: string } {
-  if (code === 0) return { icon: cloudPct > 35 ? "🌤️" : "☀️", label: "Clear" };
-  if (code <= 2) return { icon: "⛅", label: "Partly cloudy" };
+/** WMO weather code → emoji + short label. At night, clear/partly-clear skies
+ *  show a moon instead of the sun. */
+export function weatherGlyph(code: number, cloudPct = 0, isDay = true): { icon: string; label: string } {
+  if (code === 0) {
+    if (!isDay) return { icon: cloudPct > 35 ? "☁️" : "🌙", label: "Clear" };
+    return { icon: cloudPct > 35 ? "🌤️" : "☀️", label: "Clear" };
+  }
+  if (code <= 2) return { icon: isDay ? "⛅" : "☁️", label: "Partly cloudy" };
   if (code === 3) return { icon: "☁️", label: "Overcast" };
   if (code <= 48) return { icon: "🌫️", label: "Fog" };
   if (code <= 57) return { icon: "🌦️", label: "Drizzle" };
