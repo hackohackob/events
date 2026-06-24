@@ -12,6 +12,8 @@ export interface WeatherPoint {
   lat: number;
   tempC: number;
   precipMm: number;
+  precipProb: number;
+  cloudPct: number;
   primary?: boolean;
 }
 
@@ -55,6 +57,10 @@ interface Props {
   radarOpacity?: number;
   /** Forecast temperature points to show along the route, or null to hide. */
   weatherPoints?: WeatherPoint[] | null;
+  /** Weather layer toggles. Rain = real radar when live, soft forecast blobs
+   *  otherwise. Clouds = soft cloud-cover blobs from the forecast. */
+  showRain?: boolean;
+  showClouds?: boolean;
   /** Px occluded at the bottom (sheet/dock) — fed to the map as camera padding
    *  so "centre", recenter and fitBounds frame content in the *visible* area. */
   bottomInset?: number;
@@ -121,6 +127,8 @@ export function RunnerMap({
   radarTemplate,
   radarOpacity = 0.7,
   weatherPoints,
+  showRain = true,
+  showClouds = false,
   bottomInset = 0,
   topInset = 0,
   interactive = true,
@@ -419,6 +427,65 @@ export function RunnerMap({
       map.setPaintProperty("radar", "raster-opacity", radarOpacity);
     }
   }, [radarTemplate, radarOpacity, ready]);
+
+  // Forecast clouds / rain as soft blurred blobs along the sampled points.
+  // RainViewer has no future radar, so for forecast hours we synthesize the
+  // field from Open-Meteo cloud-cover & precipitation probability.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const data = {
+      type: "FeatureCollection" as const,
+      features: (weatherPoints ?? []).map((p) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+        properties: { cloud: p.cloudPct, prob: p.precipProb },
+      })),
+    };
+    const src = map.getSource("wx-cells") as maplibregl.GeoJSONSource | undefined;
+    if (src) {
+      src.setData(data);
+    } else {
+      map.addSource("wx-cells", { type: "geojson", data });
+      const before = map.getLayer("route-casing") ? "route-casing" : undefined;
+      map.addLayer(
+        {
+          id: "wx-clouds",
+          type: "circle",
+          source: "wx-cells",
+          paint: {
+            // The OSM basemap is always light, so a mid slate reads as overcast
+            // (darkens) regardless of the app's UI theme.
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 55, 12, 120, 15, 200],
+            "circle-color": "#8190a6",
+            "circle-blur": 0.7,
+            "circle-opacity": ["*", ["/", ["coalesce", ["get", "cloud"], 0], 100], 0.55],
+          },
+        },
+        before,
+      );
+      map.addLayer(
+        {
+          id: "wx-rain",
+          type: "circle",
+          source: "wx-cells",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 48, 12, 100, 15, 160],
+            "circle-color": "#2E9BFF",
+            "circle-blur": 0.9,
+            "circle-opacity": ["min", 0.62, ["*", ["/", ["coalesce", ["get", "prob"], 0], 100], 0.7]],
+          },
+        },
+        before,
+      );
+    }
+    const hasPts = (weatherPoints?.length ?? 0) > 0;
+    if (map.getLayer("wx-clouds"))
+      map.setLayoutProperty("wx-clouds", "visibility", showClouds && hasPts ? "visible" : "none");
+    if (map.getLayer("wx-rain"))
+      // Real radar wins for the live moment; blobs fill in the forecast hours.
+      map.setLayoutProperty("wx-rain", "visibility", showRain && !radarTemplate && hasPts ? "visible" : "none");
+  }, [weatherPoints, showRain, showClouds, radarTemplate, ready]);
 
   // Forecast temperature points along the route.
   useEffect(() => {

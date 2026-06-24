@@ -64,6 +64,16 @@ export function MapShell({
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [wxIndex, setWxIndex] = useState(0);
   const [wxPlaying, setWxPlaying] = useState(false);
+  const [showRain, setShowRain] = useState(true);
+  const [showClouds, setShowClouds] = useState(false);
+
+  // Open the weather layer when arriving from the Weather tab on another screen.
+  useEffect(() => {
+    if (active === "map" && sessionStorage.getItem("pe_open_weather")) {
+      sessionStorage.removeItem("pe_open_weather");
+      setWeatherOpen(true);
+    }
+  }, [active]);
 
   // When Track Studio opens, frame the whole course.
   useEffect(() => {
@@ -144,6 +154,8 @@ export function MapShell({
   }, [track, medics, pois]);
 
   // ── Weather: a few sample points down the route for spatial temperatures. ──
+  // Depends on `track` only (NOT `fix`) so live GPS updates can't change its
+  // identity and silently refetch + reset the scrubber back to "Now".
   const wxSamplePoints = useMemo(() => {
     if (track && track.coords.length > 1) {
       const n = track.coords.length;
@@ -152,8 +164,9 @@ export function MapShell({
         return { lat, lng };
       });
     }
-    return fix ? [{ lat: fix.lat, lng: fix.lng }] : [];
-  }, [track, fix]);
+    const f = fixRef.current;
+    return f ? [{ lat: f.lat, lng: f.lng }] : [];
+  }, [track]);
 
   // Fetch radar + forecast when the weather layer opens (refresh on track change).
   useEffect(() => {
@@ -175,13 +188,24 @@ export function MapShell({
   }, [weatherOpen, wxPlaying, forecast]);
 
   const scrubTime = forecast?.times[wxIndex];
-  const radarFrame = weatherOpen && scrubTime != null ? radarFrameAt(radar, scrubTime) : null;
+  // Real radar only counts toward the live moment AND when the Rain layer is on.
+  const radarFrame = weatherOpen && showRain && scrubTime != null ? radarFrameAt(radar, scrubTime) : null;
   const weatherPoints = useMemo<WeatherPoint[] | null>(() => {
     if (!weatherOpen || !forecast) return null;
     return forecast.points
       .map((p, i): WeatherPoint | null => {
         const h = p.hours[wxIndex];
-        return h ? { lng: p.lng, lat: p.lat, tempC: h.tempC, precipMm: h.precipMm, primary: i === 0 } : null;
+        return h
+          ? {
+              lng: p.lng,
+              lat: p.lat,
+              tempC: h.tempC,
+              precipMm: h.precipMm,
+              precipProb: h.precipProb,
+              cloudPct: h.cloudPct,
+              primary: i === 0,
+            }
+          : null;
       })
       .filter((x): x is WeatherPoint => x != null);
   }, [weatherOpen, forecast, wxIndex]);
@@ -191,6 +215,15 @@ export function MapShell({
       if (open) setWxPlaying(false);
       return !open;
     });
+  };
+
+  // Weather tab tapped from another screen → open weather once on the map.
+  const goWeather = () => {
+    if (active === "map") toggleWeather();
+    else {
+      sessionStorage.setItem("pe_open_weather", "1");
+      navigate("/map");
+    }
   };
 
   // Bottom occlusion fed to the map so centring/fit frame the visible area.
@@ -220,6 +253,8 @@ export function MapShell({
         fitSignal={fitSignal}
         radarTemplate={radarFrame?.template ?? null}
         weatherPoints={weatherPoints}
+        showRain={weatherOpen && showRain}
+        showClouds={weatherOpen && showClouds}
         bottomInset={bottomInset}
         topInset={HEADER_INSET}
         youLabel={
@@ -278,7 +313,6 @@ export function MapShell({
       {/* Floating controls */}
       <div style={{ position: "absolute", top: 14, right: 12, display: "flex", flexDirection: "column", gap: 8 }}>
         <ControlButton glyph="🛰️" active={satellite} onClick={() => setSatellite((s) => !s)} title="Satellite" />
-        {active === "map" && <ControlButton glyph="🌦️" active={weatherOpen} onClick={toggleWeather} title="Weather" />}
         <OfflineControlButton getBounds={getOfflineBounds} />
         <ControlButton glyph="◎" active onClick={() => setRecenter((n) => n + 1)} title="Recenter" />
         <ControlButton glyph="🧭" onClick={() => setCompass((n) => n + 1)} title="North up" />
@@ -289,7 +323,7 @@ export function MapShell({
         onClick={() => navigate("/medical")}
         style={{
           position: "absolute",
-          top: 262,
+          top: 210,
           right: 12,
           display: "flex",
           alignItems: "center",
@@ -340,6 +374,10 @@ export function MapShell({
           playing={wxPlaying}
           onTogglePlay={() => setWxPlaying((p) => !p)}
           radarLive={radarFrame != null}
+          showRain={showRain}
+          showClouds={showClouds}
+          onToggleRain={() => setShowRain((v) => !v)}
+          onToggleClouds={() => setShowClouds((v) => !v)}
           onClose={toggleWeather}
         />
       )}
@@ -380,8 +418,14 @@ export function MapShell({
           display: "flex",
         }}
       >
-        <Tab label={t("tab.map")} glyph="🗺️" active={active === "map"} onClick={() => navigate("/map")} />
+        <Tab
+          label={t("tab.map")}
+          glyph="🗺️"
+          active={active === "map" && !weatherOpen}
+          onClick={() => (active === "map" ? setWeatherOpen(false) : navigate("/map"))}
+        />
         <Tab label={t("tab.tracks")} glyph="📈" active={active === "tracks"} onClick={() => navigate("/tracks")} />
+        <Tab label={t("tab.weather")} glyph="🌦️" active={weatherOpen} onClick={goWeather} />
       </div>
     </div>
   );

@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
 import { fmtHour, tempColor, weatherGlyph, type Forecast } from "../lib/weather";
 
+const ACCENT = "var(--live-gps)";
+
 /**
  * Bottom weather scrubber. Drag (or play) across the next 12 hours; the headline
- * readout, the on-map radar frame and the along-route temperature points all
- * follow the scrubbed hour.
+ * readout, the on-map radar/cloud field and the along-route temperature points
+ * all follow the scrubbed hour. Themed (dark/light) and non-selectable so the
+ * scrub gesture never highlights text.
  */
 export function WeatherPanel({
   forecast,
@@ -14,6 +17,10 @@ export function WeatherPanel({
   playing,
   onTogglePlay,
   radarLive,
+  showRain,
+  showClouds,
+  onToggleRain,
+  onToggleClouds,
   onClose,
 }: {
   forecast: Forecast | null;
@@ -22,6 +29,10 @@ export function WeatherPanel({
   playing: boolean;
   onTogglePlay: () => void;
   radarLive: boolean;
+  showRain: boolean;
+  showClouds: boolean;
+  onToggleRain: () => void;
+  onToggleClouds: () => void;
   onClose: () => void;
 }) {
   const { t } = useT();
@@ -38,6 +49,7 @@ export function WeatherPanel({
   const hours = forecast?.primary.hours ?? [];
   const cur = hours[scrubIndex];
   const glyph = cur ? weatherGlyph(cur.code, cur.cloudPct) : { icon: "⏳", label: "" };
+  const relative = scrubIndex === 0 ? t("weather.now") : `+${scrubIndex}h`;
 
   return (
     <div
@@ -49,17 +61,20 @@ export function WeatherPanel({
         zIndex: 6,
         borderRadius: 24,
         padding: "12px 14px 14px",
-        background: "linear-gradient(180deg, rgba(14,22,34,0.72), rgba(8,12,18,0.92))",
-        backdropFilter: "blur(18px) saturate(1.25)",
-        WebkitBackdropFilter: "blur(18px) saturate(1.25)",
-        border: "1px solid rgba(255,255,255,0.10)",
-        boxShadow: "0 18px 50px rgba(0,0,0,0.55)",
+        background: "var(--bg-overlay)",
+        backdropFilter: "blur(18px) saturate(1.2)",
+        WebkitBackdropFilter: "blur(18px) saturate(1.2)",
+        border: "1px solid var(--border-subtle)",
+        boxShadow: "0 18px 50px rgba(0,0,0,0.45)",
         animation: "dockIn 0.35s ease",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        touchAction: "none",
       }}
     >
       {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="section-label" style={{ color: "var(--live-gps)", fontSize: 10 }}>
+        <span className="section-label" style={{ color: ACCENT, fontSize: 10 }}>
           {t("weather.title")}
         </span>
         <span
@@ -72,9 +87,9 @@ export function WeatherPanel({
             fontSize: 9.5,
             fontWeight: 800,
             letterSpacing: "0.06em",
-            background: radarLive ? "rgba(46,155,255,0.16)" : "rgba(255,255,255,0.06)",
-            color: radarLive ? "var(--live-gps)" : "var(--text-muted)",
-            border: `1px solid ${radarLive ? "rgba(46,155,255,0.4)" : "rgba(255,255,255,0.08)"}`,
+            background: radarLive ? "rgba(46,155,255,0.16)" : "var(--bg-card)",
+            color: radarLive ? ACCENT : "var(--text-muted)",
+            border: `1px solid ${radarLive ? "rgba(46,155,255,0.4)" : "var(--border-subtle)"}`,
           }}
         >
           <span
@@ -82,7 +97,7 @@ export function WeatherPanel({
               width: 6,
               height: 6,
               borderRadius: 3,
-              background: radarLive ? "var(--live-gps)" : "var(--text-muted)",
+              background: radarLive ? ACCENT : "var(--text-muted)",
               animation: radarLive ? "breathe 1.4s infinite" : "none",
             }}
           />
@@ -97,22 +112,51 @@ export function WeatherPanel({
         </button>
       </div>
 
-      {/* Readout */}
+      {/* Readout: condition on the left, prominent time on the right */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 2px 10px" }}>
         <span style={{ fontSize: 38, lineHeight: 1 }}>{glyph.icon}</span>
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span className="archivo" style={{ fontWeight: 800, fontSize: 30, color: cur ? tempColor(cur.tempC) : "var(--text-primary)" }}>
+            <span
+              className="archivo"
+              style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: cur ? tempColor(cur.tempC) : "var(--text-primary)" }}
+            >
               {cur ? `${Math.round(cur.tempC)}°` : "—"}
             </span>
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)" }}>{glyph.label}</span>
           </div>
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", marginTop: 1 }}>
-            {cur
-              ? `${scrubIndex === 0 ? t("weather.now") : fmtHour(cur.time)} · ☁ ${Math.round(cur.cloudPct)}% · 💧 ${cur.precipMm.toFixed(1)}mm (${Math.round(cur.precipProb)}%)`
-              : t("weather.loading")}
+        </div>
+        {/* Prominent time */}
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div className="archivo" style={{ fontWeight: 800, fontSize: 24, lineHeight: 1, color: "var(--text-primary)" }}>
+            {cur ? fmtHour(cur.time) : "—"}
+          </div>
+          <div
+            style={{
+              display: "inline-block",
+              marginTop: 4,
+              padding: "1px 8px",
+              borderRadius: 999,
+              fontSize: 10.5,
+              fontWeight: 800,
+              letterSpacing: "0.04em",
+              color: ACCENT,
+              background: "rgba(46,155,255,0.14)",
+            }}
+          >
+            {relative}
           </div>
         </div>
+      </div>
+
+      {/* Layer toggles + current detail */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <LayerChip active={showRain} icon="🌧" label={t("weather.rain")} onClick={onToggleRain} />
+        <LayerChip active={showClouds} icon="☁️" label={t("weather.clouds")} onClick={onToggleClouds} />
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+          {cur ? `☁ ${Math.round(cur.cloudPct)}% · 💧 ${cur.precipMm.toFixed(1)}mm` : t("weather.loading")}
+        </span>
       </div>
 
       {/* Timeline chart */}
@@ -127,14 +171,38 @@ const iconBtn: React.CSSProperties = {
   width: 30,
   height: 30,
   borderRadius: 9,
-  background: "rgba(255,255,255,0.07)",
-  border: "1px solid rgba(255,255,255,0.10)",
+  background: "var(--bg-card)",
+  border: "1px solid var(--border-subtle)",
   color: "var(--text-secondary)",
   fontSize: 12,
   fontWeight: 800,
   display: "grid",
   placeItems: "center",
 };
+
+function LayerChip({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "5px 11px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 800,
+        border: `1px solid ${active ? "rgba(46,155,255,0.5)" : "var(--border-subtle)"}`,
+        background: active ? "rgba(46,155,255,0.14)" : "var(--bg-card)",
+        color: active ? ACCENT : "var(--text-muted)",
+        transition: "color 0.15s, background 0.15s, border-color 0.15s",
+      }}
+    >
+      <span style={{ fontSize: 13 }}>{icon}</span>
+      {label}
+    </button>
+  );
+}
 
 function TimelineChart({
   width,
@@ -154,7 +222,7 @@ function TimelineChart({
   const innerW = Math.max(1, width - padX * 2);
 
   if (hours.length < 2) {
-    return <div style={{ width: "100%", height: H, borderRadius: 12, background: "rgba(14,26,40,0.6)" }} />;
+    return <div style={{ width: "100%", height: H, borderRadius: 12, background: "var(--bg-input)" }} />;
   }
 
   const n = hours.length;
@@ -180,7 +248,13 @@ function TimelineChart({
     <svg
       width={width}
       height={H}
-      style={{ borderRadius: 12, background: "rgba(14,26,40,0.6)", border: "1px solid rgba(255,255,255,0.06)", display: "block", touchAction: "none" }}
+      style={{
+        borderRadius: 12,
+        background: "var(--bg-input)",
+        border: "1px solid var(--border-subtle)",
+        display: "block",
+        touchAction: "none",
+      }}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         handlePointer(e.clientX, e.currentTarget);
@@ -232,8 +306,8 @@ function TimelineChart({
       )}
 
       {/* Scrubber */}
-      <line x1={sx} y1={2} x2={sx} y2={H - padBottom + 4} stroke="#F2F6FB" strokeWidth="1.4" />
-      <circle cx={sx} cy={yOf(hours[scrubIndex].tempC)} r="5.5" fill="#fff" stroke={tempColor(hours[scrubIndex].tempC)} strokeWidth="2.5" />
+      <line x1={sx} y1={2} x2={sx} y2={H - padBottom + 4} stroke="var(--text-primary)" strokeWidth="1.4" />
+      <circle cx={sx} cy={yOf(hours[scrubIndex].tempC)} r="5.5" fill="var(--bg-surface)" stroke={tempColor(hours[scrubIndex].tempC)} strokeWidth="2.5" />
     </svg>
   );
 }

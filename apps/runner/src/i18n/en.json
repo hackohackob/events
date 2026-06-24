@@ -36,6 +36,7 @@
   "map.lowGps": "Low GPS accuracy — move to open sky",
   "tab.map": "Map",
   "tab.tracks": "Tracks",
+  "tab.weather": "Weather",
   "tracks.studio": "TRACK STUDIO",
   "tracks.pullUp": "↑ pull up for details",
   "tracks.distanceFromStart": "Distance from start",
@@ -185,5 +186,7 @@
   "weather.liveRadar": "LIVE RADAR",
   "weather.forecast": "FORECAST",
   "weather.now": "Now",
-  "weather.loading": "Loading forecast…"
+  "weather.loading": "Loading forecast…",
+  "weather.rain": "Rain",
+  "weather.clouds": "Clouds"
 }
