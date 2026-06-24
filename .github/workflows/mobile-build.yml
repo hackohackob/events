@@ -84,15 +84,24 @@ jobs:
       - name: Install project dependencies
         run: npm ci
 
+      - name: Read app version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./apps/mobile/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building APK for version $VERSION"
+
       - name: Build Android APK (local, no EAS credits)
         working-directory: apps/mobile
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
           eas build \
             --platform android \
             --profile "$EAS_PROFILE" \
             --local \
             --non-interactive \
-            --output "$GITHUB_WORKSPACE/paramedic-event-${EAS_PROFILE}.apk"
+            --output "$GITHUB_WORKSPACE/paramedic-event-v${APP_VERSION}-${EAS_PROFILE}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

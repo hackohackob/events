@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapShell } from "./MapShell";
 import { useT } from "../i18n";
 import { ElevationChart, type ElevSample } from "../components/ElevationChart";
@@ -6,6 +6,12 @@ import { useApp } from "../state/AppContext";
 import { cumulativeDistances, snapToRoute } from "../lib/geo";
 import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
 import type { PublicMedicState } from "../api/contracts-shim";
+
+const TAB_BAR = 64;
+/** Resting sheet heights as a fraction of the viewport. PEEK is deliberately
+ *  smaller than half so the track stays visible above it. */
+const PEEK = 0.4;
+const FULL = 0.86;
 
 export function TracksScreen() {
   return <MapShell active="tracks" renderSheet={(ctx) => <TrackStudioSheet {...ctx} />} />;
@@ -17,16 +23,60 @@ function TrackStudioSheet({
   offsetMeters,
   medics,
   onScrub,
+  onSheetInset,
 }: {
   track: ResolvedTrack | null;
   kmAlong: number | null;
   offsetMeters: number | null;
   medics: PublicMedicState[];
   onScrub: (km: number | null) => void;
+  onSheetInset: (px: number) => void;
 }) {
   const { t } = useT();
   const { profile } = useApp();
-  const [expanded, setExpanded] = useState(false);
+
+  // Draggable sheet: `frac` is the live height fraction; PEEK/FULL are snaps.
+  const [frac, setFrac] = useState(PEEK);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startY: number; startFrac: number; moved: number; frac: number } | null>(null);
+  const expanded = frac > (PEEK + FULL) / 2;
+
+  // Report the occluded height so the map frames the track above the sheet.
+  const reportInset = (f: number) => onSheetInset(f * window.innerHeight + TAB_BAR);
+  useEffect(() => {
+    reportInset(frac);
+    // Only on mount / when the snapped height settles (see drag handlers).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const snapTo = (f: number) => {
+    setFrac(f);
+    reportInset(f);
+  };
+
+  const onHandleDown = (e: React.PointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startY: e.clientY, startFrac: frac, moved: 0, frac };
+    setDragging(true);
+  };
+  const onHandleMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dy = d.startY - e.clientY; // drag up = grow
+    d.moved = Math.max(d.moved, Math.abs(dy));
+    d.frac = Math.min(0.92, Math.max(0.26, d.startFrac + dy / window.innerHeight));
+    setFrac(d.frac);
+  };
+  const onHandleUp = () => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDragging(false);
+    if (!d) return;
+    // Tap → toggle; drag → snap to the nearer rest point. Use the ref's live
+    // fraction so the decision is right even on a fast flick (state may lag).
+    if (d.moved < 6) snapTo(expanded ? PEEK : FULL);
+    else snapTo(d.frac > (PEEK + FULL) / 2 ? FULL : PEEK);
+  };
 
   const label = profile?.selectedTrackLabel ?? "—";
   const color = profile?.selectedTrackColor ?? "var(--primary)";
@@ -71,30 +121,48 @@ function TrackStudioSheet({
         position: "absolute",
         left: 0,
         right: 0,
-        bottom: 64,
-        height: expanded ? "82%" : "50%",
+        bottom: TAB_BAR,
+        height: `${(frac * 100).toFixed(2)}%`,
         background: "var(--bg-surface)",
         borderTopLeftRadius: 26,
         borderTopRightRadius: 26,
         boxShadow: "0 -30px 60px rgba(0,0,0,0.5)",
-        padding: "12px 16px 18px",
-        transition: "height 0.28s ease",
-        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        transition: dragging ? "none" : "height 0.28s cubic-bezier(0.22,1,0.36,1)",
         zIndex: 5,
       }}
     >
+      {/* Drag zone — handle + title row. Drag to resize, tap to toggle. */}
       <div
-        onClick={() => setExpanded((e) => !e)}
-        style={{ width: 42, height: 5, borderRadius: 3, background: "var(--border-strong)", margin: "0 auto 14px" }}
-      />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span className="archivo" style={{ fontWeight: 800, fontSize: 13, letterSpacing: "0.10em" }}>
-          {t("tracks.studio")}
-        </span>
-        <button onClick={() => setExpanded((e) => !e)} style={{ color: "var(--primary)", fontWeight: 700, fontSize: 11.5 }}>
-          {t("tracks.pullUp")}
-        </button>
+        onPointerDown={onHandleDown}
+        onPointerMove={onHandleMove}
+        onPointerUp={onHandleUp}
+        onPointerCancel={onHandleUp}
+        style={{ padding: "12px 16px 8px", touchAction: "none", cursor: "grab", flexShrink: 0 }}
+      >
+        <div
+          style={{
+            width: 42,
+            height: 5,
+            borderRadius: 3,
+            background: dragging ? "var(--primary)" : "var(--border-strong)",
+            margin: "0 auto 12px",
+            transition: "background 0.15s",
+          }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="archivo" style={{ fontWeight: 800, fontSize: 13, letterSpacing: "0.10em" }}>
+            {t("tracks.studio")}
+          </span>
+          <span style={{ color: "var(--primary)", fontWeight: 700, fontSize: 11.5 }}>
+            {expanded ? "▾" : "▴"} {t("tracks.pullUp")}
+          </span>
+        </div>
       </div>
+
+      {/* Scrollable content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 18px" }}>
 
       <div className="card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", marginTop: 12 }}>
         <div style={{ width: 24, height: 5, borderRadius: 3, background: color }} />
@@ -133,6 +201,7 @@ function TrackStudioSheet({
           <Tile label={t("tracks.totalClimb")} value={`${Math.round(ascent)} ${t("common.m")}`} />
         </div>
       )}
+      </div>
     </div>
   );
 }

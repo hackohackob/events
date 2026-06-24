@@ -4,13 +4,24 @@ import type { PublicMedicState } from "../api/contracts-shim";
 import type { Fix } from "../hooks/useGeolocation";
 import type { PoiLike } from "../api";
 import { haversineMeters } from "../lib/geo";
+import { OSM_TILE_URL } from "../lib/offline-map";
+import { tempColor } from "../lib/weather";
+
+export interface WeatherPoint {
+  lng: number;
+  lat: number;
+  tempC: number;
+  precipMm: number;
+  primary?: boolean;
+}
 
 const MAP_STYLE: StyleSpecification = {
   version: 8,
   sources: {
     osm: {
       type: "raster",
-      tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      // Same template offline packs cache, so cached tiles resolve 1:1.
+      tiles: [OSM_TILE_URL],
       tileSize: 256,
       attribution: "© OpenStreetMap",
     },
@@ -39,6 +50,16 @@ interface Props {
   fitSignal?: number;
   satellite?: boolean;
   scrubPoint?: [number, number] | null;
+  /** Weather radar tile template (RainViewer) to overlay, or null to hide. */
+  radarTemplate?: string | null;
+  radarOpacity?: number;
+  /** Forecast temperature points to show along the route, or null to hide. */
+  weatherPoints?: WeatherPoint[] | null;
+  /** Px occluded at the bottom (sheet/dock) — fed to the map as camera padding
+   *  so "centre", recenter and fitBounds frame content in the *visible* area. */
+  bottomInset?: number;
+  /** Px reserved at the top (header). */
+  topInset?: number;
   interactive?: boolean;
   /** Editable incident pin (Confirm screen): initial position. */
   editablePin?: [number, number] | null;
@@ -97,6 +118,11 @@ export function RunnerMap({
   fitSignal,
   satellite,
   scrubPoint,
+  radarTemplate,
+  radarOpacity = 0.7,
+  weatherPoints,
+  bottomInset = 0,
+  topInset = 0,
   interactive = true,
   editablePin,
   pinMaxMeters = 500,
@@ -111,9 +137,22 @@ export function RunnerMap({
   const scrubMarkerRef = useRef<maplibregl.Marker | null>(null);
   const pinMarkerRef = useRef<maplibregl.Marker | null>(null);
   const pinOriginRef = useRef<[number, number] | null>(null);
+  const weatherMarkersRef = useRef<maplibregl.Marker[]>([]);
   const [ready, setReady] = useState(false);
   const fittedRef = useRef(false);
   const centeredOnFixRef = useRef(false);
+  // Latest fix without re-triggering the recenter effect on every GPS update.
+  const fixRef = useRef<Fix | null>(fix);
+  fixRef.current = fix;
+  // Latest camera insets, read by fitBounds without re-fitting on every drag px.
+  const insetRef = useRef({ top: topInset, bottom: bottomInset });
+  insetRef.current = { top: topInset, bottom: bottomInset };
+  const fitPad = () => ({
+    top: insetRef.current.top + 40,
+    bottom: insetRef.current.bottom + 40,
+    left: 28,
+    right: 28,
+  });
 
   // Init
   useEffect(() => {
@@ -187,7 +226,7 @@ export function RunnerMap({
     }
     map.setPaintProperty("route-line", "line-color", routeColor);
     if (!fittedRef.current && !fix && !editablePin) {
-      map.fitBounds(routeBounds(coords), { padding: 50, maxZoom: 14, duration: 0 });
+      map.fitBounds(routeBounds(coords), { padding: fitPad(), maxZoom: 14, duration: 0 });
       fittedRef.current = true;
     }
   }, [ready, coords, routeColor, fix, editablePin]);
@@ -318,11 +357,15 @@ export function RunnerMap({
     }
   }, [scrubPoint]);
 
+  // Recenter ONLY when the button is pressed (recenterSignal changes) — not on
+  // every GPS update. Reading the fix from a ref keeps the map free to pan so
+  // the runner can look around the course without being yanked back.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !fix || recenterSignal === undefined) return;
-    map.flyTo({ center: [fix.lng, fix.lat], zoom: 14.5, duration: 600 });
-  }, [recenterSignal, fix]);
+    const f = fixRef.current;
+    if (!map || !f || !recenterSignal) return; // recenterSignal 0/undefined = no-op
+    map.flyTo({ center: [f.lng, f.lat], zoom: 14.5, duration: 600 });
+  }, [recenterSignal]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -330,12 +373,75 @@ export function RunnerMap({
     map.easeTo({ bearing: 0, pitch: 0, duration: 400 });
   }, [compassSignal]);
 
-  // Fit to the full track (e.g. when Track Studio opens)
+  // Fit to the full track (e.g. when Track Studio opens) — framed into the
+  // visible area above the sheet via the current bottom inset.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || fitSignal === undefined || !coords || coords.length < 2) return;
-    map.fitBounds(routeBounds(coords), { padding: 60, maxZoom: 15, duration: 600 });
+    map.fitBounds(routeBounds(coords), { padding: fitPad(), maxZoom: 15, duration: 600 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitSignal, coords]);
+
+  // Camera padding — animate the visible centre up/down as the bottom sheet or
+  // dock grows/shrinks, so the route never hides behind it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.easeTo({ padding: { top: topInset, bottom: bottomInset, left: 0, right: 0 }, duration: 300 });
+  }, [topInset, bottomInset, ready]);
+
+  // Weather radar overlay (RainViewer) — a raster layer under the route.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const hasLayer = map.getLayer("radar");
+    if (!radarTemplate) {
+      if (hasLayer) map.setLayoutProperty("radar", "visibility", "none");
+      return;
+    }
+    const src = map.getSource("radar") as { setTiles?: (t: string[]) => void } | undefined;
+    if (src && typeof src.setTiles === "function") {
+      src.setTiles([radarTemplate]);
+    } else if (!src) {
+      // RainViewer only serves real radar imagery up to z7 (z8+ is a "Zoom Level
+      // Not Supported" placeholder). Cap maxzoom so MapLibre over-zooms the real
+      // low-zoom tiles — radar is coarse anyway, so soft blobs read fine.
+      map.addSource("radar", { type: "raster", tiles: [radarTemplate], tileSize: 256, maxzoom: 7 });
+      // Sit above the basemap but below the route casing when it exists.
+      const before = map.getLayer("route-casing") ? "route-casing" : undefined;
+      map.addLayer(
+        { id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": radarOpacity } },
+        before,
+      );
+    }
+    if (map.getLayer("radar")) {
+      map.setLayoutProperty("radar", "visibility", "visible");
+      map.setPaintProperty("radar", "raster-opacity", radarOpacity);
+    }
+  }, [radarTemplate, radarOpacity, ready]);
+
+  // Forecast temperature points along the route.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    weatherMarkersRef.current.forEach((m) => m.remove());
+    weatherMarkersRef.current = [];
+    if (!weatherPoints) return;
+    for (const p of weatherPoints) {
+      const c = tempColor(p.tempC);
+      const el = document.createElement("div");
+      el.style.cssText = [
+        "display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px",
+        `background:${c};color:#06121d;font-family:Archivo,sans-serif`,
+        `font-weight:800;font-size:${p.primary ? 14 : 12}px;white-space:nowrap`,
+        "border:2px solid rgba(255,255,255,0.9);box-shadow:0 3px 8px rgba(0,0,0,0.45)",
+      ].join(";");
+      el.textContent = `${Math.round(p.tempC)}°${p.precipMm >= 0.1 ? " 💧" : ""}`;
+      weatherMarkersRef.current.push(
+        new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map),
+      );
+    }
+  }, [weatherPoints]);
 
   return <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />;
 }

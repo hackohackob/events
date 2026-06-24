@@ -36,13 +36,36 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,woff2}"],
         runtimeCaching: [
           {
-            // OSM / Carto map tiles — cache the last viewed area for offline.
+            // OSM / Carto map tiles — cache the last viewed area + explicit
+            // offline-map downloads (see src/lib/offline-map.ts). High maxEntries
+            // so a downloaded event area isn't evicted by casual browsing.
             urlPattern: ({ url }) =>
               /tile\.openstreetmap\.org|basemaps\.cartocdn\.com|tiles?\./.test(url.host),
             handler: "CacheFirst",
             options: {
               cacheName: "map-tiles",
-              expiration: { maxEntries: 600, maxAgeSeconds: 60 * 60 * 24 * 14 },
+              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 8000, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true },
+            },
+          },
+          {
+            // Weather radar tiles (RainViewer) — short cache so scrubbing across
+            // frames is instant without holding stale frames forever.
+            urlPattern: ({ url }) => /rainviewer\.com/.test(url.host),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "weather-radar",
+              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 2 },
+            },
+          },
+          {
+            // Weather forecast + radar index JSON (Open-Meteo / RainViewer).
+            urlPattern: ({ url }) => /open-meteo\.com|api\.rainviewer\.com/.test(url.host),
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "weather-api",
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 },
             },
           },
           {

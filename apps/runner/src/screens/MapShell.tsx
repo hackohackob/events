@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { RunnerMap } from "../map/RunnerMap";
+import { RunnerMap, type WeatherPoint } from "../map/RunnerMap";
 import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { useLiveMedics } from "../hooks/useLiveMedics";
@@ -9,10 +9,22 @@ import { LOW_ACCURACY_METERS } from "../hooks/useGeolocation";
 import { fetchMyIncidents, fetchPois, type PoiLike } from "../api";
 import { haversineMeters, cumulativeDistances, snapToRoute, pointAtKm, bearingDeg } from "../lib/geo";
 import { SafetyDock } from "../components/SafetyDock";
+import { OfflineControlButton } from "../components/OfflineControlButton";
+import { WeatherPanel } from "../components/WeatherPanel";
+import { boundsForPoints, type Bounds } from "../lib/offline-map";
+import {
+  fetchForecast,
+  fetchRadar,
+  radarFrameAt,
+  type Forecast,
+  type RadarData,
+} from "../lib/weather";
 import { loadMedical } from "../lib/storage";
 import { hasMedicalInfo } from "../lib/types";
 import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
 import type { IncidentRecordLike, PublicMedicState } from "../api/contracts-shim";
+
+const HEADER_INSET = 70; // identity header height reserved at the top
 
 interface ShellCtx {
   track: ResolvedTrack | null;
@@ -20,6 +32,7 @@ interface ShellCtx {
   offsetMeters: number | null;
   medics: PublicMedicState[];
   onScrub: (km: number | null) => void;
+  onSheetInset: (px: number) => void;
 }
 
 export function MapShell({
@@ -43,6 +56,14 @@ export function MapShell({
   const [activeIncident, setActiveIncident] = useState<IncidentRecordLike | null>(null);
   const [scrubPoint, setScrubPoint] = useState<[number, number] | null>(null);
   const [fitSignal, setFitSignal] = useState<number | undefined>(undefined);
+  const [sheetInset, setSheetInset] = useState(0);
+
+  // ── Weather overlay state ──
+  const [weatherOpen, setWeatherOpen] = useState(false);
+  const [radar, setRadar] = useState<RadarData | null>(null);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [wxIndex, setWxIndex] = useState(0);
+  const [wxPlaying, setWxPlaying] = useState(false);
 
   // When Track Studio opens, frame the whole course.
   useEffect(() => {
@@ -110,6 +131,72 @@ export function MapShell({
   const hasMedical = hasMedicalInfo(loadMedical());
   const showAccuracyWarning = gpsDenied || (fix != null && fix.accuracy > LOW_ACCURACY_METERS);
 
+  // ── Offline pack: cache the whole event area (track + medics + POIs + you). ──
+  const fixRef = useRef(fix);
+  fixRef.current = fix;
+  const getOfflineBounds = useCallback((): Bounds | null => {
+    const points: Array<{ lat: number; lng: number }> = [];
+    if (track) for (const [lng, lat] of track.coords) points.push({ lat, lng });
+    for (const m of medics) points.push({ lat: m.lat, lng: m.lng });
+    for (const p of pois) points.push({ lat: p.lat, lng: p.lng });
+    if (fixRef.current) points.push({ lat: fixRef.current.lat, lng: fixRef.current.lng });
+    return boundsForPoints(points);
+  }, [track, medics, pois]);
+
+  // ── Weather: a few sample points down the route for spatial temperatures. ──
+  const wxSamplePoints = useMemo(() => {
+    if (track && track.coords.length > 1) {
+      const n = track.coords.length;
+      return [0, 0.25, 0.5, 0.75, 1].map((f) => {
+        const [lng, lat] = track.coords[Math.min(n - 1, Math.round(f * (n - 1)))];
+        return { lat, lng };
+      });
+    }
+    return fix ? [{ lat: fix.lat, lng: fix.lng }] : [];
+  }, [track, fix]);
+
+  // Fetch radar + forecast when the weather layer opens (refresh on track change).
+  useEffect(() => {
+    if (!weatherOpen) return;
+    let alive = true;
+    setWxIndex(0);
+    void fetchRadar().then((r) => alive && setRadar(r));
+    if (wxSamplePoints.length) void fetchForecast(wxSamplePoints).then((f) => alive && setForecast(f));
+    return () => {
+      alive = false;
+    };
+  }, [weatherOpen, wxSamplePoints]);
+
+  // Auto-play the 12h scrub.
+  useEffect(() => {
+    if (!weatherOpen || !wxPlaying || !forecast) return;
+    const id = setInterval(() => setWxIndex((i) => (i + 1) % forecast.times.length), 850);
+    return () => clearInterval(id);
+  }, [weatherOpen, wxPlaying, forecast]);
+
+  const scrubTime = forecast?.times[wxIndex];
+  const radarFrame = weatherOpen && scrubTime != null ? radarFrameAt(radar, scrubTime) : null;
+  const weatherPoints = useMemo<WeatherPoint[] | null>(() => {
+    if (!weatherOpen || !forecast) return null;
+    return forecast.points
+      .map((p, i): WeatherPoint | null => {
+        const h = p.hours[wxIndex];
+        return h ? { lng: p.lng, lat: p.lat, tempC: h.tempC, precipMm: h.precipMm, primary: i === 0 } : null;
+      })
+      .filter((x): x is WeatherPoint => x != null);
+  }, [weatherOpen, forecast, wxIndex]);
+
+  const toggleWeather = () => {
+    setWeatherOpen((open) => {
+      if (open) setWxPlaying(false);
+      return !open;
+    });
+  };
+
+  // Bottom occlusion fed to the map so centring/fit frame the visible area.
+  const bottomInset =
+    active === "tracks" ? sheetInset : weatherOpen ? 250 : active === "map" ? 190 : 0;
+
   // Scrubbing the elevation chart → show that point on the route.
   const onScrub = (km: number | null) => {
     if (km == null || !track) {
@@ -131,6 +218,10 @@ export function MapShell({
         satellite={satellite}
         scrubPoint={scrubPoint}
         fitSignal={fitSignal}
+        radarTemplate={radarFrame?.template ?? null}
+        weatherPoints={weatherPoints}
+        bottomInset={bottomInset}
+        topInset={HEADER_INSET}
         youLabel={
           progress.kmAlong != null
             ? `${t("map.you")} · ${t("common.km").toUpperCase()} ${progress.kmAlong.toFixed(1)}`
@@ -187,6 +278,8 @@ export function MapShell({
       {/* Floating controls */}
       <div style={{ position: "absolute", top: 14, right: 12, display: "flex", flexDirection: "column", gap: 8 }}>
         <ControlButton glyph="🛰️" active={satellite} onClick={() => setSatellite((s) => !s)} title="Satellite" />
+        {active === "map" && <ControlButton glyph="🌦️" active={weatherOpen} onClick={toggleWeather} title="Weather" />}
+        <OfflineControlButton getBounds={getOfflineBounds} />
         <ControlButton glyph="◎" active onClick={() => setRecenter((n) => n + 1)} title="Recenter" />
         <ControlButton glyph="🧭" onClick={() => setCompass((n) => n + 1)} title="North up" />
       </div>
@@ -196,7 +289,7 @@ export function MapShell({
         onClick={() => navigate("/medical")}
         style={{
           position: "absolute",
-          top: 158,
+          top: 262,
           right: 12,
           display: "flex",
           alignItems: "center",
@@ -235,12 +328,36 @@ export function MapShell({
         </div>
       )}
 
+      {/* Weather radar + 12h scrubber */}
+      {active === "map" && weatherOpen && (
+        <WeatherPanel
+          forecast={forecast}
+          scrubIndex={wxIndex}
+          onScrub={(i) => {
+            setWxPlaying(false);
+            setWxIndex(i);
+          }}
+          playing={wxPlaying}
+          onTogglePlay={() => setWxPlaying((p) => !p)}
+          radarLive={radarFrame != null}
+          onClose={toggleWeather}
+        />
+      )}
+
       {children}
       {active === "tracks" &&
-        renderSheet?.({ track, kmAlong: progress.kmAlong, offsetMeters: progress.offsetMeters, medics, onScrub })}
+        renderSheet?.({
+          track,
+          kmAlong: progress.kmAlong,
+          offsetMeters: progress.offsetMeters,
+          medics,
+          onScrub,
+          onSheetInset: setSheetInset,
+        })}
 
-      {/* Bottom safety dock (medic radar + report / live-alert) */}
-      {active === "map" && (
+      {/* Bottom safety dock (medic radar + report / live-alert) — hidden while
+          the weather scrubber is up so they don't stack. */}
+      {active === "map" && !weatherOpen && (
         <SafetyDock
           nearest={nearest}
           active={activeDock}
