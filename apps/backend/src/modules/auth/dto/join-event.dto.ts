@@ -18,9 +18,9 @@ export class JoinEventDto implements JoinEventRequest {
   @IsOptional()
   phone?: string;
 
-  @IsIn(["runner", "medic"])
+  @IsIn(["runner", "medic", "external"])
   @IsOptional()
-  role?: "runner" | "medic";
+  role?: "runner" | "medic" | "external";
 
   @IsString()
   @IsOptional()

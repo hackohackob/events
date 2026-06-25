@@ -5,13 +5,14 @@ import Link from 'next/link'
 import {
   ChevronRight, Calendar, MapPin, Users, Activity,
   Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
-  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check, MessageCircle
+  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check, MessageCircle, ChevronDown
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
 import { useLiveMap } from '@/hooks/useLiveMap'
 import { useHeatmap } from '@/hooks/useHeatmap'
 import MapWrapper from '@/components/map/MapWrapper'
+import type { BaseLayer } from '@/components/map/MapClient'
 import BroadcastModal from '@/components/BroadcastModal'
 import IncidentDrawer from '@/components/IncidentDrawer'
 import MedicDrawer from '@/components/MedicDrawer'
@@ -244,6 +245,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [showPois, setShowPois] = useState(true)
   const [showParticipants, setShowParticipants] = useState(false)
   const [showIncidents, setShowIncidents] = useState(true)
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>('streets')
+  const [layersOpen, setLayersOpen] = useState(true)
   // -1 = All days, 0+ = specific day index
   const [selectedDayIdx, setSelectedDayIdx] = useState<number>(-1)
   const [showQR, setShowQR] = useState(false)
@@ -997,6 +1000,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           <MapWrapper
             center={[23.3219, 42.6977]}
             zoom={11}
+            baseLayer={baseLayer}
             pois={showPois ? mapPois : []}
             tracks={showTracks ? allTracks : []}
             liveMedics={isActive && showMedics ? medics : []}
@@ -1046,9 +1050,44 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 padding: '10px 12px',
               }}
             >
-              <div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: '#334155' }}>
-                <Layers className="w-3 h-3 inline mr-1" />Layers
+              {/* Header — click anywhere to collapse; arrow sits top-right */}
+              <button
+                onClick={() => setLayersOpen(o => !o)}
+                className="flex items-center justify-between w-full"
+                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#334155' }}>
+                  <Layers className="w-3 h-3 inline mr-1" />Layers
+                </span>
+                <ChevronDown
+                  className="w-3.5 h-3.5 transition-transform"
+                  style={{ color: '#64748b', transform: layersOpen ? 'rotate(180deg)' : 'none' }}
+                />
+              </button>
+
+              {layersOpen && (
+              <>
+              {/* Base map — minimalist segmented buttons at the top */}
+              <div className="flex gap-1.5 mt-1.5">
+                {(['streets', 'satellite', 'terrain'] as BaseLayer[]).map(b => {
+                  const on = baseLayer === b
+                  return (
+                    <button
+                      key={b}
+                      onClick={() => setBaseLayer(b)}
+                      className="flex-1 capitalize rounded-lg py-1.5 text-[10px] font-bold transition-all"
+                      style={{
+                        background: on ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${on ? 'rgba(59,130,246,0.5)' : 'rgba(148,163,184,0.1)'}`,
+                        color: on ? '#e2e8f0' : '#64748b',
+                      }}
+                    >
+                      {b}
+                    </button>
+                  )
+                })}
               </div>
+
               {[
                 { key: 'tracks', label: 'Tracks', count: allTracks.filter(t => t.coordinates.length > 0).length, color: '#3b82f6', active: showTracks, toggle: () => setShowTracks(v => !v) },
                 { key: 'medics', label: 'Medics', count: medics.length, color: '#22c55e', active: showMedics, toggle: () => setShowMedics(v => !v) },
@@ -1084,6 +1123,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   ) : null}
                 </button>
               ))}
+              </>
+              )}
             </div>
           </div>
 

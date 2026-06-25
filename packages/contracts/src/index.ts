@@ -22,7 +22,9 @@ export interface JoinEventRequest {
   name?: string;
   bibNumber?: string;
   phone?: string;
-  role?: "runner" | "medic";
+  /** "external" = a guest (organizer / external responder) who types their own
+   *  name instead of picking from the roster; granted medic-level access. */
+  role?: "runner" | "medic" | "external";
   /** Medic roster ID (required when role = medic) */
   medicId?: string;
 }

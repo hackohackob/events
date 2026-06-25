@@ -14,7 +14,34 @@ export class AuthService {
     if (role === "medic") {
       return this.joinAsMedic(eventId, payload);
     }
+    if (role === "external") {
+      return this.joinAsExternal(eventId, payload);
+    }
     return this.joinAsRunner(eventId, payload);
+  }
+
+  /**
+   * External / organizer guest — not on the roster, types their own name and is
+   * granted medic-level access so they can use the field app. The `external_`
+   * userId keeps them distinguishable from rostered medics.
+   */
+  private async joinAsExternal(
+    eventId: string,
+    payload: JoinEventDto,
+  ): Promise<{ token: string; session: SessionPayload }> {
+    const name = payload.name?.trim();
+    if (!name || name.length < 3) {
+      throw new BadRequestException("name (min 3 characters) is required for external guests");
+    }
+    const slug = name.toLowerCase().replace(/\s+/g, "_").replace(/[^\w]/g, "");
+    const session: SessionPayload = {
+      userId: `external_${slug}`,
+      eventId,
+      role: "medic",
+      name,
+    };
+    const token = Buffer.from(JSON.stringify(session)).toString("base64");
+    return { token, session };
   }
 
   private async joinAsRunner(

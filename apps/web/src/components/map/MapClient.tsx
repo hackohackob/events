@@ -10,8 +10,31 @@ import type { MedicState } from '@events/contracts'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import type { LiveIncident } from '@/hooks/useLiveMap'
+import type { StyleSpecification } from 'maplibre-gl'
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
+
+export type BaseLayer = 'streets' | 'satellite' | 'terrain'
+
+/** Minimal single-source raster style (no glyphs needed — all overlays are line/
+ *  heatmap layers or DOM markers). */
+function rasterStyle(tiles: string, attribution: string): StyleSpecification {
+  return {
+    version: 8,
+    sources: { base: { type: 'raster', tiles: [tiles], tileSize: 256, attribution } },
+    layers: [{ id: 'base', type: 'raster', source: 'base' }],
+  }
+}
+
+/** Base map style per selected layer. Satellite + terrain use keyless Esri
+ *  rasters; streets is the default Carto vector style. */
+function styleFor(base: BaseLayer): string | StyleSpecification {
+  if (base === 'satellite')
+    return rasterStyle('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', '© Esri, Maxar')
+  if (base === 'terrain')
+    return rasterStyle('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', '© Esri')
+  return MAP_STYLE
+}
 
 export interface TrackLayer {
   id: string
@@ -55,6 +78,8 @@ interface MapClientProps {
   /** Online medics available for assignment */
   availableMedics?: Array<{ medicId: string; name: string }>
   showControls?: boolean
+  /** Selected base map layer (streets / satellite / terrain). */
+  baseLayer?: BaseLayer
   hoverCoord?: [number, number]
   hoverCoordColor?: string
   fitBounds?: [[number, number], [number, number]]
@@ -1050,6 +1075,7 @@ export default function MapClient({
   runnerLocations = [],
   showHeatmap = false,
   showControls = true,
+  baseLayer = 'streets',
   hoverCoord,
   hoverCoordColor = '#f97316',
   fitBounds,
@@ -1171,7 +1197,7 @@ export default function MapClient({
     <MapGL
       ref={mapRef}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
-      mapStyle={MAP_STYLE}
+      mapStyle={styleFor(baseLayer)}
       style={{ width: '100%', height: '100%' }}
       cursor={interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
       onClick={handleClick}
