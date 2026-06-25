@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, Info, Trash2, Eye, EyeOff, Check, X, Copy, Mountain, TrendingUp } from 'lucide-react'
-import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceDot } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
 import type { EventFormData, PointOfInterest, POIType } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
@@ -14,6 +14,37 @@ interface Props {
   update: (p: Partial<EventFormData>) => void
   onNext: () => void
   onBack: () => void
+}
+
+/** A POI is considered "on the path" within this distance of the track. */
+const POI_ON_PATH_METERS = 200
+
+/** Great-circle distance in metres between two [lng, lat] points. */
+function distanceMeters(a: [number, number], b: [number, number]): number {
+  const R = 6371000
+  const toRad = (x: number) => (x * Math.PI) / 180
+  const dLat = toRad(b[1] - a[1])
+  const dLng = toRad(b[0] - a[0])
+  const la1 = toRad(a[1])
+  const la2 = toRad(b[1])
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
+}
+
+/** POI badge drawn on the elevation profile (Recharts ReferenceDot custom shape):
+ *  a small connector up to a circular icon chip sitting above the elevation line. */
+function PoiProfileMarker({ cx, cy, poi }: { cx?: number; cy?: number; poi: PointOfInterest }) {
+  if (cx == null || cy == null) return null
+  const color = POI_CONFIGS.find((c) => c.type === poi.type)?.color ?? '#94a3b8'
+  return (
+    <g>
+      <line x1={cx} y1={cy} x2={cx} y2={cy - 12} stroke={color} strokeWidth={1} opacity={0.55} />
+      <circle cx={cx} cy={cy - 21} r={9} fill="rgba(10,18,34,0.97)" stroke={color} strokeWidth={1.5} />
+      <g transform={`translate(${cx - 6}, ${cy - 27}) scale(0.5)`}>
+        <PoiIcon type={poi.type} icon={poi.icon} size={24} color={color} strokeWidth={2.4} />
+      </g>
+    </g>
+  )
 }
 
 /** Compact dropdown of selectable vector icons for a custom point of interest. */
@@ -133,6 +164,29 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
     if (visibleTracks.length === 0) return undefined
     return new Set(visibleTracks.filter(t => !hiddenTrackIds.has(t.id)).map(t => t.id))
   }, [visibleTracks, hiddenTrackIds])
+
+  // POIs that sit on the open track's path (within 20 m) → placed on the
+  // elevation profile at their distance-along-track / elevation.
+  const poisOnProfile = useMemo(() => {
+    const coords = profileTrack?.coordinates
+    const elev = profileTrack?.elevationProfile
+    if (!profileTrack || !coords?.length || !elev || elev.length < 2) return []
+    return displayedPois
+      .map((poi) => {
+        let best = Infinity
+        let bi = 0
+        for (let i = 0; i < coords.length; i++) {
+          const d = distanceMeters(poi.coordinates, coords[i] as [number, number])
+          if (d < best) { best = d; bi = i }
+        }
+        if (best > POI_ON_PATH_METERS) return null
+        const frac = coords.length > 1 ? bi / (coords.length - 1) : 0
+        const pt = elev[Math.round(frac * (elev.length - 1))] as { distance: number; elevation: number } | undefined
+        if (!pt) return null
+        return { poi, x: pt.distance, y: pt.elevation }
+      })
+      .filter((v): v is { poi: PointOfInterest; x: number; y: number } => v !== null)
+  }, [profileTrack, displayedPois])
 
   const trackBounds = useMemo(() => {
     const tracks = visibleTracks.filter(t => !hiddenTrackIds.has(t.id))
@@ -646,6 +700,19 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                   isAnimationActive={false}
                   activeDot={{ r: 4, fill: profileTrack.color, stroke: 'white', strokeWidth: 2 }}
                 />
+                {poisOnProfile.map(({ poi, x, y }) => (
+                  <ReferenceDot
+                    key={poi.id}
+                    x={x}
+                    y={y}
+                    r={0}
+                    isFront
+                    ifOverflow="extendDomain"
+                    shape={(props: { cx?: number; cy?: number }) => (
+                      <PoiProfileMarker cx={props.cx} cy={props.cy} poi={poi} />
+                    )}
+                  />
+                ))}
               </AreaChart>
             </ResponsiveContainer>
           </div>

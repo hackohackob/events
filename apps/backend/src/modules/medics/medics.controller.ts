@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpException, HttpStatus, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "../common/guards/auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
@@ -50,6 +50,7 @@ export class MedicsController {
     @Param("medicId") medicId: string,
     @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number; timestamp?: string },
   ) {
+    try {
     const medic = await this.medicsService.getMedicById(eventId, medicId);
     await this.medicsService.upsertMedicLocation({
       eventId,
@@ -64,6 +65,9 @@ export class MedicsController {
       timestamp: body.timestamp,
     });
     await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, body.lat, body.lng);
+    } catch (err) {
+      throw new HttpException(`DEBUG: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`, 500);
+    }
   }
 
   @Patch("medics/:medicId/assign")

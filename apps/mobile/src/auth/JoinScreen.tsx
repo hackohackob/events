@@ -55,6 +55,7 @@ export function JoinScreen() {
 
   const cardEntrance = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     Animated.timing(cardEntrance, {
@@ -163,7 +164,11 @@ export function JoinScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         keyboardShouldPersistTaps="handled"
+        // Keep the focused field above the keyboard (iOS) and let the user scroll
+        // to it; we also auto-scroll on focus below.
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
@@ -272,6 +277,7 @@ export function JoinScreen() {
                         placeholderTextColor="#7f95aa"
                         style={styles.input}
                         autoFocus
+                        onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250)}
                       />
                     </View>
                   )}
