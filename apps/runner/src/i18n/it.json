@@ -190,5 +190,6 @@
   "sent.addVoice": "Voce",
   "sent.backToMap": "Torna alla mappa",
   "offline.areaLabel": "AREA",
-  "offline.sizeLabel": "DIMENSIONE"
+  "offline.sizeLabel": "DIMENSIONE",
+  "report.moreSub": "Colpo di calore, allergia, convulsioni e altro"
 }

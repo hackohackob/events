@@ -190,5 +190,6 @@
   "sent.addVoice": "Глас",
   "sent.backToMap": "Назад към картата",
   "offline.areaLabel": "ПЛОЩ",
-  "offline.sizeLabel": "РАЗМЕР"
+  "offline.sizeLabel": "РАЗМЕР",
+  "report.moreSub": "Топлинен удар, алергия, гърч и още"
 }

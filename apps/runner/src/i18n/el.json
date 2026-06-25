@@ -190,5 +190,6 @@
   "sent.addVoice": "Φωνή",
   "sent.backToMap": "Πίσω στον χάρτη",
   "offline.areaLabel": "ΠΕΡΙΟΧΗ",
-  "offline.sizeLabel": "ΜΕΓΕΘΟΣ"
+  "offline.sizeLabel": "ΜΕΓΕΘΟΣ",
+  "report.moreSub": "Θερμοπληξία, αλλεργία, σπασμοί και άλλα"
 }

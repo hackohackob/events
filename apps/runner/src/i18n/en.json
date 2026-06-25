@@ -213,5 +213,6 @@
   "sent.addVoice": "Voice",
   "sent.backToMap": "Back to map",
   "offline.areaLabel": "AREA",
-  "offline.sizeLabel": "SIZE"
+  "offline.sizeLabel": "SIZE",
+  "report.moreSub": "Heat, allergy, seizure & more"
 }

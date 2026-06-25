@@ -190,5 +190,6 @@
   "sent.addVoice": "Голос",
   "sent.backToMap": "Назад к карте",
   "offline.areaLabel": "ОБЛАСТЬ",
-  "offline.sizeLabel": "РАЗМЕР"
+  "offline.sizeLabel": "РАЗМЕР",
+  "report.moreSub": "Тепловой удар, аллергия, судороги и др."
 }

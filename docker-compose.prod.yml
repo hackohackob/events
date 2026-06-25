@@ -11,6 +11,11 @@ services:
       NODE_ENV: production
       GRAPHHOPPER_URL: "http://graphhopper:8989"
       GRAPHHOPPER_NATIVE_RESCUE: "true"
+      # Speech-to-text for voice notes (Bulgarian-tuned). Keys live in the host
+      # .env (/opt/events/.env), never in the repo. Soniox is primary, OpenAI is
+      # the fallback; absent keys → transcripts are simply skipped.
+      SONIOX_API_KEY: "${SONIOX_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
     depends_on:
       postgres:
         condition: service_healthy

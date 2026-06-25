@@ -155,7 +155,8 @@ export class IncidentsController {
   }
 
   @Post(":incidentId/voice")
-  @Roles("paramedic", "coordinator", "medic")
+  // Participants (runners) leave voice notes on their own incident too.
+  @Roles("paramedic", "coordinator", "medic", "runner")
   @UseInterceptors(
     FileInterceptor("audio", {
       storage: diskStorage({

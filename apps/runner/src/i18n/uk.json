@@ -190,5 +190,6 @@
   "sent.addVoice": "Голос",
   "sent.backToMap": "Назад до карти",
   "offline.areaLabel": "ПЛОЩА",
-  "offline.sizeLabel": "РОЗМІР"
+  "offline.sizeLabel": "РОЗМІР",
+  "report.moreSub": "Тепловий удар, алергія, судоми та інше"
 }

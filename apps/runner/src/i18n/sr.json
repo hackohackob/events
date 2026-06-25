@@ -213,5 +213,6 @@
   "sent.addVoice": "Glas",
   "sent.backToMap": "Nazad na mapu",
   "offline.areaLabel": "PODRUČJE",
-  "offline.sizeLabel": "VELIČINA"
+  "offline.sizeLabel": "VELIČINA",
+  "report.moreSub": "Toplotni udar, alergija, napad i još"
 }

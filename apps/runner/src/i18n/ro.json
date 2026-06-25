@@ -190,5 +190,6 @@
   "sent.addVoice": "Voce",
   "sent.backToMap": "Înapoi la hartă",
   "offline.areaLabel": "ZONĂ",
-  "offline.sizeLabel": "MĂRIME"
+  "offline.sizeLabel": "MĂRIME",
+  "report.moreSub": "Insolație, alergie, convulsii și altele"
 }

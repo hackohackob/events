@@ -190,5 +190,6 @@
   "sent.addVoice": "Ses",
   "sent.backToMap": "Haritaya dön",
   "offline.areaLabel": "ALAN",
-  "offline.sizeLabel": "BOYUT"
+  "offline.sizeLabel": "BOYUT",
+  "report.moreSub": "Sıcak çarpması, alerji, nöbet ve daha fazlası"
 }

@@ -190,5 +190,6 @@
   "sent.addVoice": "Sprache",
   "sent.backToMap": "Zurück zur Karte",
   "offline.areaLabel": "BEREICH",
-  "offline.sizeLabel": "GRÖSSE"
+  "offline.sizeLabel": "GRÖSSE",
+  "report.moreSub": "Hitze, Allergie, Krampf & mehr"
 }
