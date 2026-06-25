@@ -54,8 +54,8 @@ jobs:
           push: true
           tags: ${{ env.WEB_IMAGE }}:latest
           build-args: |
-            NEXT_PUBLIC_API_URL=https://events-api.hackohackob.com/api
-            NEXT_PUBLIC_WS_URL=https://events-api.hackohackob.com/realtime
+            NEXT_PUBLIC_API_URL=https://events-api.academyfirstaid.com/api
+            NEXT_PUBLIC_WS_URL=https://events-api.academyfirstaid.com/realtime
             NEXT_PUBLIC_MAPY_API_KEY=${{ secrets.MAPY_API_KEY }}
             NEXT_PUBLIC_USE_MAPY_TILES=true
           cache-from: type=registry,ref=${{ env.WEB_IMAGE }}:buildcache
@@ -69,7 +69,7 @@ jobs:
           push: true
           tags: ${{ env.SIM_IMAGE }}:latest
           build-args: |
-            VITE_API_URL=https://events-api.hackohackob.com
+            VITE_API_URL=https://events-api.academyfirstaid.com
             VITE_EVENT_ID=severozapad
           cache-from: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.SIM_IMAGE }}:buildcache,mode=max
@@ -82,8 +82,8 @@ jobs:
           push: true
           tags: ${{ env.RUNNER_IMAGE }}:latest
           build-args: |
-            VITE_API_URL=https://events-api.hackohackob.com/api
-            VITE_WS_URL=https://events-api.hackohackob.com/realtime
+            VITE_API_URL=https://events-api.academyfirstaid.com/api
+            VITE_WS_URL=https://events-api.academyfirstaid.com/realtime
           cache-from: type=registry,ref=${{ env.RUNNER_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.RUNNER_IMAGE }}:buildcache,mode=max
 
@@ -94,7 +94,7 @@ jobs:
           username: ${{ env.DEPLOY_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
-          source: "docker-compose.prod.yml,apps/backend/graphhopper/config.yml,infra/nginx/pwa.hackohackob.com.conf,infra/nginx/README.md"
+          source: "docker-compose.prod.yml,apps/backend/graphhopper/config.yml,infra/nginx/pwa.hackohackob.com.conf,infra/nginx/academyfirstaid.conf,infra/nginx/README.md"
           target: ${{ env.DEPLOY_DIR }}
 
       - name: Deploy to server

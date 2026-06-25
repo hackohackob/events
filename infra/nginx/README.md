@@ -1,3 +1,35 @@
+# Primary domain: academyfirstaid.com
+
+The stack is served on **academyfirstaid.com** (the apps build against this API):
+
+| Subdomain                         | Proxies to        | Serves                  |
+| --------------------------------- | ----------------- | ----------------------- |
+| `events.academyfirstaid.com`      | `127.0.0.1:8892`  | Coordinator web         |
+| `events-api.academyfirstaid.com`  | `127.0.0.1:8891`  | Backend API + realtime  |
+| `sos.academyfirstaid.com`         | `127.0.0.1:8894`  | Runner Companion PWA    |
+| `race.academyfirstaid.com`        | `127.0.0.1:8894`  | Same PWA (alias of sos) |
+
+The legacy `*.hackohackob.com` vhosts are kept as working aliases. One-time VPS
+setup (already applied):
+
+```bash
+sudo cp /opt/events/infra/nginx/academyfirstaid.conf \
+        /etc/nginx/sites-available/academyfirstaid.conf
+sudo ln -sf /etc/nginx/sites-available/academyfirstaid.conf \
+            /etc/nginx/sites-enabled/academyfirstaid.conf
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx \
+  -d events.academyfirstaid.com -d events-api.academyfirstaid.com \
+  -d sos.academyfirstaid.com -d race.academyfirstaid.com \
+  --non-interactive --agree-tos -m hackohackob@gmail.com --redirect
+```
+
+Certbot's systemd timer auto-renews. `certbot --nginx` rewrites the vhost in
+place to add the 443 blocks + 80→443 redirects (so the checked-in file stays the
+plain HTTP version, like `pwa.hackohackob.com.conf`).
+
+---
+
 # VPS setup for pwa.hackohackob.com (one-time)
 
 CI builds `hackohackob1/events-runner:latest` and runs it on the host at
