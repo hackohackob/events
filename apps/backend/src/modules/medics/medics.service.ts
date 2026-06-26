@@ -128,7 +128,9 @@ export class MedicsService implements OnModuleInit {
 
   async getMedicById(eventId: string, medicId: string) {
     const { rows } = await this.db.query<RosterRow>(
-      "SELECT id, name, unit, vehicle, type, skills, capabilities FROM event_medics WHERE event_id = $1 AND id = $2",
+      // id::text so a non-UUID medicId (external/guest joins like
+      // "external_pesho") doesn't error on the UUID column — it returns no row.
+      "SELECT id, name, unit, vehicle, type, skills, capabilities FROM event_medics WHERE event_id = $1 AND id::text = $2",
       [eventId, medicId],
     );
     return rows[0] ? rosterRowToMedic(rows[0]) : null;
@@ -141,7 +143,7 @@ export class MedicsService implements OnModuleInit {
       `SELECT u.role
        FROM event_medics em
        LEFT JOIN users u ON u.name = em.name
-       WHERE em.event_id = $1 AND em.id = $2`,
+       WHERE em.event_id = $1 AND em.id::text = $2`,
       [eventId, medicId],
     );
     return rows[0]?.role === "coordinator";

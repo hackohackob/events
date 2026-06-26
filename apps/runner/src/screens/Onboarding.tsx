@@ -85,6 +85,10 @@ export function Onboarding() {
   // or a still-unresolved/invalid code).
   const needsEventInput = eventStatus !== "valid" && (!hasEventQuery() || eventStatus === "invalid");
 
+  // With more than one active event, always offer the dropdown on the landing
+  // step (so a preselected event can still be switched). One event → no dropdown.
+  const showEventDropdown = step === "landing" && (activeEvents?.length ?? 0) > 1;
+
   // Both landing actions need a valid event and agreement to the terms.
   const canProceed = agreed && eventStatus === "valid" && !busy;
   const canEnter = Boolean(track) && !busy;
@@ -171,18 +175,19 @@ export function Onboarding() {
       <div className="section-label" style={{ marginTop: 22 }}>
         {t("onboarding.event")}
       </div>
-      {/* Title appears only once a code resolves; before that just the input. */}
-      {eventStatus === "valid" ? (
+      {/* With several live events show the dropdown so the runner can switch even
+          when one is already selected; with one (or none yet) just show the title.
+          The dropdown itself displays the chosen event, so skip the big title then. */}
+      {!showEventDropdown && eventStatus === "valid" ? (
         <div className="archivo" style={{ fontWeight: 800, fontSize: 24, marginTop: 4, lineHeight: 1.15 }}>
           {eventInfo!.title}
         </div>
-      ) : eventStatus === "loading" ? (
+      ) : !showEventDropdown && eventStatus === "loading" ? (
         <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 14 }}>{t("onboarding.loadingEvent")}</div>
       ) : null}
 
-      {step === "landing" && needsEventInput && (
-        (activeEvents?.length ?? 0) > 1 ? (
-          /* Multiple live events → choose from a dropdown. */
+      {showEventDropdown ? (
+          /* Multiple live events → always choose from a dropdown. */
           <select
             value={eventId || ""}
             onChange={(e) => e.target.value && setEventId(e.target.value)}
@@ -210,7 +215,7 @@ export function Onboarding() {
               </option>
             ))}
           </select>
-        ) : (
+        ) : step === "landing" && needsEventInput ? (
           /* No live events to list (or not loaded yet) → manual code entry. */
           <>
             <div
@@ -244,8 +249,7 @@ export function Onboarding() {
               </div>
             )}
           </>
-        )
-      )}
+        ) : null}
 
       {step === "landing" ? (
         <>

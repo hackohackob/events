@@ -34,7 +34,9 @@ function distanceMeters(a: [number, number], b: [number, number]): number {
 /** POI badge drawn on the elevation profile (Recharts ReferenceDot custom shape):
  *  a small connector up to a circular icon chip sitting above the elevation line. */
 function PoiProfileMarker({ cx, cy, poi }: { cx?: number; cy?: number; poi: PointOfInterest }) {
-  if (cx == null || cy == null) return null
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null
+  cx = cx as number
+  cy = cy as number
   const color = POI_CONFIGS.find((c) => c.type === poi.type)?.color ?? '#94a3b8'
   return (
     <g>
@@ -677,7 +679,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
                     <stop offset="95%" stopColor={profileTrack.color} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="distance" hide />
+                <XAxis dataKey="distance" type="number" domain={['dataMin', 'dataMax']} hide />
                 <YAxis hide domain={['auto', 'auto']} />
                 <Tooltip
                   contentStyle={{
