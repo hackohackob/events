@@ -1158,7 +1158,16 @@ export default function MapClient({
     if (!fitBounds || !mapRef.current) return
     const [[w, s], [e, n]] = fitBounds
     if (w === e && s === n) return
-    mapRef.current.fitBounds([[w, s], [e, n]], { padding: 60, duration: 600, maxZoom: 15 })
+    const map = mapRef.current.getMap()
+    // Keep the user's current rotation/tilt — fitBounds defaults bearing/pitch to
+    // 0, which would snap the map back to north-up when toggling track visibility.
+    mapRef.current.fitBounds([[w, s], [e, n]], {
+      padding: 60,
+      duration: 600,
+      maxZoom: 15,
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
+    })
   }, [boundsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLoad = useCallback(() => applyFitBounds(), [applyFitBounds])

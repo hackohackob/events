@@ -32,19 +32,31 @@ function distanceMeters(a: [number, number], b: [number, number]): number {
 }
 
 /** POI badge drawn on the elevation profile (Recharts ReferenceDot custom shape):
- *  a small connector up to a circular icon chip sitting above the elevation line. */
+ *  a circular icon chip with a connector to the elevation line. It sits above the
+ *  line, but flips below near the top of the chart so it's never clipped. Hovering
+ *  shows the POI's name (native SVG tooltip). */
 function PoiProfileMarker({ cx, cy, poi }: { cx?: number; cy?: number; poi: PointOfInterest }) {
   if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null
-  cx = cx as number
-  cy = cy as number
-  const color = POI_CONFIGS.find((c) => c.type === poi.type)?.color ?? '#94a3b8'
+  const x = cx as number
+  const y = cy as number
+  const cfg = POI_CONFIGS.find((c) => c.type === poi.type)
+  const color = cfg?.color ?? '#94a3b8'
+  const label = poi.name?.trim() || cfg?.label || poi.type
+  // Not enough room above the line → drop the badge below the point.
+  const below = y < 34
+  const lineEnd = below ? y + 12 : y - 12
+  const badgeCy = below ? y + 21 : y - 21
+  const iconY = below ? y + 15 : y - 27
   return (
-    <g>
-      <line x1={cx} y1={cy} x2={cx} y2={cy - 12} stroke={color} strokeWidth={1} opacity={0.55} />
-      <circle cx={cx} cy={cy - 21} r={9} fill="rgba(10,18,34,0.97)" stroke={color} strokeWidth={1.5} />
-      <g transform={`translate(${cx - 6}, ${cy - 27}) scale(0.5)`}>
+    <g style={{ cursor: 'pointer' }}>
+      <title>{label}</title>
+      <line x1={x} y1={y} x2={x} y2={lineEnd} stroke={color} strokeWidth={1} opacity={0.55} />
+      <circle cx={x} cy={badgeCy} r={9} fill="rgba(10,18,34,0.97)" stroke={color} strokeWidth={1.5} />
+      <g transform={`translate(${x - 6}, ${iconY}) scale(0.5)`}>
         <PoiIcon type={poi.type} icon={poi.icon} size={24} color={color} strokeWidth={2.4} />
       </g>
+      {/* Larger transparent hit area so the name tooltip is easy to trigger. */}
+      <circle cx={x} cy={badgeCy} r={13} fill="transparent" />
     </g>
   )
 }
