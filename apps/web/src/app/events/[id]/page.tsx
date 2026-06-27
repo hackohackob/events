@@ -279,8 +279,20 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
   // Runner heatmap from one aggregated, polled snapshot (not per-participant WS).
   const { points: heatPoints, count: runnerCount } = useHeatmap(id, isActive)
-  // Roster for the Participants tab — only polls while that tab is open.
-  const { participants } = useParticipants(id, activeTab === 'participants')
+  // The participant dots layer + which one is emphasised (dot pulse + panel row).
+  const [showParticipantDots, setShowParticipantDots] = useState(false)
+  const [participantHighlight, setParticipantHighlight] = useState<{ userId: string; nonce: number } | null>(null)
+  // Roster for the Participants tab + map dots. Polls while the tab is open OR
+  // the dots layer is on, so located participants stay live on the map.
+  const { participants } = useParticipants(id, activeTab === 'participants' || showParticipantDots)
+  // Roster entries with a known location, as clickable map dots.
+  const participantMarkers = useMemo(
+    () =>
+      participants
+        .filter((p) => p.lat != null && p.lng != null)
+        .map((p) => ({ userId: p.userId, lat: p.lat as number, lng: p.lng as number, name: p.name, bibNumber: p.bibNumber, freshness: p.freshness })),
+    [participants],
+  )
 
   const [showBroadcast, setShowBroadcast] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
@@ -990,8 +1002,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             {activeTab === 'participants' && (
               <ParticipantsPanel
                 participants={participants}
+                highlight={participantHighlight}
                 onLocate={(p) => {
                   if (p.lat == null || p.lng == null) return
+                  setShowParticipantDots(true) // turn the dots layer on
+                  setParticipantHighlight({ userId: p.userId, nonce: Date.now() })
                   setParticipantFocus({ lng: p.lng, lat: p.lat, nonce: Date.now() })
                   setPanelOpen(false) // mobile: reveal the map under the overlay
                 }}
@@ -1029,6 +1044,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             focusTarget={participantFocus ?? undefined}
             hoverCoord={participantFocus ? [participantFocus.lng, participantFocus.lat] : undefined}
             hoverCoordColor="#22c55e"
+            participantMarkers={participantMarkers}
+            showParticipantDots={isActive && showParticipantDots}
+            highlightedParticipantId={participantHighlight?.userId}
+            onParticipantClick={(userId) => {
+              setActiveTab('participants')
+              setPanelOpen(true)
+              setParticipantHighlight({ userId, nonce: Date.now() })
+            }}
             liveIncidents={isActive && showIncidents ? liveIncidents : []}
             onAssignIncident={isActive ? assignIncident : undefined}
             availableMedics={onlineMedics.map(m => ({ medicId: m.medicId, name: m.name }))}
@@ -1113,6 +1136,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 { key: 'tracks', label: 'Tracks', count: allTracks.filter(t => t.coordinates.length > 0).length, color: '#3b82f6', active: showTracks, toggle: () => setShowTracks(v => !v) },
                 { key: 'medics', label: 'Medics', count: medics.length, color: '#22c55e', active: showMedics, toggle: () => setShowMedics(v => !v) },
                 { key: 'pois', label: 'POIs', count: totalPois, color: '#ef4444', active: showPois, toggle: () => setShowPois(v => !v) },
+                { key: 'participant-dots', label: 'Participants', count: participantMarkers.length, color: '#22c55e', active: showParticipantDots, toggle: () => setShowParticipantDots(v => !v) },
                 { key: 'participants', label: 'Heatmap', count: runnerCount, color: '#f97316', active: showParticipants, toggle: () => setShowParticipants(v => !v) },
                 { key: 'incidents', label: 'Incidents', count: liveIncidents.length, color: '#f87171', active: showIncidents, toggle: () => setShowIncidents(v => !v) },
               ].map(({ key, label, count, color, active, toggle }) => (

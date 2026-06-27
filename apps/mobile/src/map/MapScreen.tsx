@@ -1472,6 +1472,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [locatedParticipant, setLocatedParticipant] = useState<
     { lng: number; lat: number; name?: string; bibNumber?: string } | null
   >(null);
+  // Tapping a participant dot opens the People list and highlights them there
+  // (matched by userId, falling back to BIB) instead of a marker detail sheet.
+  const [participantHighlight, setParticipantHighlight] = useState<
+    { userId?: string; bib?: string; nonce: number } | null
+  >(null);
   // Unread-comment tracking for the incident pin indicator.
   const incidentLastReadAt = useIncidentReadsStore((s) => s.lastReadAt);
   const incidentLatestMessageAt = useIncidentReadsStore((s) => s.latestMessageAt);
@@ -3095,6 +3100,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             key={marker.id}
             lngLat={[marker.lng, marker.lat]}
             onPress={() => {
+              // A participant dot → jump to the People list and highlight them
+              // (rather than opening a marker sheet).
+              if (marker.type === "runner") {
+                setParticipantHighlight({ userId: marker.id, bib: marker.bibNumber, nonce: Date.now() });
+                setSelectedMarkerId(null);
+                setActiveTab("participants");
+                return;
+              }
               setSelectedMarkerId(marker.id);
               // Bring the tapped marker into the upper half — the detail sheet
               // opens over the bottom ~42% of the screen.
@@ -4048,6 +4061,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         <View style={styles.tabOverlay}>
           <ParticipantsScreen
             onClose={() => setActiveTab("map")}
+            highlight={participantHighlight}
             onLocate={(p) => {
               if (p.lat == null || p.lng == null) return;
               setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber });

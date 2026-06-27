@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
@@ -47,10 +47,14 @@ function recentMs(p: ParticipantLastLocation): number {
 export function ParticipantsScreen({
   onClose,
   onLocate,
+  highlight,
 }: {
   onClose: () => void;
   /** Center the map on a participant's last known location. */
   onLocate?: (p: ParticipantLastLocation) => void;
+  /** Expand + scroll to + flash a participant (their map dot was tapped).
+   *  Matched by userId, falling back to BIB. */
+  highlight?: { userId?: string; bib?: string; nonce: number } | null;
 }) {
   const [rows, setRows] = useState<ParticipantLastLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,6 +65,9 @@ export function ParticipantsScreen({
   const [grouped, setGrouped] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const rowY = useRef<Map<string, number>>(new Map());
 
   const load = useCallback(async (asRefresh = false) => {
     if (asRefresh) setRefreshing(true);
@@ -102,6 +109,38 @@ export function ParticipantsScreen({
     }
     return Array.from(map.entries());
   }, [sorted, grouped]);
+
+  // React to a highlight request (a participant's map dot was tapped): find them
+  // by userId (or BIB), expand the row, un-collapse its track group, scroll to
+  // it, and flash it briefly.
+  useEffect(() => {
+    if (!highlight) return;
+    const target = rows.find(
+      (p) => (highlight.userId && p.userId === highlight.userId) || (highlight.bib && p.bibNumber === highlight.bib),
+    );
+    if (!target) return;
+    setExpanded(target.userId);
+    const groupKey = target.trackLabel || "No track";
+    setCollapsed((prev) => {
+      if (!prev.has(groupKey)) return prev;
+      const next = new Set(prev);
+      next.delete(groupKey);
+      return next;
+    });
+    setFlashId(target.userId);
+    const t1 = setTimeout(() => {
+      // Recorded y is content-relative only in the flat list; skip auto-scroll
+      // when grouped (expand + flash still draw attention).
+      const y = rowY.current.get(target.userId);
+      if (!grouped && y != null) scrollRef.current?.scrollTo({ y: Math.max(0, y - 90), animated: true });
+    }, 120);
+    const t2 = setTimeout(() => setFlashId(null), 1600);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight?.nonce, rows.length]);
 
   const toggleSort = (key: SortKey) => {
     void Haptics.selectionAsync();
@@ -174,6 +213,7 @@ export function ParticipantsScreen({
         </View>
       ) : (
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#34d399" />}
         >
@@ -200,6 +240,8 @@ export function ParticipantsScreen({
                           key={p.userId}
                           p={p}
                           open={expanded === p.userId}
+                          flash={flashId === p.userId}
+                          onLayoutY={(y) => rowY.current.set(p.userId, y)}
                           onToggle={() => setExpanded((id) => (id === p.userId ? null : p.userId))}
                           onLocate={onLocate}
                         />
@@ -214,6 +256,8 @@ export function ParticipantsScreen({
                 key={p.userId}
                 p={p}
                 open={expanded === p.userId}
+                flash={flashId === p.userId}
+                onLayoutY={(y) => rowY.current.set(p.userId, y)}
                 onToggle={() => setExpanded((id) => (id === p.userId ? null : p.userId))}
                 onLocate={onLocate}
               />
@@ -225,9 +269,11 @@ export function ParticipantsScreen({
   );
 }
 
-function Row({ p, open, onToggle, onLocate }: {
+function Row({ p, open, flash, onLayoutY, onToggle, onLocate }: {
   p: ParticipantLastLocation;
   open: boolean;
+  flash?: boolean;
+  onLayoutY?: (y: number) => void;
   onToggle: () => void;
   onLocate?: (p: ParticipantLastLocation) => void;
 }) {
@@ -236,7 +282,10 @@ function Row({ p, open, onToggle, onLocate }: {
   const hasLocation = p.lat != null && p.lng != null;
 
   return (
-    <View style={[styles.row, open && styles.rowOpen]}>
+    <View
+      style={[styles.row, open && styles.rowOpen, flash && styles.rowFlash]}
+      onLayout={onLayoutY ? (e) => onLayoutY(e.nativeEvent.layout.y) : undefined}
+    >
       <Pressable style={styles.rowPreview} onPress={onToggle}>
         <View style={styles.bib}>
           <Text style={styles.bibText}>{p.bibNumber ?? "—"}</Text>
@@ -395,6 +444,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   rowOpen: { borderColor: "rgba(52,211,153,0.28)" },
+  rowFlash: { borderColor: "#34d399", backgroundColor: "rgba(52,211,153,0.12)" },
   rowPreview: { flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 11, paddingVertical: 10 },
   bib: {
     minWidth: 44,

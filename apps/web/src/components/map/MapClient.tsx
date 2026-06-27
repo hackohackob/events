@@ -94,6 +94,14 @@ interface MapClientProps {
   onIncidentClick?: (incidentId: string) => void
   /** Clicking a medic → open its detail drawer (map focuses automatically). */
   onMedicClick?: (medicId: string) => void
+  /** Live participant roster as clickable, identity-carrying dots. */
+  participantMarkers?: Array<{ userId: string; lat: number; lng: number; name?: string; bibNumber?: string; freshness?: string }>
+  /** Show the participant dots layer. */
+  showParticipantDots?: boolean
+  /** Clicking a participant dot → open the People tab + highlight them. */
+  onParticipantClick?: (userId: string) => void
+  /** Emphasise one participant's dot (e.g. just located from the roster). */
+  highlightedParticipantId?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1061,6 +1069,51 @@ function ageColor(ageMin: number): string {
   return '#8a97a8' // stale
 }
 
+const PARTICIPANT_FRESH: Record<string, string> = {
+  fresh: '#22c55e', warning: '#f59e0b', stale: '#f97316', offline: '#64748b',
+}
+
+/** A clickable, identity-carrying participant dot from the live roster. The
+ *  highlighted one (just located, or clicked in the panel) gets a pulse + label. */
+function ParticipantDot({ p, highlighted, onSelect }: {
+  p: { userId: string; lat: number; lng: number; name?: string; bibNumber?: string; freshness?: string }
+  highlighted: boolean
+  onSelect?: () => void
+}) {
+  const color = PARTICIPANT_FRESH[p.freshness ?? 'offline'] ?? '#64748b'
+  const size = highlighted ? 16 : 11
+  return (
+    <Marker longitude={p.lng} latitude={p.lat}>
+      <div
+        className="relative flex items-center justify-center"
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => { e.stopPropagation(); onSelect?.() }}
+        title={`${p.bibNumber ? '#' + p.bibNumber + ' · ' : ''}${p.name ?? 'Participant'}`}
+      >
+        {highlighted && (
+          <div className="absolute rounded-full animate-ping" style={{ width: 30, height: 30, background: `${color}55`, animationDuration: '1.6s' }} />
+        )}
+        <div
+          style={{
+            width: size, height: size, borderRadius: '50%', background: color,
+            border: `2px solid ${highlighted ? '#ffffff' : 'rgba(255,255,255,0.85)'}`,
+            boxShadow: highlighted ? `0 0 12px ${color}` : '0 1px 3px rgba(0,0,0,0.45)',
+            transition: 'width 0.15s, height 0.15s',
+          }}
+        />
+        {highlighted && (
+          <div
+            className="absolute whitespace-nowrap px-1.5 py-0.5 rounded text-[10px] font-bold"
+            style={{ top: -22, background: 'rgba(8,15,28,0.92)', color: '#e2e8f0', border: '1px solid rgba(34,197,94,0.4)' }}
+          >
+            {p.bibNumber ? `#${p.bibNumber}` : (p.name ?? 'Participant')}
+          </div>
+        )}
+      </div>
+    </Marker>
+  )
+}
+
 export default function MapClient({
   center,
   zoom = 12,
@@ -1090,6 +1143,10 @@ export default function MapClient({
   onAddPoi,
   onIncidentClick,
   onMedicClick,
+  participantMarkers = [],
+  showParticipantDots = false,
+  onParticipantClick,
+  highlightedParticipantId,
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
@@ -1100,23 +1157,28 @@ export default function MapClient({
     const t = setInterval(() => setNowTick(Date.now()), 30_000)
     return () => clearInterval(t)
   }, [])
-  // Focusing a marker opens its detail drawer (440px, slides in from the right
-  // on desktop) — pad the camera right so the point centres in the area that
-  // stays visible instead of landing behind the drawer.
-  const focusOn = (lng: number, lat: number) => {
-    const drawerPad = typeof window !== 'undefined' && window.innerWidth >= 1024 ? 440 : 0
+  // Centre a point in the part of the map the user can actually see, not the
+  // raw map element. On desktop the left panel is a flex sibling (already
+  // excluded from the map box), but a right-side detail drawer (incident/medic,
+  // ~440px) slides over the map — pad right by that much when one is open so the
+  // point doesn't land behind it. Locating a participant opens the left People
+  // tab, not a right drawer, so it passes `rightDrawer: false` and centres in
+  // the full visible map.
+  const focusOn = (lng: number, lat: number, opts?: { rightDrawer?: boolean }) => {
+    const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 1024
+    const rightPad = isDesktop && (opts?.rightDrawer ?? true) ? 440 : 0
     mapRef.current?.flyTo({
       center: [lng, lat],
       zoom: Math.max(liveZoom, 15.5),
       duration: 650,
-      padding: { top: 0, bottom: 0, left: 0, right: drawerPad },
+      padding: { top: 0, bottom: 0, left: 0, right: rightPad },
     })
   }
   // Imperative focus (locate a participant from the side panel): fly there each
   // time the nonce changes, even if the coordinate is identical.
   useEffect(() => {
     if (!focusTarget) return
-    focusOn(focusTarget.lng, focusTarget.lat)
+    focusOn(focusTarget.lng, focusTarget.lat, { rightDrawer: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget?.nonce])
 
@@ -1359,6 +1421,16 @@ export default function MapClient({
           />
         </Source>
       )}
+
+      {/* Live participant dots (identity-carrying, clickable → People tab) */}
+      {showParticipantDots && participantMarkers.filter(p => isFiniteLngLat(p.lng, p.lat)).map(p => (
+        <ParticipantDot
+          key={p.userId}
+          p={p}
+          highlighted={p.userId === highlightedParticipantId}
+          onSelect={() => { focusOn(p.lng, p.lat, { rightDrawer: false }); onParticipantClick?.(p.userId) }}
+        />
+      ))}
 
       {/* Incident markers */}
       {liveIncidents.map(inc => (

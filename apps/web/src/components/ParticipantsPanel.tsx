@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp, ArrowDown, Layers, ChevronRight, ChevronDown,
   Phone, MapPin, Clock, Pill, AlertTriangle, Users, Droplet, HeartPulse, Crosshair,
@@ -40,16 +40,44 @@ function recentMs(p: ParticipantLastLocation): number {
 export default function ParticipantsPanel({
   participants,
   onLocate,
+  highlight,
 }: {
   participants: ParticipantLastLocation[]
   /** Fly the map to a participant's last known location. */
   onLocate?: (p: ParticipantLastLocation) => void
+  /** Expand + scroll to + flash a participant (e.g. their map dot was clicked). */
+  highlight?: { userId: string; nonce: number } | null
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('bib')
   const [sortAsc, setSortAsc] = useState(true)
   const [grouped, setGrouped] = useState(false)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [flashId, setFlashId] = useState<string | null>(null)
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  // React to a highlight request (map dot click / "show on map"): open the row,
+  // un-collapse its track group, scroll it into view, and flash it briefly.
+  useEffect(() => {
+    if (!highlight) return
+    const target = participants.find((p) => p.userId === highlight.userId)
+    if (!target) return
+    setExpandedRow(highlight.userId)
+    const groupKey = target.trackLabel || 'No track'
+    setCollapsedGroups((prev) => {
+      if (!prev.has(groupKey)) return prev
+      const next = new Set(prev)
+      next.delete(groupKey)
+      return next
+    })
+    setFlashId(highlight.userId)
+    const t1 = setTimeout(() => {
+      rowRefs.current.get(highlight.userId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 60)
+    const t2 = setTimeout(() => setFlashId(null), 1600)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight?.nonce])
 
   const sorted = useMemo(() => {
     const dir = sortAsc ? 1 : -1
@@ -178,6 +206,8 @@ export default function ParticipantsPanel({
                         key={p.userId}
                         p={p}
                         expanded={expandedRow === p.userId}
+                        flash={flashId === p.userId}
+                        rowRef={(el) => { if (el) rowRefs.current.set(p.userId, el); else rowRefs.current.delete(p.userId) }}
                         onToggle={() => setExpandedRow((id) => (id === p.userId ? null : p.userId))}
                         onLocate={onLocate}
                       />
@@ -194,6 +224,8 @@ export default function ParticipantsPanel({
                 key={p.userId}
                 p={p}
                 expanded={expandedRow === p.userId}
+                flash={flashId === p.userId}
+                rowRef={(el) => { if (el) rowRefs.current.set(p.userId, el); else rowRefs.current.delete(p.userId) }}
                 onToggle={() => setExpandedRow((id) => (id === p.userId ? null : p.userId))}
                 onLocate={onLocate}
               />
@@ -205,9 +237,11 @@ export default function ParticipantsPanel({
   )
 }
 
-function ParticipantRow({ p, expanded, onToggle, onLocate }: {
+function ParticipantRow({ p, expanded, flash, rowRef, onToggle, onLocate }: {
   p: ParticipantLastLocation
   expanded: boolean
+  flash?: boolean
+  rowRef?: (el: HTMLDivElement | null) => void
   onToggle: () => void
   onLocate?: (p: ParticipantLastLocation) => void
 }) {
@@ -216,8 +250,13 @@ function ParticipantRow({ p, expanded, onToggle, onLocate }: {
 
   return (
     <div
+      ref={rowRef}
       className="rounded-xl overflow-hidden transition-all"
-      style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${expanded ? 'rgba(34,197,94,0.25)' : 'rgba(148,163,184,0.07)'}` }}
+      style={{
+        background: flash ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${flash ? '#22c55e' : expanded ? 'rgba(34,197,94,0.25)' : 'rgba(148,163,184,0.07)'}`,
+        boxShadow: flash ? '0 0 0 3px rgba(34,197,94,0.18)' : 'none',
+      }}
     >
       {/* Preview */}
       <button onClick={onToggle} className="flex items-center gap-3 w-full px-3 py-2.5 text-left">
