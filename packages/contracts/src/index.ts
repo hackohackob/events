@@ -158,12 +158,37 @@ export interface ParticipantLastLocation {
   name: string;
   bibNumber?: string;
   phone?: string;
-  lat: number;
-  lng: number;
+  /** Selected course/track for this event. */
+  trackId?: string;
+  trackLabel?: string;
+  /** Server-side medical (opted in via the runner PWA). */
+  allergies?: string;
+  medications?: string;
+  bloodType?: string;
+  conditions?: string;
+  lat?: number;
+  lng?: number;
   accuracy?: number;
   battery?: number;
-  recordedAt: string;
-  lastSeenAt: string;
+  /** ISO time of the last location fetch (undefined until the first GPS fix). */
+  recordedAt?: string;
+  lastSeenAt?: string;
+  /** Location freshness bucket derived from `recordedAt`. */
+  freshness?: "fresh" | "warning" | "stale" | "offline";
+}
+
+/** Runner self-registration payload — name/BIB/phone/track + optional medical,
+ *  stored server-side and keyed by event + BIB for incident lookups. */
+export interface RegisterParticipantRequest {
+  name: string;
+  bibNumber?: string;
+  phone?: string;
+  trackId?: string;
+  trackLabel?: string;
+  allergies?: string;
+  medications?: string;
+  bloodType?: string;
+  conditions?: string;
 }
 
 // ─── Legacy location (kept for backwards compat) ─────────────────────────────
@@ -237,6 +262,22 @@ export interface CreateIncidentRequest {
   bibNumber?: string;
   /** Reporter display name (runner PWA). */
   runnerName?: string;
+  /** Reporter (sender) phone — always attached so medics have a callback. */
+  reporterPhone?: string;
+  /** True when the report is for the reporter themselves (vs someone else). */
+  forSelf?: boolean;
+  /** Patient bib when reporting for someone else — backend looks up their
+   *  phone + medical by this. */
+  patientBib?: string;
+  /** Patient allergies (the reporter's own when forSelf; resolved by BIB
+   *  otherwise). */
+  allergies?: string;
+  /** Patient medications, same resolution as `allergies`. */
+  medications?: string;
+  /** Patient blood type, same resolution as `allergies`. */
+  bloodType?: string;
+  /** Patient pre-existing conditions, same resolution as `allergies`. */
+  conditions?: string;
   /** Client capture time (ISO8601). */
   timestamp?: string;
 }

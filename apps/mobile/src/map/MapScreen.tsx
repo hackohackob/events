@@ -57,6 +57,7 @@ import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
 import { SettingsScreen } from "../settings/SettingsScreen";
 import { FieldGuideScreen } from "../guide/FieldGuideScreen";
+import { ParticipantsScreen } from "../participants/ParticipantsScreen";
 import { useSettingsStore } from "../settings/settings-store";
 import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
@@ -181,6 +182,14 @@ interface IncidentResponse {
   responders?: string[];
   createdBy?: string;
   reportedBy?: string;
+  reporterPhone?: string;
+  patientBib?: string;
+  patientName?: string;
+  patientPhone?: string;
+  allergies?: string;
+  medications?: string;
+  bloodType?: string;
+  conditions?: string;
   createdAt?: string;
   lastMessageAt?: string;
 }
@@ -200,6 +209,14 @@ function incidentToMarker(incident: IncidentResponse) {
     photoUrl: incident.photoUrl,
     photoUrls: incident.photoUrls,
     reportedBy: incident.reportedBy,
+    reporterPhone: incident.reporterPhone,
+    patientBib: incident.patientBib,
+    patientName: incident.patientName,
+    patientPhone: incident.patientPhone,
+    allergies: incident.allergies,
+    medications: incident.medications,
+    bloodType: incident.bloodType,
+    conditions: incident.conditions,
     createdBy: incident.createdBy,
     createdAt: incident.createdAt,
   };
@@ -1450,10 +1467,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const offlineBadgeOpacity = useRef(new Animated.Value(1)).current;
 
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  // Last location of a participant the user chose to locate from the roster —
+  // drawn as a transient pin and centred by the camera. Tap it to dismiss.
+  const [locatedParticipant, setLocatedParticipant] = useState<
+    { lng: number; lat: number; name?: string; bibNumber?: string } | null
+  >(null);
   // Unread-comment tracking for the incident pin indicator.
   const incidentLastReadAt = useIncidentReadsStore((s) => s.lastReadAt);
   const incidentLatestMessageAt = useIncidentReadsStore((s) => s.latestMessageAt);
-  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "chat" | "location" | "debug" | "settings" | "profile" | "guide">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "chat" | "location" | "debug" | "settings" | "profile" | "guide" | "participants">("map");
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3163,6 +3185,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             </View>
           </Marker>
         ) : null}
+
+        {locatedParticipant ? (
+          <Marker key="participant-focus" lngLat={[locatedParticipant.lng, locatedParticipant.lat]}>
+            <Pressable onPress={() => setLocatedParticipant(null)} style={styles.participantFocusWrap}>
+              <View style={styles.participantFocusPin}>
+                <Text style={styles.participantFocusBib}>{locatedParticipant.bibNumber ?? "•"}</Text>
+              </View>
+              {locatedParticipant.name ? (
+                <View style={styles.participantFocusLabel}>
+                  <Text style={styles.participantFocusLabelText} numberOfLines={1}>{locatedParticipant.name}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </Marker>
+        ) : null}
       </MapLibreMap>
 
       {/* Heatmap temporary tuner (disabled with heatmap).
@@ -3320,6 +3357,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {menuOpen ? (
         <View style={styles.menuPopup}>
           <Text style={styles.menuPopupTitle}>Menu</Text>
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
+              setActiveTab("participants");
+              setMenuOpen(false);
+            }}
+          >
+            <Feather name="users" size={18} color="#34d399" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Participants</Text>
+              <Text style={styles.menuPageSubtitle}>Roster, tracks & live status</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
           <Pressable
             style={styles.menuPageRow}
             onPress={() => {
@@ -3991,6 +4042,25 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {activeTab === "guide" ? (
         <View style={styles.tabOverlay}>
           <FieldGuideScreen onClose={() => setActiveTab("map")} />
+        </View>
+      ) : null}
+      {activeTab === "participants" ? (
+        <View style={styles.tabOverlay}>
+          <ParticipantsScreen
+            onClose={() => setActiveTab("map")}
+            onLocate={(p) => {
+              if (p.lat == null || p.lng == null) return;
+              setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber });
+              setSelectedMarkerId(null);
+              setActiveTab("map");
+              cameraRef.current?.easeTo({
+                center: [p.lng, p.lat],
+                zoom: 15.5,
+                padding: { top: 0, bottom: 0, left: 0, right: 0 },
+                duration: 600,
+              });
+            }}
+          />
         </View>
       ) : null}
       {activeTab === "chat" ? (
@@ -5005,6 +5075,32 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "rgba(245, 158, 11, 0.98)",
   },
+  participantFocusWrap: { alignItems: "center" },
+  participantFocusPin: {
+    minWidth: 30,
+    height: 30,
+    paddingHorizontal: 6,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#10b981",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  participantFocusBib: { color: "#03261a", fontSize: 12, fontWeight: "900" },
+  participantFocusLabel: {
+    marginTop: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 7,
+    backgroundColor: "rgba(3,18,31,0.9)",
+    maxWidth: 140,
+  },
+  participantFocusLabelText: { color: "#e8eef7", fontSize: 11, fontWeight: "700" },
   tracksDrawer: {
     paddingHorizontal: 16,
     paddingTop: 4,

@@ -31,7 +31,8 @@ export function Sending() {
     // Build the notes: who it's for, the patient's medical summary, then the
     // reporter's own description. For "me" we attach this device's medical info;
     // for someone else we record their BIB (patient medical isn't on this device).
-    const med = draft.forSelf ? medicalSummary(loadMedical()) : "";
+    const myMedical = draft.forSelf ? loadMedical() : null;
+    const med = draft.forSelf ? medicalSummary(myMedical) : "";
     const subjectLine = draft.forSelf
       ? undefined
       : draft.patientBib
@@ -50,6 +51,16 @@ export function Sending() {
       accuracy: draft.fix?.accuracy,
       runnerName: profile?.runnerName ?? undefined,
       bibNumber: profile?.bibNumber ?? undefined,
+      // Always attach the sender's phone for a callback; flag who it's for so the
+      // backend resolves patient phone + medical (by BIB for someone else, or
+      // from the reporter's own opt-in medical for "me").
+      reporterPhone: profile?.phone ?? undefined,
+      forSelf: draft.forSelf,
+      patientBib: draft.forSelf ? undefined : draft.patientBib ?? undefined,
+      allergies: myMedical?.allergies?.trim() || undefined,
+      medications: myMedical?.medications?.trim() || undefined,
+      bloodType: myMedical?.bloodType?.trim() || undefined,
+      conditions: myMedical?.conditions?.trim() || undefined,
       timestamp: draft.fix?.timestamp ?? new Date().toISOString(),
     };
 

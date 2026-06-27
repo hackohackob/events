@@ -83,6 +83,9 @@ interface MapClientProps {
   hoverCoord?: [number, number]
   hoverCoordColor?: string
   fitBounds?: [[number, number], [number, number]]
+  /** Imperatively fly the camera to a point (e.g. locating a participant). The
+   *  `nonce` makes repeat clicks on the same coordinate re-trigger the flight. */
+  focusTarget?: { lng: number; lat: number; nonce: number }
   /** POIs available as Go-To destinations */
   availablePois?: PointOfInterest[]
   /** Callback for right-click to add a POI */
@@ -1079,6 +1082,7 @@ export default function MapClient({
   hoverCoord,
   hoverCoordColor = '#f97316',
   fitBounds,
+  focusTarget,
   liveIncidents = [],
   onAssignIncident,
   availableMedics = [],
@@ -1108,6 +1112,14 @@ export default function MapClient({
       padding: { top: 0, bottom: 0, left: 0, right: drawerPad },
     })
   }
+  // Imperative focus (locate a participant from the side panel): fly there each
+  // time the nonce changes, even if the coordinate is identical.
+  useEffect(() => {
+    if (!focusTarget) return
+    focusOn(focusTarget.lng, focusTarget.lat)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTarget?.nonce])
+
   const boundsKey = fitBounds ? JSON.stringify(fitBounds) : null
 
   // Aggregate runner locations into ~100m grid cells, weighting each ping by

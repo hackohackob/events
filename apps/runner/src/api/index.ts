@@ -7,6 +7,7 @@ import type {
   JoinEventRequest,
   ParticipantLocationRequest,
   PublicMedicState,
+  RegisterParticipantRequest,
   SessionPayload,
   TrackGeoJson,
 } from "./contracts-shim";
@@ -89,6 +90,12 @@ export async function uploadIncidentVoice(incidentId: string, audio: Blob, durat
 
 export async function postParticipantLocation(eventId: string, body: ParticipantLocationRequest) {
   return apiPost<{ ok: boolean }>(`/events/${encodeURIComponent(eventId)}/location`, body);
+}
+
+/** Upload the runner's identity/track + opt-in medical so medics can resolve a
+ *  patient by BIB and the dashboard roster is populated. Best-effort. */
+export async function registerParticipant(eventId: string, body: RegisterParticipantRequest) {
+  return apiPost<void>(`/events/${encodeURIComponent(eventId)}/participants/register`, body);
 }
 
 export async function fetchGuidance(req: GuidanceRequest) {

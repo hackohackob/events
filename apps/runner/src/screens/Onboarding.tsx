@@ -4,7 +4,7 @@ import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { LanguageMenu } from "../components/LanguageMenu";
 import { hasEventQuery, prefillFromUrl, loadMedical, saveMedical } from "../lib/storage";
-import { ensureSession, refreshSession } from "../lib/session";
+import { ensureSession, refreshSession, syncParticipantProfile } from "../lib/session";
 import { hasMedicalInfo, type MedicalInfo } from "../lib/types";
 import type { TrackChoice } from "../lib/types";
 import { fetchEvents, type EventSummaryLike } from "../api";
@@ -118,6 +118,8 @@ export function Onboarding() {
     }
     if (hasMedicalInfo(medical)) saveMedical(medical);
     saveProfile(p);
+    // Push identity/track + opt-in medical to the backend (roster + BIB lookup).
+    void syncParticipantProfile(p, hasMedicalInfo(medical) ? medical : null);
     navigate("/map");
   }
 

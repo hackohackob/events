@@ -13,6 +13,7 @@ export type {
   JoinEventRequest,
   ParticipantLocationRequest,
   PublicMedicState,
+  RegisterParticipantRequest,
   SessionPayload,
   TrackGeoJson,
 } from "@events/contracts";

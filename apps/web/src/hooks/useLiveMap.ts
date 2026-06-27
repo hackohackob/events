@@ -39,6 +39,17 @@ export interface LiveIncident {
   responders?: string[]
   reportedBy?: string
   createdBy?: string
+  /** Reporter (sender) callback phone. */
+  reporterPhone?: string
+  /** Patient identity + contact when reporting for someone else. */
+  patientBib?: string
+  patientName?: string
+  patientPhone?: string
+  /** Patient medical, resolved server-side (self or by BIB). */
+  allergies?: string
+  medications?: string
+  bloodType?: string
+  conditions?: string
   vitals?: string
   treatment?: string
   transport?: string
@@ -67,6 +78,14 @@ function toLiveIncident(inc: any): LiveIncident {
     responders: inc.responders,
     reportedBy: inc.reportedBy,
     createdBy: inc.createdBy,
+    reporterPhone: inc.reporterPhone,
+    patientBib: inc.patientBib,
+    patientName: inc.patientName,
+    patientPhone: inc.patientPhone,
+    allergies: inc.allergies,
+    medications: inc.medications,
+    bloodType: inc.bloodType,
+    conditions: inc.conditions,
     vitals: inc.vitals,
     treatment: inc.treatment,
     transport: inc.transport,

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 // Gesture-handler ScrollView: plain RN ScrollViews don't receive horizontal pan
 // gestures inside a @gorhom/bottom-sheet — the sheet swallows them.
 import { ScrollView } from "react-native-gesture-handler";
@@ -492,6 +492,49 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
               {reportedAgo ? ` · ${reportedAgo}` : ""}
             </Text>
           </View>
+
+          {/* Contact + patient medical — compact, tap a number to call. */}
+          {(incident.reporterPhone || incident.patientPhone || incident.patientBib ||
+            incident.patientName || incident.allergies || incident.medications ||
+            incident.bloodType || incident.conditions) && (
+            <View style={styles.contactBlock}>
+              {incident.reporterPhone ? (
+                <Pressable style={styles.phoneRow} onPress={() => void Linking.openURL(`tel:${incident.reporterPhone}`)}>
+                  <Feather name="phone" size={12} color="#34d399" />
+                  <Text style={styles.phoneText}>Sender {incident.reporterPhone}</Text>
+                </Pressable>
+              ) : null}
+              {(incident.patientName || incident.patientBib || incident.patientPhone) ? (
+                <View style={styles.patientRow}>
+                  <Feather name="alert-triangle" size={12} color="#f59e0b" />
+                  <Text style={styles.patientText} numberOfLines={1}>
+                    Patient {incident.patientName ?? ""}{incident.patientBib ? ` #${incident.patientBib}` : ""}
+                  </Text>
+                  {incident.patientPhone ? (
+                    <Pressable onPress={() => void Linking.openURL(`tel:${incident.patientPhone}`)}>
+                      <Text style={styles.phoneText}>{incident.patientPhone}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+              {(incident.allergies || incident.medications || incident.bloodType || incident.conditions) ? (
+                <View style={styles.medChipRow}>
+                  {incident.bloodType ? (
+                    <Text style={[styles.medChip, styles.bloodChip]} numberOfLines={1}>🩸 {incident.bloodType}</Text>
+                  ) : null}
+                  {incident.allergies ? (
+                    <Text style={[styles.medChip, styles.allergyChip]} numberOfLines={1}>⚠ {incident.allergies}</Text>
+                  ) : null}
+                  {incident.medications ? (
+                    <Text style={[styles.medChip, styles.medsChip]} numberOfLines={1}>💊 {incident.medications}</Text>
+                  ) : null}
+                  {incident.conditions ? (
+                    <Text style={[styles.medChip, styles.conditionChip]} numberOfLines={1}>🩺 {incident.conditions}</Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          )}
         </View>
 
         {/* ── Notes (may include the patient's medical info, then the
@@ -825,6 +868,17 @@ const styles = StyleSheet.create({
   categoryBig: { flex: 1, color: "#f4f8ff", fontSize: 20, fontWeight: "900", letterSpacing: 0.2 },
   reportedRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   reportedByText: { flex: 1, color: "#8da3bd", fontSize: 12.5, fontWeight: "700" },
+  contactBlock: { marginTop: 8, gap: 5 },
+  phoneRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  phoneText: { color: "#34d399", fontSize: 12.5, fontWeight: "800" },
+  patientRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  patientText: { color: "#e2b04a", fontSize: 12.5, fontWeight: "800", flexShrink: 1 },
+  medChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 1 },
+  medChip: { fontSize: 11.5, fontWeight: "700", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, overflow: "hidden", maxWidth: "100%" },
+  allergyChip: { backgroundColor: "rgba(239,68,68,0.16)", color: "#fca5a5" },
+  medsChip: { backgroundColor: "rgba(168,85,247,0.16)", color: "#c4b5fd" },
+  bloodChip: { backgroundColor: "rgba(239,68,68,0.22)", color: "#fca5a5" },
+  conditionChip: { backgroundColor: "rgba(245,158,11,0.16)", color: "#fcd34d" },
 
   // Meta strip (legacy)
   metaRow: {

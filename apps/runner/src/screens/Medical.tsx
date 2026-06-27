@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
 import type { MedicalInfo } from "../lib/types";
 import { loadMedical, saveMedical } from "../lib/storage";
+import { syncParticipantProfile } from "../lib/session";
 import { MedicalQuestions } from "../components/MedicalQuestions";
 
 const EMPTY: MedicalInfo = {
@@ -22,6 +23,8 @@ export function Medical() {
 
   function save() {
     saveMedical(info);
+    // Re-sync so edited medical reaches the backend (BIB lookup + roster).
+    void syncParticipantProfile(null, info);
     setSaved(true);
     setTimeout(() => navigate(-1), 600);
   }

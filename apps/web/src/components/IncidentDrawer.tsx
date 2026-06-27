@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check } from 'lucide-react'
+import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse } from 'lucide-react'
 import VoiceMessage from './VoiceMessage'
 import type { IncidentMessage } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
@@ -256,8 +256,57 @@ export default function IncidentDrawer({
                 <div className="text-sm text-slate-300">
                   {incident.reportedBy ?? 'Unknown'}
                   <span className="text-slate-500"> ({incident.createdBy?.startsWith('runner_') ? 'Participant' : 'Medic'})</span>
+                  {incident.reporterPhone && (
+                    <a href={`tel:${incident.reporterPhone}`} className="ml-2 inline-flex items-center gap-1 font-medium" style={{ color: '#22c55e' }}>
+                      <Phone className="w-3 h-3" /> {incident.reporterPhone}
+                    </a>
+                  )}
                 </div>
               </div>
+
+              {/* Patient (when reporting for someone else) + medical — compact */}
+              {(incident.patientBib || incident.patientName || incident.patientPhone || incident.allergies || incident.medications || incident.bloodType || incident.conditions) && (
+                <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.16)' }}>
+                  <div className="text-[10px] font-bold tracking-widest" style={{ color: '#f87171' }}>PATIENT</div>
+                  {(incident.patientName || incident.patientBib || incident.patientPhone) && (
+                    <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-sm text-slate-200">
+                      {incident.patientName && <span className="font-semibold">{incident.patientName}</span>}
+                      {incident.patientBib && (
+                        <span className="font-mono text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e' }}>#{incident.patientBib}</span>
+                      )}
+                      {incident.patientPhone && (
+                        <a href={`tel:${incident.patientPhone}`} className="inline-flex items-center gap-1 font-medium" style={{ color: '#22c55e' }}>
+                          <Phone className="w-3 h-3" /> {incident.patientPhone}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {(incident.allergies || incident.medications || incident.bloodType || incident.conditions) && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {incident.bloodType && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md font-semibold" style={{ background: 'rgba(239,68,68,0.2)', color: '#fca5a5' }}>
+                          <Droplet className="w-3 h-3" /> {incident.bloodType}
+                        </span>
+                      )}
+                      {incident.allergies && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md" style={{ background: 'rgba(239,68,68,0.14)', color: '#fca5a5' }}>
+                          <AlertTriangle className="w-3 h-3" /> {incident.allergies}
+                        </span>
+                      )}
+                      {incident.medications && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md" style={{ background: 'rgba(168,85,247,0.14)', color: '#c4b5fd' }}>
+                          <Pill className="w-3 h-3" /> {incident.medications}
+                        </span>
+                      )}
+                      {incident.conditions && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md" style={{ background: 'rgba(245,158,11,0.14)', color: '#fcd34d' }}>
+                          <HeartPulse className="w-3 h-3" /> {incident.conditions}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Responders + assign */}
               {!isClosed && onAssignResponder && (

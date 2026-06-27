@@ -68,6 +68,32 @@ export class MedicsService implements OnModuleInit {
     for (const sql of alterations) {
       await this.db.query(sql).catch((err) => this.logger.warn(`battery column migration skipped: ${String(err)}`));
     }
+
+    // Participant self-registration profiles (name/BIB/phone/track + opt-in
+    // medical). Separate from participant_last_location so a participant appears
+    // in the roster before their first GPS fix, and so medical survives across
+    // location pings. Keyed by (event_id, user_id); BIB index powers incident
+    // lookups for "someone else" reports.
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS participant_profiles (
+        event_id    TEXT NOT NULL,
+        user_id     TEXT NOT NULL,
+        bib_number  TEXT,
+        name        TEXT NOT NULL DEFAULT '',
+        phone       TEXT,
+        track_id    TEXT,
+        track_label TEXT,
+        allergies   TEXT,
+        medications TEXT,
+        blood_type  TEXT,
+        conditions  TEXT,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (event_id, user_id)
+      )
+    `).catch((err) => this.logger.warn(`participant_profiles create skipped: ${String(err)}`));
+    await this.db.query(
+      `CREATE INDEX IF NOT EXISTS idx_participant_profiles_bib ON participant_profiles (event_id, bib_number)`,
+    ).catch(() => undefined);
   }
 
   /** Drop malformed destinations (e.g. `{}` or missing coords) so clients never
@@ -552,6 +578,105 @@ export class MedicsService implements OnModuleInit {
     };
   }
 
+  /** Upsert a runner's self-registered profile (identity/track + opt-in medical). */
+  async registerParticipant(
+    eventId: string,
+    userId: string,
+    data: {
+      name: string;
+      bibNumber?: string;
+      phone?: string;
+      trackId?: string;
+      trackLabel?: string;
+      allergies?: string;
+      medications?: string;
+      bloodType?: string;
+      conditions?: string;
+    },
+  ): Promise<void> {
+    await this.db.query(
+      `INSERT INTO participant_profiles
+         (event_id, user_id, bib_number, name, phone, track_id, track_label,
+          allergies, medications, blood_type, conditions, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+       ON CONFLICT (event_id, user_id) DO UPDATE SET
+         bib_number  = EXCLUDED.bib_number,
+         name        = EXCLUDED.name,
+         phone       = EXCLUDED.phone,
+         track_id    = EXCLUDED.track_id,
+         track_label = EXCLUDED.track_label,
+         allergies   = EXCLUDED.allergies,
+         medications = EXCLUDED.medications,
+         blood_type  = EXCLUDED.blood_type,
+         conditions  = EXCLUDED.conditions,
+         updated_at  = now()`,
+      [
+        eventId, userId,
+        data.bibNumber ?? null, data.name ?? "", data.phone ?? null,
+        data.trackId ?? null, data.trackLabel ?? null,
+        data.allergies ?? null, data.medications ?? null,
+        data.bloodType ?? null, data.conditions ?? null,
+      ],
+    );
+  }
+
+  /** Resolve a patient's contact + medical by BIB — used to enrich a "someone
+   *  else" incident report. Returns null when no participant registered this BIB. */
+  async findParticipantByBib(
+    eventId: string,
+    bibNumber: string,
+  ): Promise<{
+    name: string;
+    phone?: string;
+    allergies?: string;
+    medications?: string;
+    bloodType?: string;
+    conditions?: string;
+  } | null> {
+    const { rows } = await this.db.query<{
+      name: string;
+      phone: string | null;
+      allergies: string | null;
+      medications: string | null;
+      blood_type: string | null;
+      conditions: string | null;
+    }>(
+      `SELECT name, phone, allergies, medications, blood_type, conditions
+       FROM participant_profiles
+       WHERE event_id = $1 AND bib_number = $2
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [eventId, bibNumber],
+    );
+    if (!rows[0]) return null;
+    return {
+      name: rows[0].name,
+      phone: rows[0].phone ?? undefined,
+      allergies: rows[0].allergies ?? undefined,
+      medications: rows[0].medications ?? undefined,
+      bloodType: rows[0].blood_type ?? undefined,
+      conditions: rows[0].conditions ?? undefined,
+    };
+  }
+
+  /** Location freshness bucket from the last fetch time (mirrors the live-map
+   *  thresholds: <2min fresh, <5min warning, <15min stale, else offline). */
+  private participantFreshness(recordedAt: string | null): "fresh" | "warning" | "stale" | "offline" {
+    if (!recordedAt) return "offline";
+    const ageMs = Date.now() - new Date(recordedAt).getTime();
+    if (!Number.isFinite(ageMs)) return "offline";
+    if (ageMs < 120_000) return "fresh";
+    if (ageMs < 300_000) return "warning";
+    if (ageMs < 900_000) return "stale";
+    return "offline";
+  }
+
+  /**
+   * Full participant roster for the dashboard + medic app: registered identity
+   * (name/BIB/phone/track/medical) joined with the latest known location and a
+   * computed freshness. Includes participants with no GPS fix yet (location
+   * fields undefined).
+   */
   async getParticipants(eventId: string) {
     const { rows } = await this.db.query<{
       user_id: string;
@@ -559,15 +684,27 @@ export class MedicsService implements OnModuleInit {
       name: string;
       bib_number: string | null;
       phone: string | null;
-      lat: number;
-      lng: number;
-      recorded_at: string;
-      last_seen_at: string;
+      track_id: string | null;
+      track_label: string | null;
+      allergies: string | null;
+      medications: string | null;
+      blood_type: string | null;
+      conditions: string | null;
+      lat: number | null;
+      lng: number | null;
+      accuracy: number | null;
+      battery: number | null;
+      recorded_at: string | null;
+      last_seen_at: string | null;
     }>(
-      `SELECT user_id, event_id, name, bib_number, phone, lat, lng, recorded_at, last_seen_at
-       FROM participant_last_location
-       WHERE event_id = $1
-       ORDER BY name`,
+      `SELECT p.user_id, p.event_id, p.name, p.bib_number, p.phone,
+              p.track_id, p.track_label, p.allergies, p.medications, p.blood_type, p.conditions,
+              l.lat, l.lng, l.accuracy, l.battery, l.recorded_at, l.last_seen_at
+       FROM participant_profiles p
+       LEFT JOIN participant_last_location l
+         ON l.event_id = p.event_id AND l.user_id = p.user_id
+       WHERE p.event_id = $1
+       ORDER BY p.name`,
       [eventId],
     );
     return rows.map((r) => ({
@@ -576,10 +713,19 @@ export class MedicsService implements OnModuleInit {
       name: r.name,
       bibNumber: r.bib_number ?? undefined,
       phone: r.phone ?? undefined,
-      lat: r.lat,
-      lng: r.lng,
-      recordedAt: r.recorded_at,
-      lastSeenAt: r.last_seen_at,
+      trackId: r.track_id ?? undefined,
+      trackLabel: r.track_label ?? undefined,
+      allergies: r.allergies ?? undefined,
+      medications: r.medications ?? undefined,
+      bloodType: r.blood_type ?? undefined,
+      conditions: r.conditions ?? undefined,
+      lat: r.lat ?? undefined,
+      lng: r.lng ?? undefined,
+      accuracy: r.accuracy ?? undefined,
+      battery: r.battery ?? undefined,
+      recordedAt: r.recorded_at ?? undefined,
+      lastSeenAt: r.last_seen_at ?? undefined,
+      freshness: this.participantFreshness(r.recorded_at),
     }));
   }
 }

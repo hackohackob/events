@@ -29,6 +29,17 @@ export interface IncidentRecord {
   status: IncidentStatus;
   createdBy: string;
   reportedBy?: string;
+  /** Reporter (sender) callback phone. */
+  reporterPhone?: string;
+  /** Patient identity + contact when reporting for someone else. */
+  patientBib?: string;
+  patientName?: string;
+  patientPhone?: string;
+  /** Patient medical — reporter's own (forSelf) or resolved by BIB. */
+  allergies?: string;
+  medications?: string;
+  bloodType?: string;
+  conditions?: string;
   createdAt: string;
   updatedAt: string;
   responders: string[];
@@ -80,6 +91,14 @@ interface IncidentRow {
   status: string;
   created_by: string;
   reporter_name: string | null;
+  reporter_phone: string | null;
+  patient_bib: string | null;
+  patient_name: string | null;
+  patient_phone: string | null;
+  allergies: string | null;
+  medications: string | null;
+  blood_type: string | null;
+  conditions: string | null;
   created_at: string;
   updated_at: string;
   responders: string[];
@@ -129,6 +148,14 @@ function rowToRecord(r: IncidentRow): IncidentRecord {
     status: r.status as IncidentStatus,
     createdBy: r.created_by,
     reportedBy: r.reporter_name ?? undefined,
+    reporterPhone: r.reporter_phone ?? undefined,
+    patientBib: r.patient_bib ?? undefined,
+    patientName: r.patient_name ?? undefined,
+    patientPhone: r.patient_phone ?? undefined,
+    allergies: r.allergies ?? undefined,
+    medications: r.medications ?? undefined,
+    bloodType: r.blood_type ?? undefined,
+    conditions: r.conditions ?? undefined,
     createdAt: typeof r.created_at === "string" ? r.created_at : new Date(r.created_at).toISOString(),
     updatedAt: typeof r.updated_at === "string" ? r.updated_at : new Date(r.updated_at).toISOString(),
     responders: Array.isArray(r.responders) ? r.responders : [],
@@ -209,6 +236,14 @@ export class IncidentsService implements OnModuleInit {
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS photo_urls JSONB NOT NULL DEFAULT '[]'`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS category TEXT`,
       `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS accuracy DOUBLE PRECISION`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reporter_phone TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS patient_bib TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS patient_name TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS patient_phone TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS allergies TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS medications TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS blood_type TEXT`,
+      `ALTER TABLE incidents ADD COLUMN IF NOT EXISTS conditions TEXT`,
     ];
     for (const sql of alterations) {
       await this.db.query(sql);
@@ -372,10 +407,42 @@ export class IncidentsService implements OnModuleInit {
       input.severity ?? (category ? INCIDENT_CATEGORY_SEVERITY[category] : null);
     const type = input.type ?? (category ? category.replace(/_/g, " ") : "other");
 
+    // Contact + medical enrichment. The reporter's phone is always recorded.
+    // For "someone else" we resolve the patient's phone + medical by BIB from
+    // the participant roster (falling back to whatever the client sent); for
+    // "for me" the patient IS the reporter, so their phone/medical come straight
+    // from the payload.
+    const reporterPhone = input.reporterPhone?.trim() || null;
+    let patientName: string | null = null;
+    let patientPhone: string | null = null;
+    let allergies = input.allergies?.trim() || null;
+    let medications = input.medications?.trim() || null;
+    let bloodType = input.bloodType?.trim() || null;
+    let conditions = input.conditions?.trim() || null;
+    const patientBib = input.forSelf === false ? (input.patientBib?.trim() || null) : null;
+
+    if (input.forSelf === false) {
+      if (patientBib) {
+        const match = await this.medicsService.findParticipantByBib(eventId, patientBib).catch(() => null);
+        if (match) {
+          patientName = match.name || null;
+          patientPhone = match.phone ?? null;
+          allergies = match.allergies ?? allergies;
+          medications = match.medications ?? medications;
+          bloodType = match.bloodType ?? bloodType;
+          conditions = match.conditions ?? conditions;
+        }
+      }
+    } else {
+      // For-me: patient = reporter.
+      patientName = input.runnerName?.trim() || null;
+      patientPhone = reporterPhone;
+    }
+
     const { rows } = await this.db.query<IncidentRow>(
       `INSERT INTO incidents
-         (id, event_id, name, lat, lng, type, description, severity, category, accuracy, photo_url, status, created_by, reporter_name, created_at, updated_at, responders)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12, $13, $14, $14, '[]')
+         (id, event_id, name, lat, lng, type, description, severity, category, accuracy, photo_url, status, created_by, reporter_name, reporter_phone, patient_bib, patient_name, patient_phone, allergies, medications, blood_type, conditions, created_at, updated_at, responders)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $22, '[]')
        RETURNING *`,
       [
         id,
@@ -391,6 +458,14 @@ export class IncidentsService implements OnModuleInit {
         input.photoUrl ?? null,
         userId,
         reporterName,
+        reporterPhone,
+        patientBib,
+        patientName,
+        patientPhone,
+        allergies,
+        medications,
+        bloodType,
+        conditions,
         now,
       ],
     );

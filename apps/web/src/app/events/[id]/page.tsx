@@ -17,7 +17,9 @@ import BroadcastModal from '@/components/BroadcastModal'
 import IncidentDrawer from '@/components/IncidentDrawer'
 import MedicDrawer from '@/components/MedicDrawer'
 import ChatDrawer from '@/components/ChatDrawer'
+import ParticipantsPanel from '@/components/ParticipantsPanel'
 import { useEventChat } from '@/hooks/useEventChat'
+import { useParticipants } from '@/hooks/useParticipants'
 import { POI_CONFIGS } from '@/lib/constants'
 import { fetchGpxCoordinates } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
@@ -239,7 +241,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const { data: event, isLoading, isError } = useEvent(id)
   const activate = useActivateEvent()
   const deactivate = useDeactivateEvent()
-  const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents' | 'participants'>('info')
   const [showTracks, setShowTracks] = useState(true)
   const [showMedics, setShowMedics] = useState(true)
   const [showPois, setShowPois] = useState(true)
@@ -277,11 +279,15 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
   // Runner heatmap from one aggregated, polled snapshot (not per-participant WS).
   const { points: heatPoints, count: runnerCount } = useHeatmap(id, isActive)
+  // Roster for the Participants tab — only polls while that tab is open.
+  const { participants } = useParticipants(id, activeTab === 'participants')
 
   const [showBroadcast, setShowBroadcast] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
   const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
+  // Locating a participant from the roster: fly the map there + drop a pin.
+  const [participantFocus, setParticipantFocus] = useState<{ lng: number; lat: number; nonce: number } | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useEventChat({ eventId: id, enabled: isActive })
   const [roster, setRoster] = useState<EventMedic[]>([])
@@ -631,11 +637,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
           {/* Tab bar */}
           <div className="flex border-b" style={{ borderColor: 'rgba(148,163,184,0.08)' }}>
-            {(['info', 'medics', 'incidents'] as const).map(tab => (
+            {(['info', 'medics', 'incidents', 'participants'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className="flex-1 py-3 text-xs font-semibold uppercase tracking-widest transition-colors relative"
+                className="flex-1 py-3 text-xs font-semibold uppercase tracking-widest transition-colors relative whitespace-nowrap"
                 style={{
                   color: activeTab === tab ? '#e2e8f0' : '#475569',
                   background: 'transparent',
@@ -657,7 +663,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     {liveIncidents.filter(i => i.status === 'open').length}
                   </span>
                 )}
-                {tab}
+                {tab === 'participants' ? 'people' : tab}
                 {activeTab === tab && (
                   <div className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full" style={{ background: '#22c55e' }} />
                 )}
@@ -979,6 +985,18 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 )}
               </div>
             )}
+
+            {/* ── PARTICIPANTS TAB ── */}
+            {activeTab === 'participants' && (
+              <ParticipantsPanel
+                participants={participants}
+                onLocate={(p) => {
+                  if (p.lat == null || p.lng == null) return
+                  setParticipantFocus({ lng: p.lng, lat: p.lat, nonce: Date.now() })
+                  setPanelOpen(false) // mobile: reveal the map under the overlay
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -1008,6 +1026,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             runnerLocations={isActive ? heatPoints : []}
             showHeatmap={showParticipants}
             fitBounds={mapFitBounds}
+            focusTarget={participantFocus ?? undefined}
+            hoverCoord={participantFocus ? [participantFocus.lng, participantFocus.lat] : undefined}
+            hoverCoordColor="#22c55e"
             liveIncidents={isActive && showIncidents ? liveIncidents : []}
             onAssignIncident={isActive ? assignIncident : undefined}
             availableMedics={onlineMedics.map(m => ({ medicId: m.medicId, name: m.name }))}

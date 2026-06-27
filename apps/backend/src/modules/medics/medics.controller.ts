@@ -7,6 +7,7 @@ import { AssignDestinationDto } from "./dto/assign-destination.dto";
 import { BroadcastDto } from "./dto/broadcast.dto";
 import { UpdateMedicStatusDto } from "./dto/update-medic-status.dto";
 import { SetMedicRouteDto } from "./dto/set-medic-route.dto";
+import { RegisterParticipantDto } from "./dto/register-participant.dto";
 import { MedicsService } from "./medics.service";
 import { IncidentsService } from "../incidents/incidents.service";
 
@@ -117,6 +118,18 @@ export class MedicsController {
   @Get("participants")
   getParticipants(@Param("eventId") eventId: string) {
     return this.medicsService.getParticipants(eventId);
+  }
+
+  /** Runner self-registration — identity/track + opt-in medical, keyed to the
+   *  caller's session userId so it links to their location pings. */
+  @Post("participants/register")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async registerParticipant(
+    @Param("eventId") eventId: string,
+    @CurrentUser() user: RequestUser,
+    @Body() body: RegisterParticipantDto,
+  ) {
+    await this.medicsService.registerParticipant(eventId, user.userId, body);
   }
 
   /** Aggregated runner heatmap snapshot (dashboard + medic app poll this). */

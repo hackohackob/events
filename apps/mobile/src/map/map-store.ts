@@ -45,6 +45,17 @@ interface Marker {
   photoUrls?: string[];
   /** Display name of whoever reported the incident. */
   reportedBy?: string;
+  /** Reporter (sender) callback phone. */
+  reporterPhone?: string;
+  /** Patient identity + contact when reporting for someone else. */
+  patientBib?: string;
+  patientName?: string;
+  patientPhone?: string;
+  /** Patient medical — reporter's own (forSelf) or resolved by BIB. */
+  allergies?: string;
+  medications?: string;
+  bloodType?: string;
+  conditions?: string;
   /** User id of whoever created the incident (used to derive their role). */
   createdBy?: string;
   /** ISO timestamp of when an incident was reported. */
