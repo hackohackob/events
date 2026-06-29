@@ -113,6 +113,34 @@ function tileUrl(template: string, z: number, x: number, y: number): string {
   return template.replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
 }
 
+/**
+ * Bounding box around a set of points, padded by a fixed `bufferKm` on every
+ * side. Used for the offline pack so the cached area hugs the *track* (plus a
+ * small buffer) instead of stretching to wherever medics happen to be — that
+ * kept the download small and centred on where the runner actually goes.
+ */
+export function boundsForPathKm(
+  points: Array<{ lat: number; lng: number }>,
+  bufferKm = 5,
+): Bounds | null {
+  const valid = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (valid.length === 0) return null;
+  let minLat = Infinity;
+  let minLng = Infinity;
+  let maxLat = -Infinity;
+  let maxLng = -Infinity;
+  for (const p of valid) {
+    minLat = Math.min(minLat, p.lat);
+    maxLat = Math.max(maxLat, p.lat);
+    minLng = Math.min(minLng, p.lng);
+    maxLng = Math.max(maxLng, p.lng);
+  }
+  const midLat = (minLat + maxLat) / 2;
+  const padLat = bufferKm / 111.32;
+  const padLng = bufferKm / (111.32 * Math.cos((midLat * Math.PI) / 180));
+  return [minLng - padLng, minLat - padLat, maxLng + padLng, maxLat + padLat];
+}
+
 /** Bounding box around a set of points, padded ~12% (min ~1 km) like the native app. */
 export function boundsForPoints(points: Array<{ lat: number; lng: number }>): Bounds | null {
   const valid = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));

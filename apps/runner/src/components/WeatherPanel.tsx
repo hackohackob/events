@@ -6,9 +6,10 @@ const ACCENT = "var(--live-gps)";
 
 /**
  * Bottom weather scrubber. Drag (or play) across the next 12 hours; the headline
- * readout, the on-map radar/cloud field and the along-route temperature points
- * all follow the scrubbed hour. Themed (dark/light) and non-selectable so the
- * scrub gesture never highlights text.
+ * readout and the along-route temperature points follow the scrubbed hour. The
+ * on-map precipitation field is live Tomorrow.io tiles (current conditions), so
+ * the badge reads LIVE at "now" and FORECAST as you scrub ahead. Themed and
+ * non-selectable so the scrub gesture never highlights text.
  */
 export function WeatherPanel({
   forecast,
@@ -16,11 +17,6 @@ export function WeatherPanel({
   onScrub,
   playing,
   onTogglePlay,
-  radarLive,
-  showRain,
-  showClouds,
-  onToggleRain,
-  onToggleClouds,
   onClose,
 }: {
   forecast: Forecast | null;
@@ -28,11 +24,6 @@ export function WeatherPanel({
   onScrub: (i: number) => void;
   playing: boolean;
   onTogglePlay: () => void;
-  radarLive: boolean;
-  showRain: boolean;
-  showClouds: boolean;
-  onToggleRain: () => void;
-  onToggleClouds: () => void;
   onClose: () => void;
 }) {
   const { t } = useT();
@@ -50,6 +41,8 @@ export function WeatherPanel({
   const cur = hours[scrubIndex];
   const glyph = cur ? weatherGlyph(cur.code, cur.cloudPct, cur.isDay) : { icon: "⏳", label: "" };
   const relative = scrubIndex === 0 ? t("weather.now") : `+${scrubIndex}h`;
+  // Precipitation tiles are "now"; scrubbing ahead drives only the forecast read.
+  const radarLive = scrubIndex === 0;
 
   return (
     <div
@@ -149,10 +142,11 @@ export function WeatherPanel({
         </div>
       </div>
 
-      {/* Layer toggles + current detail */}
+      {/* Current detail line (precip field is shown on the map itself) */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <LayerChip active={showRain} icon="🌧" label={t("weather.rain")} onClick={onToggleRain} />
-        <LayerChip active={showClouds} icon="☁️" label={t("weather.clouds")} onClick={onToggleClouds} />
+        <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text-secondary)" }}>
+          {t("weather.precip")}
+        </span>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
           {cur ? `☁ ${Math.round(cur.cloudPct)}% · 💧 ${cur.precipMm.toFixed(1)}mm` : t("weather.loading")}
@@ -179,30 +173,6 @@ const iconBtn: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
 };
-
-function LayerChip({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        padding: "5px 11px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 800,
-        border: `1px solid ${active ? "rgba(46,155,255,0.5)" : "var(--border-subtle)"}`,
-        background: active ? "rgba(46,155,255,0.14)" : "var(--bg-card)",
-        color: active ? ACCENT : "var(--text-muted)",
-        transition: "color 0.15s, background 0.15s, border-color 0.15s",
-      }}
-    >
-      <span style={{ fontSize: 13 }}>{icon}</span>
-      {label}
-    </button>
-  );
-}
 
 function TimelineChart({
   width,

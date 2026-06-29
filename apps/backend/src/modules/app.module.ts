@@ -21,6 +21,7 @@ import { RoutingModule } from "./routing/routing.module";
 import { SearchModule } from "./search/search.module";
 import { UnitsModule } from "./units/units.module";
 import { UsersModule } from "./users/users.module";
+import { WeatherModule } from "./weather/weather.module";
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { UsersModule } from "./users/users.module";
     SearchModule,
     UnitsModule,
     UsersModule,
+    WeatherModule,
   ],
 })
 export class AppModule {}

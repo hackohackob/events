@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useT } from "../i18n";
 import {
   QUALITIES,
@@ -20,14 +20,20 @@ interface Props {
 }
 
 /**
- * Offline-map download sheet — deliberately minimal: it saves the recommended
- * pack for the whole event area in one tap. We show the area and an estimated
- * size so there are no surprises, and skip the quality matrix entirely.
+ * Offline-map download sheet. Shows the area + estimated size and lets the runner
+ * pick a resolution — Fast (overview), Balanced (recommended) or Detailed (full
+ * zoom). The estimate follows the chosen resolution so there are no surprises.
  */
 export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
   const { t } = useT();
-  // Always download the "balanced" pack — good detail without huge size.
-  const quality = QUALITIES.find((q) => q.key === "balanced") ?? QUALITIES[0];
+  // Default to "Balanced" — good detail without a huge download.
+  const [qualityKey, setQualityKey] = useState("balanced");
+  const quality = QUALITIES.find((q) => q.key === qualityKey) ?? QUALITIES[1];
+
+  // Reset to the recommended resolution each time the sheet is reopened.
+  useEffect(() => {
+    if (open) setQualityKey("balanced");
+  }, [open]);
 
   const span = useMemo(() => (bounds ? boundsSpanKm(bounds) : null), [bounds]);
   const sizeMb = useMemo(
@@ -111,6 +117,43 @@ export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
           />
           <div style={{ width: 1, background: "rgba(148,163,184,0.18)" }} />
           <Stat label={t("offline.sizeLabel")} value={sizeMb != null ? fmtMb(sizeMb) : "—"} accent />
+        </div>
+
+        {/* Resolution picker — Fast / Balanced / Detailed. */}
+        <div style={{ textAlign: "left" }}>
+          <div className="section-label" style={{ marginBottom: 8 }}>
+            {t("offline.quality")}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {QUALITIES.map((q) => {
+              const selected = q.key === qualityKey;
+              return (
+                <button
+                  key={q.key}
+                  onClick={() => setQualityKey(q.key)}
+                  style={{
+                    flex: 1,
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    borderRadius: 14,
+                    background: selected ? "rgba(46,155,255,0.14)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${selected ? ACCENT : "rgba(148,163,184,0.18)"}`,
+                    transition: "background 0.15s, border-color 0.15s",
+                  }}
+                >
+                  <div
+                    className="archivo"
+                    style={{ fontWeight: 800, fontSize: 13.5, color: selected ? ACCENT : "var(--text-primary)" }}
+                  >
+                    {t(`offline.q.${q.key}`)}
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.3 }}>
+                    {t(`offline.q.${q.key}.sub`)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <button

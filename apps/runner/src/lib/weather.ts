@@ -1,70 +1,31 @@
 /**
- * Weather data for the on-map radar + 12-hour scrubber.
+ * Weather data for the on-map precipitation field + 12-hour scrubber.
  *
- *  • Live precipitation radar  → RainViewer (free, no key). Gives a list of
- *    timestamped frames (~2 h of past + ~30 min nowcast); each frame is a raster
- *    tile template MapLibre can render as an overlay.
- *  • 12-hour forecast          → Open-Meteo (free, no key). Hourly temperature,
+ *  • Precipitation field → Tomorrow.io map tiles, proxied + cached by our
+ *    backend (apps/backend .../weather). The client just points a raster source
+ *    at a fixed URL template; the backend rations Tomorrow.io's tight request
+ *    budget. See weatherTileTemplate().
+ *  • 12-hour forecast    → Open-Meteo (free, no key). Hourly temperature,
  *    precipitation, probability and cloud cover, sampled at several points along
  *    the track so the runner sees how conditions change over the route and time.
  */
 
-export interface RadarFrame {
-  /** Unix seconds. */
-  time: number;
-  /** Tile template `https://…/{z}/{x}/{y}/…png` for MapLibre. */
-  template: string;
-}
+import { API_BASE } from "../api/client";
 
-export interface RadarData {
-  frames: RadarFrame[];
-  /** Index of the frame closest to "now" (last past / nowcast boundary). */
-  nowIndex: number;
-}
+/**
+ * Open-Meteo weather overlays. The backend fetches a coarse Bulgaria forecast
+ * grid and renders small PNG overlays per field/hour (cached); the runner just
+ * drops them on the map as image overlays positioned over Bulgaria — light, no
+ * WASM, no tiles. See apps/backend .../weather.
+ */
 
-const RAINVIEWER_API = "https://api.rainviewer.com/public/weather-maps.json";
+/** [W, S, E, N] the overlays cover — must match the backend's WEATHER_BBOX.
+ *  ⚠️ TEMP DEBUG: Bulgaria + neighbours (revert to [22,41,29,44.5] for Bulgaria-only). */
+export const WEATHER_BBOX: [number, number, number, number] = [20.0, 40.0, 29.0, 45.5];
 
-interface RainviewerResponse {
-  host: string;
-  radar: {
-    past: Array<{ time: number; path: string }>;
-    nowcast: Array<{ time: number; path: string }>;
-  };
-}
-
-/** Colour scheme 4 = "Universal Blue", smooth + snow (1_1) reads well on a dark map. */
-function radarTemplate(host: string, path: string): string {
-  return `${host}${path}/256/{z}/{x}/{y}/4/1_1.png`;
-}
-
-export async function fetchRadar(): Promise<RadarData | null> {
-  try {
-    const res = await fetch(RAINVIEWER_API);
-    if (!res.ok) return null;
-    const data = (await res.json()) as RainviewerResponse;
-    const past = data.radar?.past ?? [];
-    const nowcast = data.radar?.nowcast ?? [];
-    const frames = [...past, ...nowcast].map((f) => ({ time: f.time, template: radarTemplate(data.host, f.path) }));
-    if (frames.length === 0) return null;
-    return { frames, nowIndex: Math.max(0, past.length - 1) };
-  } catch {
-    return null;
-  }
-}
-
-/** Pick the radar frame nearest a given unix-seconds time, or null if none is within `toleranceSec`. */
-export function radarFrameAt(radar: RadarData | null, timeSec: number, toleranceSec = 20 * 60): RadarFrame | null {
-  if (!radar || radar.frames.length === 0) return null;
-  let best: RadarFrame | null = null;
-  let bestDiff = Infinity;
-  for (const f of radar.frames) {
-    const diff = Math.abs(f.time - timeSec);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = f;
-    }
-  }
-  return bestDiff <= toleranceSec ? best : null;
+/** URL of the rendered PNG overlay for a field at a forecast hour offset (0…6). */
+export function weatherOverlayUrl(field: string, hour: number): string {
+  return `${API_BASE}/weather/overlay/${field}/${hour}`;
 }
 
 // ─── Forecast (Open-Meteo) ────────────────────────────────────────────────────
@@ -96,7 +57,7 @@ export interface Forecast {
   primary: SamplePoint;
 }
 
-export const HORIZON_HOURS = 12;
+export const HORIZON_HOURS = 20; // ⚠️ TEMP DEBUG (revert to 6)
 
 interface MeteoHourly {
   /** Unix seconds (we request `timeformat=unixtime`). */

@@ -5,7 +5,16 @@ import type { Fix } from "../hooks/useGeolocation";
 import type { PoiLike } from "../api";
 import { haversineMeters } from "../lib/geo";
 import { OSM_TILE_URL } from "../lib/offline-map";
-import { tempColor } from "../lib/weather";
+import { tempColor, WEATHER_BBOX } from "../lib/weather";
+
+// Image-overlay corner coordinates (top-left, top-right, bottom-right, bottom-left)
+// for the Bulgaria weather overlays, from the [W,S,E,N] bbox.
+const WX_COORDS: [[number, number], [number, number], [number, number], [number, number]] = [
+  [WEATHER_BBOX[0], WEATHER_BBOX[3]],
+  [WEATHER_BBOX[2], WEATHER_BBOX[3]],
+  [WEATHER_BBOX[2], WEATHER_BBOX[1]],
+  [WEATHER_BBOX[0], WEATHER_BBOX[1]],
+];
 
 export interface WeatherPoint {
   lng: number;
@@ -16,6 +25,21 @@ export interface WeatherPoint {
   cloudPct: number;
   primary?: boolean;
 }
+
+// Fence the camera to the overlay area: pan is clamped to the rendered bbox
+// (maxBounds) so you can't scroll onto blank map, and zoom is bounded. ⚠️ TEMP
+// DEBUG band; for Bulgaria-only use ~6 / 11 / 7.
+const WEATHER_MIN_ZOOM = 5; // floor (maxBounds usually raises the effective min)
+const WEATHER_MAX_ZOOM = 13; // hard zoom-in cap
+const WEATHER_VIEW_ZOOM = 6.5; // fallback target on entry when there's no track
+const WEATHER_ENTRY_MAXZOOM = 9; // on entry, frame the track but don't zoom past this
+const DEFAULT_MAX_ZOOM = 19; // restored when leaving weather mode
+const DEFAULT_MIN_ZOOM = 0; // restored when leaving weather mode
+/** Pan limit while weather is open — the rendered overlay bbox [[W,S],[E,N]]. */
+const WEATHER_MAX_BOUNDS: [[number, number], [number, number]] = [
+  [WEATHER_BBOX[0], WEATHER_BBOX[1]],
+  [WEATHER_BBOX[2], WEATHER_BBOX[3]],
+];
 
 const MAP_STYLE: StyleSpecification = {
   version: 8,
@@ -52,15 +76,18 @@ interface Props {
   fitSignal?: number;
   satellite?: boolean;
   scrubPoint?: [number, number] | null;
-  /** Weather radar tile template (RainViewer) to overlay, or null to hide. */
-  radarTemplate?: string | null;
-  radarOpacity?: number;
+  /** Open-Meteo weather image overlays (Bulgaria PNGs), drawn under the route in
+   *  list order (bottom→top). Every forecast hour for both fields is passed at
+   *  once and kept loaded; the scrubbed hour has opacity 1, the rest 0 — so
+   *  scrubbing is an instant opacity swap with no reload. An empty list removes
+   *  them all (leaving the weather view). */
+  weatherLayers?: Array<{ id: string; url: string; opacity?: number }>;
   /** Forecast temperature points to show along the route, or null to hide. */
   weatherPoints?: WeatherPoint[] | null;
-  /** Weather layer toggles. Rain = real radar when live, soft forecast blobs
-   *  otherwise. Clouds = soft cloud-cover blobs from the forecast. */
-  showRain?: boolean;
-  showClouds?: boolean;
+  /** Weather mode: lock the camera around the low tile zoom — block zooming in
+   *  past the tile resolution, and clamp zoom-out to the regional level (Balkans,
+   *  not the whole continent) — and pull back a little on entry. */
+  weatherMode?: boolean;
   /** Px occluded at the bottom (sheet/dock) — fed to the map as camera padding
    *  so "centre", recenter and fitBounds frame content in the *visible* area. */
   bottomInset?: number;
@@ -124,11 +151,9 @@ export function RunnerMap({
   fitSignal,
   satellite,
   scrubPoint,
-  radarTemplate,
-  radarOpacity = 0.7,
+  weatherLayers,
   weatherPoints,
-  showRain = true,
-  showClouds = false,
+  weatherMode = false,
   bottomInset = 0,
   topInset = 0,
   interactive = true,
@@ -146,6 +171,10 @@ export function RunnerMap({
   const pinMarkerRef = useRef<maplibregl.Marker | null>(null);
   const pinOriginRef = useRef<[number, number] | null>(null);
   const weatherMarkersRef = useRef<maplibregl.Marker[]>([]);
+  // Weather image-overlay ids we've created (to remove on close) + the last image
+  // url set on each (so we only swap the image when the scrubbed hour changes).
+  const weatherLayerIdsRef = useRef<Set<string>>(new Set());
+  const weatherUrlRef = useRef<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   const fittedRef = useRef(false);
   const centeredOnFixRef = useRef(false);
@@ -412,94 +441,80 @@ export function RunnerMap({
     map.easeTo({ padding: { top: topInset, bottom: bottomInset, left: 0, right: 0 }, duration: 300 });
   }, [topInset, bottomInset, ready]);
 
-  // Weather radar overlay (RainViewer) — a raster layer under the route.
+  // Open-Meteo weather image overlays (Bulgaria PNGs), under the route. Every
+  // forecast hour for both fields is added at once (so they all load on open); the
+  // scrubbed hour is opaque, the rest transparent — scrubbing just swaps raster-
+  // opacity, so there's no reload glitch. An empty list (leaving weather) removes
+  // them all so they stop loading.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const hasLayer = map.getLayer("radar");
-    if (!radarTemplate) {
-      if (hasLayer) map.setLayoutProperty("radar", "visibility", "none");
-      return;
-    }
-    const src = map.getSource("radar") as { setTiles?: (t: string[]) => void } | undefined;
-    if (src && typeof src.setTiles === "function") {
-      src.setTiles([radarTemplate]);
-    } else if (!src) {
-      // RainViewer only serves real radar imagery up to z7 (z8+ is a "Zoom Level
-      // Not Supported" placeholder). Cap maxzoom so MapLibre over-zooms the real
-      // low-zoom tiles — radar is coarse anyway, so soft blobs read fine.
-      map.addSource("radar", { type: "raster", tiles: [radarTemplate], tileSize: 256, maxzoom: 7 });
-      // Sit above the basemap but below the route casing when it exists.
-      const before = map.getLayer("route-casing") ? "route-casing" : undefined;
-      map.addLayer(
-        { id: "radar", type: "raster", source: "radar", paint: { "raster-opacity": radarOpacity } },
-        before,
-      );
-    }
-    if (map.getLayer("radar")) {
-      map.setLayoutProperty("radar", "visibility", "visible");
-      map.setPaintProperty("radar", "raster-opacity", radarOpacity);
-    }
-  }, [radarTemplate, radarOpacity, ready]);
+    const layers = weatherLayers ?? [];
+    const wanted = new Set(layers.map((l) => l.id));
 
-  // Forecast clouds / rain as soft blurred blobs along the sampled points.
-  // RainViewer has no future radar, so for forecast hours we synthesize the
-  // field from Open-Meteo cloud-cover & precipitation probability.
+    // Remove any weather layer no longer wanted (close).
+    for (const id of [...weatherLayerIdsRef.current]) {
+      if (!wanted.has(id)) {
+        if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(id)) map.removeSource(id);
+        weatherLayerIdsRef.current.delete(id);
+      }
+    }
+
+    // Add/update in list order so later layers (precip) sit above earlier ones
+    // (clouds), both below the route casing. Scrubbing changes the url → swap the
+    // image in place (updateImage) rather than re-adding the layer.
+    for (const { id, url, opacity = 0 } of layers) {
+      const src = map.getSource(id) as maplibregl.ImageSource | undefined;
+      if (!src) {
+        map.addSource(id, { type: "image", url, coordinates: WX_COORDS });
+        const before = map.getLayer("route-casing") ? "route-casing" : undefined;
+        map.addLayer(
+          {
+            id,
+            type: "raster",
+            source: id,
+            paint: { "raster-opacity": opacity, "raster-opacity-transition": { duration: 0 }, "raster-fade-duration": 0 },
+          },
+          before,
+        );
+        weatherLayerIdsRef.current.add(id);
+        weatherUrlRef.current[id] = url;
+      } else {
+        if (weatherUrlRef.current[id] !== url) {
+          src.updateImage({ url, coordinates: WX_COORDS });
+          weatherUrlRef.current[id] = url;
+        }
+        map.setPaintProperty(id, "raster-opacity", opacity);
+      }
+    }
+  }, [weatherLayers, ready]);
+
+  // Weather mode: clamp panning to the rendered overlay bbox (maxBounds) so you
+  // can't scroll onto blank map, bound the zoom, and pull back on entry. Restore
+  // the free camera on exit.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const data = {
-      type: "FeatureCollection" as const,
-      features: (weatherPoints ?? []).map((p) => ({
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-        properties: { cloud: p.cloudPct, prob: p.precipProb },
-      })),
-    };
-    const src = map.getSource("wx-cells") as maplibregl.GeoJSONSource | undefined;
-    if (src) {
-      src.setData(data);
+    if (weatherMode) {
+      map.setMinZoom(WEATHER_MIN_ZOOM);
+      map.setMaxZoom(WEATHER_MAX_ZOOM);
+      map.setMaxBounds(WEATHER_MAX_BOUNDS);
+      // Frame the track on entry (a bit zoomed in, capped so there's still weather
+      // context around it). No track → fall back to a regional zoom.
+      if (coords && coords.length > 1) {
+        map.fitBounds(routeBounds(coords), { padding: fitPad(), maxZoom: WEATHER_ENTRY_MAXZOOM, duration: 600 });
+      } else if (Math.abs(map.getZoom() - WEATHER_VIEW_ZOOM) > 0.05) {
+        map.easeTo({ zoom: WEATHER_VIEW_ZOOM, duration: 500 });
+      }
     } else {
-      map.addSource("wx-cells", { type: "geojson", data });
-      const before = map.getLayer("route-casing") ? "route-casing" : undefined;
-      map.addLayer(
-        {
-          id: "wx-clouds",
-          type: "circle",
-          source: "wx-cells",
-          paint: {
-            // The OSM basemap is always light, so a mid slate reads as overcast
-            // (darkens) regardless of the app's UI theme.
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 55, 12, 120, 15, 200],
-            "circle-color": "#8190a6",
-            "circle-blur": 0.7,
-            "circle-opacity": ["*", ["/", ["coalesce", ["get", "cloud"], 0], 100], 0.55],
-          },
-        },
-        before,
-      );
-      map.addLayer(
-        {
-          id: "wx-rain",
-          type: "circle",
-          source: "wx-cells",
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 48, 12, 100, 15, 160],
-            "circle-color": "#2E9BFF",
-            "circle-blur": 0.9,
-            "circle-opacity": ["min", 0.62, ["*", ["/", ["coalesce", ["get", "prob"], 0], 100], 0.7]],
-          },
-        },
-        before,
-      );
+      map.setMaxBounds(null);
+      map.setMinZoom(DEFAULT_MIN_ZOOM);
+      map.setMaxZoom(DEFAULT_MAX_ZOOM);
     }
-    const hasPts = (weatherPoints?.length ?? 0) > 0;
-    if (map.getLayer("wx-clouds"))
-      map.setLayoutProperty("wx-clouds", "visibility", showClouds && hasPts ? "visible" : "none");
-    if (map.getLayer("wx-rain"))
-      // Real radar wins for the live moment; blobs fill in the forecast hours.
-      map.setLayoutProperty("wx-rain", "visibility", showRain && !radarTemplate && hasPts ? "visible" : "none");
-  }, [weatherPoints, showRain, showClouds, radarTemplate, ready]);
+    // Only re-run when entering/leaving weather (coords is read once on entry).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weatherMode, ready]);
 
   // Forecast temperature points along the route.
   useEffect(() => {

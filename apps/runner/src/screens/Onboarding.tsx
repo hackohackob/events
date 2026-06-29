@@ -85,9 +85,10 @@ export function Onboarding() {
   // or a still-unresolved/invalid code).
   const needsEventInput = eventStatus !== "valid" && (!hasEventQuery() || eventStatus === "invalid");
 
-  // With more than one active event, always offer the dropdown on the landing
-  // step (so a preselected event can still be switched). One event → no dropdown.
-  const showEventDropdown = step === "landing" && (activeEvents?.length ?? 0) > 1;
+  // Always offer the dropdown on the landing step whenever there are live events
+  // to list — so the runner can always change the event, even when one is already
+  // selected (a single live event still shows as a one-item, switchable dropdown).
+  const showEventDropdown = step === "landing" && (activeEvents?.length ?? 0) >= 1;
 
   // Both landing actions need a valid event and agreement to the terms.
   const canProceed = agreed && eventStatus === "valid" && !busy;
@@ -177,9 +178,9 @@ export function Onboarding() {
       <div className="section-label" style={{ marginTop: 22 }}>
         {t("onboarding.event")}
       </div>
-      {/* With several live events show the dropdown so the runner can switch even
-          when one is already selected; with one (or none yet) just show the title.
-          The dropdown itself displays the chosen event, so skip the big title then. */}
+      {/* Whenever there are live events to list we show the dropdown (it displays
+          the chosen event and lets the runner switch), so skip the big title then.
+          The title/loading line only appears when there's no dropdown to show. */}
       {!showEventDropdown && eventStatus === "valid" ? (
         <div className="archivo" style={{ fontWeight: 800, fontSize: 24, marginTop: 4, lineHeight: 1.15 }}>
           {eventInfo!.title}

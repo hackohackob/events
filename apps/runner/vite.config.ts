@@ -49,19 +49,19 @@ export default defineConfig({
             },
           },
           {
-            // Weather radar tiles (RainViewer) — short cache so scrubbing across
-            // frames is instant without holding stale frames forever.
-            urlPattern: ({ url }) => /rainviewer\.com/.test(url.host),
-            handler: "CacheFirst",
+            // Open-Meteo weather overlays (rendered PNGs from our backend). Short
+            // cache so panning/offline is instant but new forecasts arrive.
+            urlPattern: ({ url }) => /\/api\/weather\/overlay\//.test(url.pathname),
+            handler: "StaleWhileRevalidate",
             options: {
               cacheName: "weather-radar",
               cacheableResponse: { statuses: [0, 200] },
-              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 2 },
+              expiration: { maxEntries: 32, maxAgeSeconds: 60 * 20 },
             },
           },
           {
-            // Weather forecast + radar index JSON (Open-Meteo / RainViewer).
-            urlPattern: ({ url }) => /open-meteo\.com|api\.rainviewer\.com/.test(url.host),
+            // Weather forecast JSON (Open-Meteo).
+            urlPattern: ({ url }) => /open-meteo\.com/.test(url.host),
             handler: "StaleWhileRevalidate",
             options: {
               cacheName: "weather-api",
@@ -69,9 +69,10 @@ export default defineConfig({
             },
           },
           {
-            // Read-only race data (tracks geojson, medics, pois).
+            // Read-only race data (tracks geojson, medics, pois). Excludes the
+            // weather overlays (handled above).
             urlPattern: ({ url, request }) =>
-              request.method === "GET" && /\/api\//.test(url.pathname),
+              request.method === "GET" && /\/api\//.test(url.pathname) && !/\/api\/weather\//.test(url.pathname),
             handler: "StaleWhileRevalidate",
             options: {
               cacheName: "race-api",

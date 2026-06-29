@@ -11,14 +11,8 @@ import { haversineMeters, cumulativeDistances, snapToRoute, pointAtKm } from "..
 import { SafetyDock } from "../components/SafetyDock";
 import { OfflineControlButton } from "../components/OfflineControlButton";
 import { WeatherPanel } from "../components/WeatherPanel";
-import { boundsForPoints, type Bounds } from "../lib/offline-map";
-import {
-  fetchForecast,
-  fetchRadar,
-  radarFrameAt,
-  type Forecast,
-  type RadarData,
-} from "../lib/weather";
+import { boundsForPathKm, type Bounds } from "../lib/offline-map";
+import { fetchForecast, weatherOverlayUrl, HORIZON_HOURS, type Forecast } from "../lib/weather";
 import { loadMedical } from "../lib/storage";
 import { hasMedicalInfo } from "../lib/types";
 import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
@@ -60,12 +54,9 @@ export function MapShell({
 
   // ── Weather overlay state ──
   const [weatherOpen, setWeatherOpen] = useState(false);
-  const [radar, setRadar] = useState<RadarData | null>(null);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [wxIndex, setWxIndex] = useState(0);
   const [wxPlaying, setWxPlaying] = useState(false);
-  const [showRain, setShowRain] = useState(true);
-  const [showClouds, setShowClouds] = useState(false);
 
   // Open the weather layer when arriving from the Weather tab on another screen.
   useEffect(() => {
@@ -138,44 +129,93 @@ export function MapShell({
   const hasMedical = hasMedicalInfo(loadMedical());
   const showAccuracyWarning = gpsDenied || (fix != null && fix.accuracy > LOW_ACCURACY_METERS);
 
-  // ── Offline pack: cache the whole event area (track + medics + POIs + you). ──
+  // ── Offline pack: cache the track corridor + a 5 km buffer. Deliberately
+  //    excludes medic/POI positions so the download stays tight around where the
+  //    runner actually goes (a medic parked 30 km away shouldn't balloon it). ──
   const fixRef = useRef(fix);
   fixRef.current = fix;
   const getOfflineBounds = useCallback((): Bounds | null => {
     const points: Array<{ lat: number; lng: number }> = [];
     if (track) for (const [lng, lat] of track.coords) points.push({ lat, lng });
-    for (const m of medics) points.push({ lat: m.lat, lng: m.lng });
-    for (const p of pois) points.push({ lat: p.lat, lng: p.lng });
-    if (fixRef.current) points.push({ lat: fixRef.current.lat, lng: fixRef.current.lng });
-    return boundsForPoints(points);
-  }, [track, medics, pois]);
+    // No track yet → fall back to a 5 km area around the runner.
+    if (points.length === 0 && fixRef.current)
+      points.push({ lat: fixRef.current.lat, lng: fixRef.current.lng });
+    return boundsForPathKm(points, 5);
+  }, [track]);
 
   // ── Weather: a few sample points down the route for spatial temperatures. ──
   // Depends on `track` only (NOT `fix`) so live GPS updates can't change its
-  // identity and silently refetch + reset the scrubber back to "Now".
+  // identity and silently refetch + reset the scrubber back to "Now". Sample
+  // start/mid/end, then drop any that sit within ~3 km of one already kept — on a
+  // loop or out-and-back the start/finish/middle coincide and the temp markers
+  // would otherwise stack on top of each other.
   const wxSamplePoints = useMemo(() => {
+    const raw: Array<{ lat: number; lng: number }> = [];
     if (track && track.coords.length > 1) {
       const n = track.coords.length;
-      return [0, 0.25, 0.5, 0.75, 1].map((f) => {
+      for (const f of [0, 0.5, 1]) {
         const [lng, lat] = track.coords[Math.min(n - 1, Math.round(f * (n - 1)))];
-        return { lat, lng };
-      });
+        raw.push({ lat, lng });
+      }
+    } else if (fixRef.current) {
+      raw.push({ lat: fixRef.current.lat, lng: fixRef.current.lng });
     }
-    const f = fixRef.current;
-    return f ? [{ lat: f.lat, lng: f.lng }] : [];
+    const kept: Array<{ lat: number; lng: number }> = [];
+    for (const p of raw) if (!kept.some((q) => haversineMeters(q, p) < 3000)) kept.push(p);
+    return kept;
   }, [track]);
 
-  // Fetch radar + forecast when the weather layer opens (refresh on track change).
+  // Fetch the forecast (temps + scrub timeline) when the weather layer opens.
+  // The on-map precipitation field is served as fixed Tomorrow.io raster tiles
+  // (cached + rate-limited by our backend), so there's no radar index to fetch.
   useEffect(() => {
     if (!weatherOpen) return;
     let alive = true;
     setWxIndex(0);
-    void fetchRadar().then((r) => alive && setRadar(r));
     if (wxSamplePoints.length) void fetchForecast(wxSamplePoints).then((f) => alive && setForecast(f));
     return () => {
       alive = false;
     };
   }, [weatherOpen, wxSamplePoints]);
+
+  // On-map weather = Open-Meteo cloud cover (under) + precipitation (over),
+  // rendered server-side as PNG overlays. Two image overlays whose image is
+  // swapped (updateImage) to the scrubbed hour. The PNGs carry their own alpha.
+  // Independent of `forecast` (the temperature readout) so the rain map still
+  // shows if that separate call is slow/limited — it only needs the hour index.
+  const weatherLayers = useMemo(() => {
+    if (!weatherOpen) return [];
+    const cur = Math.min(HORIZON_HOURS, Math.max(0, wxIndex));
+    return [
+      { id: "wx-cloud", url: weatherOverlayUrl("cloud_cover", cur), opacity: 1 },
+      { id: "wx-precip", url: weatherOverlayUrl("precipitation", cur), opacity: 1 },
+    ];
+  }, [weatherOpen, wxIndex]);
+
+  // Warm every forecast-hour overlay (both fields) in the background on open, so
+  // scrubbing swaps to an already-cached image with no wait.
+  useEffect(() => {
+    if (!weatherOpen) return;
+    let cancelled = false;
+    const urls: string[] = [];
+    for (let h = 0; h <= HORIZON_HOURS; h += 1) {
+      urls.push(weatherOverlayUrl("precipitation", h), weatherOverlayUrl("cloud_cover", h));
+    }
+    let i = 0;
+    const worker = async () => {
+      while (i < urls.length && !cancelled) {
+        try {
+          await fetch(urls[i++]);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    void Promise.all([worker(), worker()]);
+    return () => {
+      cancelled = true;
+    };
+  }, [weatherOpen]);
 
   // Auto-play the 12h scrub.
   useEffect(() => {
@@ -184,9 +224,6 @@ export function MapShell({
     return () => clearInterval(id);
   }, [weatherOpen, wxPlaying, forecast]);
 
-  const scrubTime = forecast?.times[wxIndex];
-  // Real radar only counts toward the live moment AND when the Rain layer is on.
-  const radarFrame = weatherOpen && showRain && scrubTime != null ? radarFrameAt(radar, scrubTime) : null;
   const weatherPoints = useMemo<WeatherPoint[] | null>(() => {
     if (!weatherOpen || !forecast) return null;
     return forecast.points
@@ -249,10 +286,9 @@ export function MapShell({
         satellite={satellite}
         scrubPoint={scrubPoint}
         fitSignal={fitSignal}
-        radarTemplate={radarFrame?.template ?? null}
+        weatherLayers={weatherLayers}
+        weatherMode={weatherOpen}
         weatherPoints={weatherPoints}
-        showRain={weatherOpen && showRain}
-        showClouds={weatherOpen && showClouds}
         bottomInset={bottomInset}
         topInset={HEADER_INSET}
         youLabel={
@@ -312,8 +348,8 @@ export function MapShell({
       <div style={{ position: "absolute", top: 14, right: 12, display: "flex", flexDirection: "column", gap: 8 }}>
         <ControlButton glyph="🛰️" active={satellite} onClick={() => setSatellite((s) => !s)} title="Satellite" />
         <OfflineControlButton getBounds={getOfflineBounds} />
-        <ControlButton glyph="◎" active onClick={() => setRecenter((n) => n + 1)} title="Recenter" />
-        <ControlButton glyph="🧭" onClick={() => setCompass((n) => n + 1)} title="North up" />
+        <ControlButton icon={<LocateIcon />} active onClick={() => setRecenter((n) => n + 1)} title="Recenter" />
+        <ControlButton icon={<CompassIcon />} onClick={() => setCompass((n) => n + 1)} title="North up" />
       </div>
 
       {/* Medical info button — green ring once filled, amber prompt when empty */}
@@ -371,11 +407,6 @@ export function MapShell({
           }}
           playing={wxPlaying}
           onTogglePlay={() => setWxPlaying((p) => !p)}
-          radarLive={radarFrame != null}
-          showRain={showRain}
-          showClouds={showClouds}
-          onToggleRain={() => setShowRain((v) => !v)}
-          onToggleClouds={() => setShowClouds((v) => !v)}
           onClose={toggleWeather}
         />
       )}
@@ -434,7 +465,19 @@ function cssVar(v: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#2BE3A0";
 }
 
-function ControlButton({ glyph, active, onClick, title }: { glyph: string; active?: boolean; onClick?: () => void; title?: string }) {
+function ControlButton({
+  glyph,
+  icon,
+  active,
+  onClick,
+  title,
+}: {
+  glyph?: string;
+  icon?: React.ReactNode;
+  active?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
   return (
     <button
       onClick={onClick}
@@ -447,11 +490,35 @@ function ControlButton({ glyph, active, onClick, title }: { glyph: string; activ
         border: `1px solid ${active ? "var(--primary)" : "rgba(255,255,255,0.10)"}`,
         color: active ? "var(--primary)" : "var(--text-secondary)",
         fontSize: 18,
+        display: "grid",
+        placeItems: "center",
         boxShadow: "0 4px 12px rgba(0,0,0,0.30)",
       }}
     >
-      {glyph}
+      {icon ?? glyph}
     </button>
+  );
+}
+
+/** "Recenter on me" — a crisp crosshair/locator (GPS-style reticle + centre dot). */
+function LocateIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </svg>
+  );
+}
+
+/** "North up" — a compass needle (north half filled) inside a ring. */
+function CompassIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 4.5 14.6 12H9.4z" fill="#E63946" stroke="#E63946" />
+      <path d="M12 19.5 9.4 12h5.2z" fill="currentColor" opacity="0.55" />
+    </svg>
   );
 }
 

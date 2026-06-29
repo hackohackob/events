@@ -17,7 +17,8 @@
       "name": "runner",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:runner"],
-      "port": 8506
+      "port": 8506,
+      "autoPort": false
     }
   ]
 }
