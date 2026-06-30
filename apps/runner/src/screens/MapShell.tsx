@@ -331,7 +331,7 @@ export function MapShell({
             background: "linear-gradient(135deg,var(--primary),var(--primary-dark))",
             display: "grid",
             placeItems: "center",
-            fontFamily: "Archivo",
+            fontFamily: "Sofia Sans",
             fontWeight: 800,
             fontSize: 14,
             color: "#05140E",

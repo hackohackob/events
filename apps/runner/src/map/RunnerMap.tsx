@@ -533,7 +533,7 @@ export function RunnerMap({
       const el = document.createElement("div");
       el.style.cssText = [
         "display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px",
-        `background:${c};color:#06121d;font-family:Archivo,sans-serif`,
+        `background:${c};color:#06121d;font-family:'Sofia Sans',sans-serif`,
         `font-weight:800;font-size:${p.primary ? 14 : 12}px;white-space:nowrap`,
         "border:2px solid rgba(255,255,255,0.9);box-shadow:0 3px 8px rgba(0,0,0,0.45)",
       ].join(";");

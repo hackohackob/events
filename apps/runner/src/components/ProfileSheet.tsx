@@ -165,7 +165,7 @@ export function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => 
               background: "var(--critical-bg)",
               border: "1px solid var(--critical)",
               color: "var(--critical)",
-              fontFamily: "Archivo",
+              fontFamily: "Sofia Sans",
               fontWeight: 800,
               fontSize: 14,
             }}

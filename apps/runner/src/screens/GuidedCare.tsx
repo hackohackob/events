@@ -61,7 +61,7 @@ export function GuidedCare() {
       {nodeId === "cpr" && (
         <button
           onClick={() => setShowCpr(true)}
-          style={{ width: "100%", marginTop: 16, padding: 18, borderRadius: 16, background: "linear-gradient(135deg,#FF5964,#E63946)", color: "#fff", fontFamily: "Archivo", fontWeight: 900, fontSize: 17, boxShadow: "0 12px 28px rgba(230,57,70,0.4)" }}
+          style={{ width: "100%", marginTop: 16, padding: 18, borderRadius: 16, background: "linear-gradient(135deg,#FF5964,#E63946)", color: "#fff", fontFamily: "Sofia Sans", fontWeight: 900, fontSize: 17, boxShadow: "0 12px 28px rgba(230,57,70,0.4)" }}
         >
           ❤️ {t("cpr.start")}
         </button>
@@ -97,7 +97,7 @@ function bigBtnStyle(tone?: OptionTone): React.CSSProperties {
     width: "100%",
     padding: "18px 16px",
     borderRadius: 16,
-    fontFamily: "Archivo",
+    fontFamily: "Sofia Sans",
     fontWeight: 800,
     fontSize: 17,
     textAlign: "center",

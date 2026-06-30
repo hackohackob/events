@@ -84,7 +84,7 @@ input {
 }
 
 .archivo {
-  font-family: "Archivo", system-ui, sans-serif;
+  font-family: "Sofia Sans", system-ui, sans-serif;
 }
 
 .section-label {
@@ -196,7 +196,7 @@ input {
   width: 100%;
   border-radius: 16px;
   padding: 17px;
-  font-family: "Archivo", sans-serif;
+  font-family: "Sofia Sans", sans-serif;
   font-weight: 800;
   font-size: 16px;
   letter-spacing: 0.02em;
@@ -214,7 +214,7 @@ input {
   width: 100%;
   border-radius: 18px;
   padding: 18px;
-  font-family: "Archivo", sans-serif;
+  font-family: "Sofia Sans", sans-serif;
   font-weight: 900;
   font-size: 17px;
   color: #fff;

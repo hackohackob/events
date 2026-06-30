@@ -295,7 +295,7 @@ export function Onboarding() {
               background: "var(--critical-bg)",
               border: "1px solid var(--critical)",
               color: "var(--critical)",
-              fontFamily: "Archivo",
+              fontFamily: "Sofia Sans",
               fontWeight: 800,
               fontSize: 15,
               display: "flex",
