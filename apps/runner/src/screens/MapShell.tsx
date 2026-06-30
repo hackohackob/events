@@ -11,10 +11,9 @@ import { haversineMeters, cumulativeDistances, snapToRoute, pointAtKm } from "..
 import { SafetyDock } from "../components/SafetyDock";
 import { OfflineControlButton } from "../components/OfflineControlButton";
 import { WeatherPanel } from "../components/WeatherPanel";
+import { ProfileSheet } from "../components/ProfileSheet";
 import { boundsForPathKm, type Bounds } from "../lib/offline-map";
 import { fetchForecast, weatherOverlayUrl, HORIZON_HOURS, type Forecast } from "../lib/weather";
-import { loadMedical } from "../lib/storage";
-import { hasMedicalInfo } from "../lib/types";
 import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
 import type { IncidentRecordLike, PublicMedicState } from "../api/contracts-shim";
 
@@ -24,6 +23,8 @@ interface ShellCtx {
   track: ResolvedTrack | null;
   kmAlong: number | null;
   offsetMeters: number | null;
+  /** GPS-reported altitude (m), or null when the device omits it. */
+  gpsAltitude: number | null;
   medics: PublicMedicState[];
   onScrub: (km: number | null) => void;
   onSheetInset: (px: number) => void;
@@ -51,6 +52,7 @@ export function MapShell({
   const [scrubPoint, setScrubPoint] = useState<[number, number] | null>(null);
   const [fitSignal, setFitSignal] = useState<number | undefined>(undefined);
   const [sheetInset, setSheetInset] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // ── Weather overlay state ──
   const [weatherOpen, setWeatherOpen] = useState(false);
@@ -126,7 +128,6 @@ export function MapShell({
     return { kmAlong: snap.kmAlong, offsetMeters: snap.offsetMeters };
   }, [fix, track]);
 
-  const hasMedical = hasMedicalInfo(loadMedical());
   const showAccuracyWarning = gpsDenied || (fix != null && fix.accuracy > LOW_ACCURACY_METERS);
 
   // ── Offline pack: cache the track corridor + a 5 km buffer. Deliberately
@@ -279,8 +280,9 @@ export function MapShell({
       <RunnerMap
         coords={track?.coords ?? null}
         routeColor={routeColor.startsWith("var") ? cssVar(routeColor) : routeColor}
-        // Declutter the weather view — hide medics & POIs so the radar/temps read.
-        medics={weatherOpen ? [] : medics}
+        // Hide the mobile medics in the weather and track-preview views (they
+        // clutter the radar / the elevation framing); POIs only hide in weather.
+        medics={weatherOpen || active === "tracks" ? [] : medics}
         pois={weatherOpen ? [] : pois}
         fix={fix}
         satellite={satellite}
@@ -318,7 +320,10 @@ export function MapShell({
           boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
         }}
       >
-        <div
+        {/* Tap the initials to edit name / bib / phone / medical, or leave the event. */}
+        <button
+          onClick={() => setProfileOpen(true)}
+          aria-label={t("profile.title")}
           style={{
             width: 34,
             height: 34,
@@ -330,10 +335,11 @@ export function MapShell({
             fontWeight: 800,
             fontSize: 14,
             color: "#05140E",
+            flexShrink: 0,
           }}
         >
           {(profile?.runnerName ?? "R").slice(0, 2).toUpperCase()}
-        </div>
+        </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="archivo" style={{ fontWeight: 800, fontSize: 15, color: "var(--text-primary)" }}>
             {profile?.runnerName || "Runner"}
@@ -351,29 +357,6 @@ export function MapShell({
         <ControlButton icon={<LocateIcon />} active onClick={() => setRecenter((n) => n + 1)} title="Recenter" />
         <ControlButton icon={<CompassIcon />} onClick={() => setCompass((n) => n + 1)} title="North up" />
       </div>
-
-      {/* Medical info button — green ring once filled, amber prompt when empty */}
-      <button
-        onClick={() => navigate("/medical")}
-        style={{
-          position: "absolute",
-          top: 210,
-          right: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "8px 10px",
-          borderRadius: 13,
-          background: "var(--bg-overlay)",
-          border: `1px solid ${hasMedical ? "var(--primary)" : "var(--caution)"}`,
-          color: hasMedical ? "var(--primary)" : "var(--caution)",
-          fontWeight: 800,
-          fontSize: 11,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.30)",
-        }}
-      >
-        🩺 {hasMedical ? "✓" : "+"}
-      </button>
 
       {showAccuracyWarning && (
         <div
@@ -417,6 +400,7 @@ export function MapShell({
           track,
           kmAlong: progress.kmAlong,
           offsetMeters: progress.offsetMeters,
+          gpsAltitude: fix?.altitude ?? null,
           medics,
           onScrub,
           onSheetInset: setSheetInset,
@@ -456,6 +440,8 @@ export function MapShell({
         <Tab label={t("tab.tracks")} glyph="📈" active={active === "tracks"} onClick={() => navigate("/tracks")} />
         <Tab label={t("tab.weather")} glyph="🌦️" active={weatherOpen} onClick={goWeather} />
       </div>
+
+      <ProfileSheet open={profileOpen} onClose={() => setProfileOpen(false)} />
     </div>
   );
 }

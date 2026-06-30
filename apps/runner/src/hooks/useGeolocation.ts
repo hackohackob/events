@@ -5,6 +5,9 @@ export interface Fix {
   lng: number;
   accuracy: number;
   heading: number | null;
+  /** Metres above sea level from the GPS, or null when the device omits it
+   *  (common on phones) — callers fall back to the track's GPX elevation. */
+  altitude: number | null;
   timestamp: string;
 }
 
@@ -20,6 +23,7 @@ const DEV_SEED: Fix = {
   lng: 23.4413,
   accuracy: 14,
   heading: null,
+  altitude: null,
   timestamp: new Date().toISOString(),
 };
 
@@ -68,6 +72,7 @@ export function useGeolocation(onStream?: (fix: Fix) => void, streamEveryMs = 18
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy ?? 9999,
         heading: Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
+        altitude: Number.isFinite(pos.coords.altitude) ? (pos.coords.altitude as number) : null,
         timestamp: new Date(pos.timestamp).toISOString(),
       };
       lastAccuracyRef.current = next.accuracy;

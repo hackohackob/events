@@ -39,7 +39,8 @@ export function WeatherPanel({
 
   const hours = forecast?.primary.hours ?? [];
   const cur = hours[scrubIndex];
-  const glyph = cur ? weatherGlyph(cur.code, cur.cloudPct, cur.isDay) : { icon: "⏳", label: "" };
+  const glyph = cur ? weatherGlyph(cur.code, cur.cloudPct, cur.isDay) : { icon: "⏳", labelKey: "" };
+  const condLabel = glyph.labelKey ? t(glyph.labelKey) : "";
   const relative = scrubIndex === 0 ? t("weather.now") : `+${scrubIndex}h`;
   // Precipitation tiles are "now"; scrubbing ahead drives only the forecast read.
   const radarLive = scrubIndex === 0;
@@ -116,7 +117,7 @@ export function WeatherPanel({
             >
               {cur ? `${Math.round(cur.tempC)}°` : "—"}
             </span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)" }}>{glyph.label}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)" }}>{condLabel}</span>
           </div>
         </div>
         {/* Prominent time */}

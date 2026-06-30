@@ -2685,6 +2685,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         logo={false}
         attribution={false}
         compass={false}
+        // Disable MapLibre's built-in (top-left) scale bar — we render our own
+        // styled one bottom-left (see ScaleBar / styles.scaleBar).
+        scaleBar={false}
         onRegionDidChange={(event: any) => {
           const props = event?.nativeEvent ?? event?.properties ?? {};
           const z = props.zoom ?? props.zoomLevel;

@@ -3,7 +3,7 @@ import { MapShell } from "./MapShell";
 import { useT } from "../i18n";
 import { ElevationChart, type ElevSample } from "../components/ElevationChart";
 import { useApp } from "../state/AppContext";
-import { cumulativeDistances, snapToRoute } from "../lib/geo";
+import { cumulativeDistances, snapToRoute, elevationStats } from "../lib/geo";
 import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
 import type { PublicMedicState } from "../api/contracts-shim";
 
@@ -21,6 +21,7 @@ function TrackStudioSheet({
   track,
   kmAlong,
   offsetMeters,
+  gpsAltitude,
   medics,
   onScrub,
   onSheetInset,
@@ -28,6 +29,7 @@ function TrackStudioSheet({
   track: ResolvedTrack | null;
   kmAlong: number | null;
   offsetMeters: number | null;
+  gpsAltitude: number | null;
   medics: PublicMedicState[];
   onScrub: (km: number | null) => void;
   onSheetInset: (px: number) => void;
@@ -109,8 +111,14 @@ function TrackStudioSheet({
       .filter((x): x is number => x != null);
   }, [medics, track, cum]);
 
-  const ascent = track?.meta.totalAscentMeters ?? 0;
-  const descent = track?.meta.totalDescentMeters ?? 0;
+  // Elevation computed from the raw GPX heights (the precomputed meta can be
+  // wrong/zero). Current height = GPS altitude if the device gives it, else the
+  // track's elevation at the runner's snapped position.
+  const elev = useMemo(
+    () => elevationStats(track?.elevations ?? [], cum, kmAlong),
+    [track, cum, kmAlong],
+  );
+  const currentEle = gpsAltitude ?? elev.currentEle;
   const completedKm = kmAlong ?? 0;
   const distanceLeft = Math.max(0, totalKm - completedKm);
   const completedPct = totalKm > 0 ? Math.round((completedKm / totalKm) * 100) : 0;
@@ -174,7 +182,10 @@ function TrackStudioSheet({
 
       <div style={{ display: "flex", gap: 24, margin: "16px 0 12px" }}>
         <Stat label={t("tracks.distanceFromStart")} value={`${completedKm.toFixed(1)} ${t("common.km")}`} />
-        <Stat label={t("tracks.elevation")} value={`${Math.round(track?.meta.maxElevationMeters ?? 0)} ${t("common.m")}`} />
+        <Stat
+          label={t("tracks.elevation")}
+          value={currentEle != null ? `${Math.round(currentEle)} ${t("common.m")}` : "—"}
+        />
       </div>
 
       {/* Full-bleed elevation profile (cancels the sheet's side padding) */}
@@ -194,11 +205,11 @@ function TrackStudioSheet({
       {expanded && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 9, marginTop: 14 }}>
           <Tile label={t("tracks.distanceLeft")} value={`${distanceLeft.toFixed(1)} ${t("common.km")}`} />
-          <Tile label={t("tracks.climbLeft")} value={`↑ ${Math.round(ascent)} ${t("common.m")}`} color="var(--urgent)" />
-          <Tile label={t("tracks.descentLeft")} value={`↓ ${Math.round(descent)} ${t("common.m")}`} color="var(--live-gps)" />
+          <Tile label={t("tracks.climbLeft")} value={`↑ ${Math.round(elev.remainingAscent)} ${t("common.m")}`} color="var(--urgent)" />
+          <Tile label={t("tracks.descentLeft")} value={`↓ ${Math.round(elev.remainingDescent)} ${t("common.m")}`} color="var(--live-gps)" />
           <Tile label={t("tracks.completed")} value={`${completedPct}%`} color="var(--primary)" />
-          <Tile label={t("tracks.onTrack")} value={`${offsetMeters != null ? Math.round(offsetMeters) : 0} ${t("common.m")}`} color="var(--primary)" />
-          <Tile label={t("tracks.totalClimb")} value={`${Math.round(ascent)} ${t("common.m")}`} />
+          <Tile label={t("tracks.offRoute")} value={`${offsetMeters != null ? Math.round(offsetMeters) : 0} ${t("common.m")}`} color="var(--caution)" />
+          <Tile label={t("tracks.totalClimb")} value={`${Math.round(elev.totalAscent)} ${t("common.m")}`} />
         </div>
       )}
       </div>

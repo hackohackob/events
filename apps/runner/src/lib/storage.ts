@@ -59,6 +59,11 @@ export function setEventId(id: string): void {
   localStorage.setItem(EVENT_KEY, id);
 }
 
+/** Leave the event: wipe identity/session so the app returns to onboarding. */
+export function clearSession(): void {
+  for (const k of [PROFILE_KEY, MEDICAL_KEY, TOKEN_KEY, EVENT_KEY]) localStorage.removeItem(k);
+}
+
 /** Bib QRs may preload name/bib via query params (?name=…&bib=…&phone=…). */
 export function prefillFromUrl(): Partial<RunnerProfile> {
   const p = new URLSearchParams(window.location.search);

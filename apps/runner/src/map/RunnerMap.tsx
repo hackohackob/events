@@ -107,14 +107,17 @@ interface Props {
 
 function poiVisual(type: string): { bg: string; glyph: string } | null {
   const t = type.toLowerCase();
+  if (/ambulance/.test(t)) return { bg: "#E63946", glyph: "🚑" };
   if (/tent|camp|hospital|medical|aid/.test(t)) return { bg: "#FFFFFF", glyph: "✚" };
   if (/water|hydrat/.test(t)) return { bg: "#2E9BFF", glyph: "💧" };
   return null;
 }
 
 /** Single self-contained SVG marker (no nested positioning — that's what made
- *  markers drift on zoom). Green, grey when resting, blue arrow badge drawn
- *  inside the SVG when the medic is moving. */
+ *  markers drift on zoom). A *person* silhouette (head + shoulders) inside the
+ *  pin so a mobile medic reads as a moving person, clearly distinct from the
+ *  white "✚" medical-point POIs. Green when active, grey when resting; a blue
+ *  arrow badge when moving to an incident. */
 function medicMarkerEl(status: string): HTMLElement {
   const resting = status === "rest" || status === "stationary";
   const color = resting ? "#5A6B7E" : "#18B883";
@@ -128,7 +131,9 @@ function medicMarkerEl(status: string): HTMLElement {
       <path d="M19 2C9.6 2 2 9.4 2 18.6 2 30.6 19 46 19 46s17-15.4 17-27.4C36 9.4 28.4 2 19 2Z"
             fill="${color}" stroke="#fff" stroke-width="2"/>
       <circle cx="19" cy="18.6" r="12" fill="#fff"/>
-      <path d="M16.3 11h5.4v4.9h4.9v5.4h-4.9v4.9h-5.4v-4.9h-4.9v-5.4h4.9z" fill="${color}"/>
+      <!-- person: head + shoulders -->
+      <circle cx="19" cy="14.6" r="3.6" fill="${color}"/>
+      <path d="M11.8 25.4c0-4.4 3.2-7.4 7.2-7.4s7.2 3 7.2 7.4z" fill="${color}"/>
       ${
         moving
           ? `<circle cx="31" cy="8" r="7.5" fill="#2E9BFF" stroke="#fff" stroke-width="2"/>

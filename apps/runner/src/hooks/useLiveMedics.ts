@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import type { PublicMedicState } from "../api/contracts-shim";
 import { fetchPublicMedics } from "../api";
 import { getToken } from "../lib/storage";
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string) || "/realtime";
+
+/** Hide medics whose last position is older than this — a stale dot is worse
+ *  than none (the runner shouldn't head toward a medic who left long ago). */
+const STALE_AFTER_MS = 40 * 60_000;
 
 interface MedicMsg {
   medicId: string;
@@ -20,7 +24,15 @@ interface MedicMsg {
  */
 export function useLiveMedics(eventId: string) {
   const [medics, setMedics] = useState<PublicMedicState[]>([]);
+  // Re-evaluates the staleness filter even without new data, so a medic that
+  // goes quiet disappears on its own.
+  const [staleTick, setStaleTick] = useState(0);
   const socketRef = useRef<Socket | null>(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setStaleTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -63,5 +75,13 @@ export function useLiveMedics(eventId: string) {
     };
   }, [eventId]);
 
-  return medics;
+  // Drop stale medics (position older than STALE_AFTER_MS).
+  return useMemo(() => {
+    const cutoff = Date.now() - STALE_AFTER_MS;
+    void staleTick; // re-run on the minute tick
+    return medics.filter((m) => {
+      const t = Date.parse(m.recordedAt);
+      return !Number.isFinite(t) || t >= cutoff;
+    });
+  }, [medics, staleTick]);
 }

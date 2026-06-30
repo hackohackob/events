@@ -1,4 +1,7 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { promises as fs, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PNG } from "pngjs";
 
 /**
@@ -6,31 +9,34 @@ import { PNG } from "pngjs";
  * key-less). Rather than ship a heavy client (the `om://` WASM layer Range-reads
  * 160 MB model files), we keep all the work server-side and small:
  *
- *  1. Fetch the next few hours of precipitation + cloud cover on a coarse grid
- *     over **Bulgaria** in a single Open-Meteo call (~140 KB), cached.
+ *  1. Fetch the next ~12 h of precipitation + cloud cover on a coarse grid over
+ *     Bulgaria and the surrounding Balkans, batched into a few Open-Meteo calls,
+ *     cached (and persisted to disk so restarts stay warm).
  *  2. Render a small, smooth PNG overlay per field/hour (bilinear-interpolated +
  *     coloured), cached with expiry.
  *
- * The PWA then just drops these as plain MapLibre image overlays over the Bulgaria
- * bounding box — no WASM, no tiles, no Range requests. Cutting the grid/image
- * resolution keeps it cheap; the field is coarse weather anyway.
+ * The PWA then just drops these as plain MapLibre image overlays over the bbox —
+ * no WASM, no tiles, no Range requests. The coarse grid + render blur keep it
+ * cheap; the field is coarse weather anyway.
  */
 
-// ⚠️ TEMPORARY DEBUG CONFIG — wide Balkans/SE-Europe area + 20 h, so we can scrub
-// ahead and see where/how rain renders. Kept to ONE Open-Meteo call (≤450 pts ×
-// 2 days) to stay under the free minutely limit, and a render blur smooths the
-// coarse grid so it doesn't look like big diamonds. Revert to the light Bulgaria-
-// only production values:
-//   GRID { west:22, east:29, south:41, north:44.5, step:0.5 }, HORIZON_HOURS 6,
-//   IMG 256×128, FORECAST_DAYS 2 (or 1), BLUR_RADIUS small.
+// Grid covers Bulgaria + the surrounding Balkans/SE-Europe so the client can scrub
+// the forecast across the whole visible map. The fine 0.2° spacing (~1.3k points)
+// is batched into ≤FETCH_CHUNK-location Open-Meteo calls, and a render blur
+// (BLUR_RADIUS) smooths the coarse field so it reads as blobs, not diamonds.
 // Grid is step° spacing, row-major (latIdx * nLon + lonIdx), latIdx 0 = south.
-const GRID = { west: 20.0, east: 29.0, south: 40.0, north: 45.5, step: 0.25 };
-const HORIZON_HOURS = 20;
-const FORECAST_DAYS = 2; // must cover now + HORIZON_HOURS
-const IMG_W = 720; // ≈ bbox aspect (9° × 5.5°)
-const IMG_H = 440;
-/** Smooth the bilinear field so a coarse grid renders as blobs, not diamonds. */
-const BLUR_RADIUS = 10;
+// 0.35° keeps the WHOLE grid (~416 points) inside a SINGLE Open-Meteo call
+// (≤FETCH_CHUNK) — multiple back-to-back calls are what trip the per-minute
+// limit and leave the overlay perpetually blank. The render blur (BLUR_RADIUS)
+// hides the coarse spacing so it still reads as smooth blobs.
+const GRID = { west: 20.0, east: 29.0, south: 40.0, north: 45.5, step: 0.35 };
+const HORIZON_HOURS = 12;
+/** Request only the hours we scrub (+ margin) — far lighter than whole days. */
+const FORECAST_HOURS = HORIZON_HOURS + 2;
+const IMG_W = 880; // ≈ bbox aspect (9° × 5.5°)
+const IMG_H = 536;
+/** Smooth the bilinear field so the coarse grid renders as blobs, not diamonds. */
+const BLUR_RADIUS = 14;
 /** Open-Meteo caps a GET at ~550 locations (URL length); batch if a grid exceeds. */
 const FETCH_CHUNK = 450;
 
@@ -56,10 +62,22 @@ export class WeatherService {
   private gridInflight: Promise<GridData | null> | null = null;
   private readonly gridTtlMs = Number(process.env.WEATHER_GRID_TTL_MS ?? 20 * 60_000);
 
+  /** Per-request timeout so a stalled socket can't wedge `gridInflight` forever. */
+  private readonly fetchTimeoutMs = Number(process.env.WEATHER_FETCH_TIMEOUT_MS ?? 8_000);
+  /** After a failed fetch (e.g. 429) back off until this, instead of re-firing on
+   *  every request — otherwise a busy client machine-guns Open-Meteo and stays limited. */
+  private cooldownUntil = 0;
+  private readonly failCooldownMs = Number(process.env.WEATHER_FAIL_COOLDOWN_MS ?? 60_000);
+
+  /** Last-good grid is persisted here so a restart within the TTL is warm (no cold
+   *  fetch storm). Small JSON (~200 KB); defaults to the OS temp dir. */
+  private readonly cacheFile = process.env.WEATHER_GRID_CACHE_FILE ?? join(tmpdir(), "events-weather-grid.json");
+
   private readonly overlayCache = new Map<string, { buf: Buffer; expiresAt: number }>();
   private readonly overlayTtlMs = Number(process.env.WEATHER_OVERLAY_TTL_MS ?? 20 * 60_000);
 
   constructor() {
+    this.loadPersistedGrid();
     const timer = setInterval(() => this.sweep(), 10 * 60_000);
     (timer as { unref?: () => void }).unref?.();
   }
@@ -91,12 +109,73 @@ export class WeatherService {
   private async ensureGrid(): Promise<GridData | null> {
     if (this.grid && Date.now() - this.grid.fetchedAt < this.gridTtlMs) return this.grid;
     if (this.gridInflight) return this.gridInflight;
+    // Recently failed (rate-limited / network): serve stale (or null) quietly until the
+    // cooldown lapses, rather than re-firing a heavy fetch on every request.
+    if (Date.now() < this.cooldownUntil) return this.grid;
     this.gridInflight = this.fetchGrid().finally(() => {
       this.gridInflight = null;
     });
     const fresh = await this.gridInflight;
-    if (fresh) this.grid = fresh;
+    if (fresh) {
+      this.grid = fresh;
+      void this.persistGrid(fresh);
+    }
     return fresh ?? this.grid; // fall back to a stale grid on transient failure
+  }
+
+  // ── Disk persistence (warm restarts) ──────────────────────────────────────
+
+  /** Seed `this.grid` from the last-good file, but only if still within the TTL —
+   *  an older grid's hourly slices no longer line up with "now", so we'd rather
+   *  refetch than show stale weather as current. Best-effort; ignores any error. */
+  private loadPersistedGrid(): void {
+    try {
+      const g = JSON.parse(readFileSync(this.cacheFile, "utf8")) as GridData;
+      const ok =
+        typeof g?.fetchedAt === "number" &&
+        Number.isFinite(g.nLat) &&
+        Number.isFinite(g.nLon) &&
+        Array.isArray(g.precip) &&
+        Array.isArray(g.cloud) &&
+        g.precip.length === g.nLat * g.nLon;
+      const age = ok ? Date.now() - g.fetchedAt : Infinity;
+      if (ok && age >= 0 && age < this.gridTtlMs) {
+        this.grid = g;
+        this.logger.log(`Loaded persisted weather grid (${Math.round(age / 1000)}s old)`);
+      }
+    } catch {
+      // No cache yet / unreadable — fine, we fetch on first request.
+    }
+  }
+
+  /** Write atomically (tmp + rename) so a crash mid-write can't leave a torn file. */
+  private async persistGrid(grid: GridData): Promise<void> {
+    try {
+      const tmp = `${this.cacheFile}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify(grid));
+      await fs.rename(tmp, this.cacheFile);
+    } catch (error) {
+      this.logger.warn(`Failed to persist weather grid: ${(error as Error).message}`);
+    }
+  }
+
+  /** `fetch` with an abort timeout — Node's fetch has none, so a stalled connection
+   *  would otherwise hang `gridInflight` indefinitely and wedge the whole service. */
+  private async fetchWithTimeout(url: string): Promise<Response> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), this.fetchTimeoutMs);
+    try {
+      return await fetch(url, { signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Back off after a failed fetch. Honours a 429 `Retry-After` when present. */
+  private startCooldown(res?: Response): void {
+    const ra = res ? Number(res.headers.get("retry-after")) : NaN;
+    const ms = res?.status === 429 && Number.isFinite(ra) && ra > 0 ? ra * 1000 : this.failCooldownMs;
+    this.cooldownUntil = Date.now() + ms;
   }
 
   private async fetchGrid(): Promise<GridData | null> {
@@ -122,10 +201,14 @@ export class WeatherService {
         const lo = lons.slice(i, i + FETCH_CHUNK).join(",");
         const url =
           `https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}` +
-          `&hourly=precipitation,cloud_cover&forecast_days=${FORECAST_DAYS}&timeformat=unixtime&timezone=GMT`;
-        const res = await fetch(url);
+          `&hourly=precipitation,cloud_cover&forecast_hours=${FORECAST_HOURS}&timeformat=unixtime&timezone=GMT`;
+        const res = await this.fetchWithTimeout(url);
         if (!res.ok) {
-          this.logger.warn(`Open-Meteo grid chunk → ${res.status}`);
+          // Don't retry here — back off so a busy client can't keep re-tripping the
+          // rate limit. Serve stale/transparent meanwhile; recover after the cooldown.
+          this.startCooldown(res);
+          const waitS = Math.round((this.cooldownUntil - Date.now()) / 1000);
+          this.logger.warn(`Open-Meteo grid chunk → ${res.status}; backing off ${waitS}s`);
           return null;
         }
         const raw = (await res.json()) as typeof results | (typeof results)[number];
@@ -148,7 +231,9 @@ export class WeatherService {
       }
       return { nLat, nLon, precip, cloud, fetchedAt: Date.now() };
     } catch (error) {
-      this.logger.warn(`Open-Meteo grid failed: ${(error as Error).message}`);
+      // Timeout / network error — back off too, so we don't hot-loop on a flaky upstream.
+      this.startCooldown();
+      this.logger.warn(`Open-Meteo grid failed: ${(error as Error).message}; backing off ${this.failCooldownMs / 1000}s`);
       return null;
     }
   }

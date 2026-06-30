@@ -57,7 +57,7 @@ export interface Forecast {
   primary: SamplePoint;
 }
 
-export const HORIZON_HOURS = 20; // ⚠️ TEMP DEBUG (revert to 6)
+export const HORIZON_HOURS = 12;
 
 interface MeteoHourly {
   /** Unix seconds (we request `timeformat=unixtime`). */
@@ -129,22 +129,22 @@ export async function fetchForecast(points: Array<{ lat: number; lng: number }>)
 
 // ─── Presentation helpers ─────────────────────────────────────────────────────
 
-/** WMO weather code → emoji + short label. At night, clear/partly-clear skies
- *  show a moon instead of the sun. */
-export function weatherGlyph(code: number, cloudPct = 0, isDay = true): { icon: string; label: string } {
+/** WMO weather code → emoji + i18n label key (translated by the caller). At
+ *  night, clear/partly-clear skies show a moon instead of the sun. */
+export function weatherGlyph(code: number, cloudPct = 0, isDay = true): { icon: string; labelKey: string } {
   if (code === 0) {
-    if (!isDay) return { icon: cloudPct > 35 ? "☁️" : "🌙", label: "Clear" };
-    return { icon: cloudPct > 35 ? "🌤️" : "☀️", label: "Clear" };
+    if (!isDay) return { icon: cloudPct > 35 ? "☁️" : "🌙", labelKey: "weather.cond.clear" };
+    return { icon: cloudPct > 35 ? "🌤️" : "☀️", labelKey: "weather.cond.clear" };
   }
-  if (code <= 2) return { icon: isDay ? "⛅" : "☁️", label: "Partly cloudy" };
-  if (code === 3) return { icon: "☁️", label: "Overcast" };
-  if (code <= 48) return { icon: "🌫️", label: "Fog" };
-  if (code <= 57) return { icon: "🌦️", label: "Drizzle" };
-  if (code <= 67) return { icon: "🌧️", label: "Rain" };
-  if (code <= 77) return { icon: "🌨️", label: "Snow" };
-  if (code <= 82) return { icon: "🌧️", label: "Showers" };
-  if (code <= 86) return { icon: "🌨️", label: "Snow showers" };
-  return { icon: "⛈️", label: "Thunderstorm" };
+  if (code <= 2) return { icon: isDay ? "⛅" : "☁️", labelKey: "weather.cond.partly" };
+  if (code === 3) return { icon: "☁️", labelKey: "weather.cond.overcast" };
+  if (code <= 48) return { icon: "🌫️", labelKey: "weather.cond.fog" };
+  if (code <= 57) return { icon: "🌦️", labelKey: "weather.cond.drizzle" };
+  if (code <= 67) return { icon: "🌧️", labelKey: "weather.cond.rain" };
+  if (code <= 77) return { icon: "🌨️", labelKey: "weather.cond.snow" };
+  if (code <= 82) return { icon: "🌧️", labelKey: "weather.cond.showers" };
+  if (code <= 86) return { icon: "🌨️", labelKey: "weather.cond.snowShowers" };
+  return { icon: "⛈️", labelKey: "weather.cond.thunder" };
 }
 
 /** Temperature → colour on a cold-blue → warm-red gradient (°C). */
