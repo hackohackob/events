@@ -110,7 +110,8 @@ export class IncidentsController {
   }
 
   @Post(":incidentId/messages")
-  @Roles("paramedic", "coordinator", "medic")
+  // Participants (runners) post notes to their own incident chat from the PWA.
+  @Roles("paramedic", "coordinator", "medic", "runner")
   sendMessage(
     @CurrentUser() user: RequestUser,
     @Param("incidentId") incidentId: string,
@@ -120,7 +121,8 @@ export class IncidentsController {
   }
 
   @Patch(":incidentId")
-  @Roles("paramedic", "coordinator", "medic")
+  // Participants (runners) append notes to their own incident from the PWA.
+  @Roles("paramedic", "coordinator", "medic", "runner")
   updateDetails(
     @CurrentUser() user: RequestUser,
     @Param("incidentId") incidentId: string,
@@ -130,7 +132,8 @@ export class IncidentsController {
   }
 
   @Post(":incidentId/photo")
-  @Roles("paramedic", "coordinator", "medic")
+  // Participants (runners) attach photos to their own incident from the PWA.
+  @Roles("paramedic", "coordinator", "medic", "runner")
   @UseInterceptors(
     FileInterceptor("photo", {
       storage: diskStorage({
@@ -147,10 +150,19 @@ export class IncidentsController {
     @CurrentUser() user: RequestUser,
     @Param("incidentId") incidentId: string,
     @UploadedFile() file: { filename: string; path: string; mimetype: string },
+    @Body("postToChat") postToChat?: string,
   ) {
     const url = `/uploads/incidents/${file.filename}`;
     // Attach immediately so photos added after the report show up for everyone.
     const incident = await this.incidentsService.addPhoto(user.eventId, incidentId, url);
+    // When a photo is explicitly added after the report (PWA "add details"),
+    // also drop it into the incident chat so the team sees it inline in the
+    // timeline, not just in the gallery. Report-time uploads omit the flag.
+    if (postToChat === "true" || postToChat === "1") {
+      await this.incidentsService
+        .addMessage(user.eventId, incidentId, user.userId, { text: "", photoUrl: url })
+        .catch(() => undefined);
+    }
     return { url, photoUrls: incident.photoUrls };
   }
 

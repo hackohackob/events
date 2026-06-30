@@ -35,10 +35,15 @@ const WEATHER_VIEW_ZOOM = 6.5; // fallback target on entry when there's no track
 const WEATHER_ENTRY_MAXZOOM = 9; // on entry, frame the track but don't zoom past this
 const DEFAULT_MAX_ZOOM = 19; // restored when leaving weather mode
 const DEFAULT_MIN_ZOOM = 0; // restored when leaving weather mode
-/** Pan limit while weather is open — the rendered overlay bbox [[W,S],[E,N]]. */
+/** Pan limit while weather is open — the rendered overlay bbox [[W,S],[E,N]],
+ *  padded a little so you can still frame the edges. The bottom (south) of the
+ *  map sits behind the weather dock, so it gets extra slack to let you pull that
+ *  content up into the visible area above the controls. */
+const _WX_W = WEATHER_BBOX[2] - WEATHER_BBOX[0];
+const _WX_H = WEATHER_BBOX[3] - WEATHER_BBOX[1];
 const WEATHER_MAX_BOUNDS: [[number, number], [number, number]] = [
-  [WEATHER_BBOX[0], WEATHER_BBOX[1]],
-  [WEATHER_BBOX[2], WEATHER_BBOX[3]],
+  [WEATHER_BBOX[0] - _WX_W * 0.05, WEATHER_BBOX[1] - _WX_H * 0.22],
+  [WEATHER_BBOX[2] + _WX_W * 0.05, WEATHER_BBOX[3] + _WX_H * 0.05],
 ];
 
 const MAP_STYLE: StyleSpecification = {

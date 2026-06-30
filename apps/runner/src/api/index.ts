@@ -64,12 +64,28 @@ export async function createIncident(input: CreateIncidentRequest) {
   return apiPost<IncidentRecordLike>("/incidents", input);
 }
 
-export async function uploadIncidentPhoto(incidentId: string, file: File | Blob) {
+export async function uploadIncidentPhoto(
+  incidentId: string,
+  file: File | Blob,
+  opts?: { postToChat?: boolean },
+) {
   const form = new FormData();
   form.append("photo", file);
+  // Flag photos added after the report so the backend also drops them into the
+  // incident chat (event log), not just the gallery.
+  if (opts?.postToChat) form.append("postToChat", "true");
   return apiPostForm<{ url: string; photoUrls: string[] }>(
     `/incidents/${encodeURIComponent(incidentId)}/photo`,
     form,
+  );
+}
+
+/** Post a note to the incident chat (event log) — used by the SOS-sent screen
+ *  to add after-the-fact details that the response team sees in the timeline. */
+export async function sendIncidentMessage(incidentId: string, text: string) {
+  return apiPost<{ id: string }>(
+    `/incidents/${encodeURIComponent(incidentId)}/messages`,
+    { text },
   );
 }
 

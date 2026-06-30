@@ -56,6 +56,8 @@ export interface IncidentMessageDto {
   authorId: string;
   authorName: string;
   text: string;
+  /** Photo attachment (server-relative URL) — e.g. a photo added from the PWA. */
+  photoUrl?: string;
   /** Voice note attachment (server-relative URL) and its length. */
   audioUrl?: string;
   audioDurationMs?: number;

@@ -24,6 +24,22 @@ export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | 
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // A saved pack persists in localStorage, so the button must always come back
+  // green once the map is downloaded — even after a remount or the PWA resuming
+  // from the background. Re-sync idle→ready whenever a pack exists.
+  useEffect(() => {
+    const sync = () => {
+      if (getPackMeta()) setPhase((prev) => (prev === "idle" ? "ready" : prev));
+    };
+    sync();
+    window.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
+
   const press = () => {
     if (phase === "downloading") {
       abortRef.current?.abort();

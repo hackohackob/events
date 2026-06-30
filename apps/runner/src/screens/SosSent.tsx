@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
-import { fetchMyIncidents, updateIncidentDetails, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
+import { sendIncidentMessage, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { AttachmentEditor } from "../components/AttachmentEditor";
 import { COMMAND_PHONE } from "../lib/config";
@@ -16,37 +16,53 @@ export function SosSent() {
   const [note, setNote] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
+  const [noteSending, setNoteSending] = useState(false);
   const voice = useVoiceRecorder();
-  // The description already on the incident (medical summary + the report's
-  // original note) — kept so an after-the-fact note is appended, not overwritten.
-  const baseDesc = useRef<string>("");
 
-  useEffect(() => {
-    if (!incidentId) return;
-    fetchMyIncidents()
-      .then((list) => {
-        const inc = list.find((i) => i.id === incidentId);
-        if (inc?.description) baseDesc.current = inc.description;
-      })
-      .catch(() => undefined);
-  }, [incidentId]);
+  // Confirmation toast — shown when a note / photo / voice note has been sent to
+  // the team, then fades out on its own after a few seconds.
+  const [toast, setToast] = useState<string | null>(null);
+  const [toastShown, setToastShown] = useState(false);
+  const toastTimers = useRef<number[]>([]);
 
-  // Persist the after-the-fact note (debounced), appended to the base. Only when
-  // there's actually a note — never PATCH an empty value (that would wipe the
-  // medical summary already on the incident, e.g. before the base has loaded).
-  useEffect(() => {
+  function showToast(text: string) {
+    toastTimers.current.forEach((id) => clearTimeout(id));
+    toastTimers.current = [];
+    setToast(text);
+    requestAnimationFrame(() => setToastShown(true));
+    toastTimers.current.push(
+      window.setTimeout(() => setToastShown(false), 5000),
+      window.setTimeout(() => setToast(null), 5400),
+    );
+  }
+
+  useEffect(() => () => toastTimers.current.forEach((id) => clearTimeout(id)), []);
+
+  // Send an after-the-fact note to the incident chat (event log). Explicit —
+  // the runner taps Send, so they get a clear confirmation it went through.
+  async function sendNote() {
     const trimmed = note.trim();
-    if (!incidentId || !trimmed) return;
-    const id = setTimeout(() => {
-      const description = [baseDesc.current, trimmed].filter(Boolean).join("\n");
-      void updateIncidentDetails(incidentId, { description }).catch(() => undefined);
-    }, 800);
-    return () => clearTimeout(id);
-  }, [note, incidentId]);
+    if (!incidentId || !trimmed || noteSending) return;
+    setNoteSending(true);
+    try {
+      await sendIncidentMessage(incidentId, trimmed);
+      setNote("");
+      showToast(t("sent.noteSent"));
+    } catch {
+      showToast(t("sent.sendFailed"));
+    } finally {
+      setNoteSending(false);
+    }
+  }
 
   function addPhoto(file: File) {
     setPhotos((p) => [...p, file]);
-    if (incidentId) void uploadIncidentPhoto(incidentId, file).catch(() => undefined);
+    if (!incidentId) return;
+    // postToChat: also drop the photo into the incident chat (event log), not
+    // just the gallery, so the team sees it appear in the timeline.
+    uploadIncidentPhoto(incidentId, file, { postToChat: true })
+      .then(() => showToast(t("sent.photoSent")))
+      .catch(() => showToast(t("sent.sendFailed")));
   }
 
   async function toggleVoice() {
@@ -54,7 +70,11 @@ export function SosSent() {
       const res = await voice.stop();
       if (res) {
         setVoiceBlob(res.blob);
-        if (incidentId) void uploadIncidentVoice(incidentId, res.blob, res.durationMs).catch(() => undefined);
+        if (incidentId) {
+          uploadIncidentVoice(incidentId, res.blob, res.durationMs)
+            .then(() => showToast(t("sent.voiceSent")))
+            .catch(() => showToast(t("sent.sendFailed")));
+        }
       }
     } else {
       await voice.start().catch(() => undefined);
@@ -74,7 +94,8 @@ export function SosSent() {
         {t("sent.stay")}
       </div>
 
-      {/* Optional add-ons once the alert is out — note / photo / voice. */}
+      {/* Optional add-ons once the alert is out — note / photo / voice. Each is
+          dispatched to the response team and confirmed with a toast. */}
       {incidentId && (
         <div style={{ width: "100%", maxWidth: 420, marginTop: 18 }}>
           <div className="section-label" style={{ marginBottom: 8 }}>{t("sent.addDetails")}</div>
@@ -82,6 +103,9 @@ export function SosSent() {
             note={note}
             onNoteChange={setNote}
             notePlaceholder={t("sent.notePlaceholder")}
+            onSendNote={sendNote}
+            sendNoteLabel={t("sent.sendNote")}
+            noteSending={noteSending}
             photos={photos}
             onAddPhoto={addPhoto}
             voice={voiceBlob}
@@ -104,6 +128,36 @@ export function SosSent() {
           {t("sent.backToMap")}
         </button>
       </div>
+
+      {/* Sent-confirmation toast — fades out after ~5s. */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: "calc(24px + env(safe-area-inset-bottom))",
+            transform: "translateX(-50%)",
+            maxWidth: "calc(100% - 32px)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "12px 18px",
+            borderRadius: 14,
+            background: "rgba(24,184,131,0.95)",
+            color: "#04140E",
+            fontWeight: 800,
+            fontSize: 13.5,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+            opacity: toastShown ? 1 : 0,
+            transition: "opacity 0.4s ease",
+            zIndex: 90,
+            pointerEvents: "none",
+          }}
+        >
+          <span style={{ fontSize: 16 }}>✓</span>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

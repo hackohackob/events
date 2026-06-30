@@ -110,14 +110,16 @@ export function WeatherPanel({
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 2px 10px" }}>
         <span style={{ fontSize: 38, lineHeight: 1 }}>{glyph.icon}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
             <span
               className="archivo"
-              style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: cur ? tempColor(cur.tempC) : "var(--text-primary)" }}
+              style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: cur ? tempColor(cur.tempC) : "var(--text-primary)", flexShrink: 0 }}
             >
               {cur ? `${Math.round(cur.tempC)}°` : "—"}
             </span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)" }}>{condLabel}</span>
+            {/* One line — a long localized condition must not wrap and push the
+                temperature up; truncate instead (the glyph already shows it). */}
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{condLabel}</span>
           </div>
         </div>
         {/* Prominent time */}

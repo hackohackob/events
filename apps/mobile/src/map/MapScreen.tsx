@@ -1677,7 +1677,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     const loadInitialData = async () => {
       try {
         const eventId = useSessionStore.getState().eventId ?? "";
-        const [initialLocations, activeMedics, eventTracksPayload, eventPois, incidents] = await Promise.all([
+        const [initialLocations, activeMedics, eventTracksPayload, eventPois, incidents, rosterParticipants] = await Promise.all([
           apiFetch<EventLocationResponse[]>("/locations/event"),
           eventId
             ? apiFetch<MedicActiveResponse[]>(`/events/${eventId}/medics/active`).catch(() => [])
@@ -1685,6 +1685,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           apiFetch<unknown>("/events/tracks"),
           apiFetch<Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number; icon?: string }>>("/events/pois").catch(() => []),
           apiFetch<IncidentResponse[]>("/incidents").catch(() => [] as IncidentResponse[]),
+          eventId
+            ? apiFetch<Array<{ userId: string; name?: string; bibNumber?: string; lat?: number; lng?: number; freshness?: "fresh" | "warning" | "stale" | "offline" }>>(
+                `/events/${eventId}/participants`,
+              ).catch(() => [])
+            : Promise.resolve([]),
         ]);
 
         if (!mounted) {
@@ -1740,7 +1745,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         const observeRead = useIncidentReadsStore.getState().observe;
         visibleIncidents.forEach((i) => observeRead(i.id, i.lastMessageAt));
         const incidentMarkers = visibleIncidents.map(incidentToMarker);
-        setMarkers([...locationMarkers, ...medicMarkers, ...poiMarkers, ...incidentMarkers]);
+        // The /locations/event snapshot is in-memory (only runners who pinged
+        // since the server booted). Merge in the DB-backed roster so "Dots" shows
+        // the whole field — every registered participant with a known position —
+        // deduped, with the live snapshot winning.
+        const liveLocationIds = new Set(locationMarkers.map((m) => m.id));
+        const rosterMarkers = (rosterParticipants ?? [])
+          .filter((p) => p.lat != null && p.lng != null && !liveLocationIds.has(p.userId))
+          .map((p) => ({
+            id: p.userId,
+            type: "runner" as const,
+            label: p.name ?? p.userId,
+            lat: p.lat as number,
+            lng: p.lng as number,
+            staleState: p.freshness,
+            name: p.name,
+            bibNumber: p.bibNumber,
+          }));
+        setMarkers([...locationMarkers, ...rosterMarkers, ...medicMarkers, ...poiMarkers, ...incidentMarkers]);
         const normalizedTracks = Array.isArray(eventTracksPayload)
           ? eventTracksPayload
               .map((track, index) => normalizeTrack(track, index))
@@ -2609,6 +2631,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       participants: mode === "individual",
       participantsHeatmap: mode === "heatmap",
     }));
+    // Turning participants off clears everything participant-related, including
+    // a pinned "show on map" focus.
+    if (mode === "off") setLocatedParticipant(null);
   };
 
   const toggleTrack = (trackId: string) => {
@@ -4067,6 +4092,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             highlight={participantHighlight}
             onLocate={(p) => {
               if (p.lat == null || p.lng == null) return;
+              // Make sure the participant dots layer is on so the focused runner
+              // is actually visible among the rest of the field.
+              setParticipantsMode("individual");
               setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber });
               setSelectedMarkerId(null);
               setActiveTab("map");

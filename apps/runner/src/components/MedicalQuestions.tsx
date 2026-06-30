@@ -115,8 +115,10 @@ function Question({
           {question}
         </span>
         <div style={{ display: "flex", gap: 6 }}>
-          <Toggle label={t("common.no")} active={answer === "no"} tone="no" onClick={() => { setAnswer("no"); onChange({ text: "", none: true }); }} />
-          <Toggle label={t("common.yes")} active={answer === "yes"} tone="yes" onClick={() => { setAnswer("yes"); onChange({ text, none: false }); }} />
+          {/* "No" is the reassuring answer (green); "Yes" flags something for the
+              medics to note (red). */}
+          <Toggle label={t("common.no")} active={answer === "no"} tone="good" onClick={() => { setAnswer("no"); onChange({ text: "", none: true }); }} />
+          <Toggle label={t("common.yes")} active={answer === "yes"} tone="bad" onClick={() => { setAnswer("yes"); onChange({ text, none: false }); }} />
         </div>
       </div>
       {showInput && (
@@ -127,6 +129,8 @@ function Question({
           onChange={(e) => onChange({ text: e.target.value, none: false })}
           style={{
             height: 48,
+            // Indented so the free-text answer reads as a child of the question.
+            marginLeft: 14,
             padding: "0 14px",
             borderRadius: 13,
             background: "var(--bg-input)",
@@ -141,8 +145,8 @@ function Question({
   );
 }
 
-function Toggle({ label, active, tone, onClick }: { label: string; active: boolean; tone: "yes" | "no"; onClick: () => void }) {
-  const color = tone === "yes" ? "var(--primary)" : "var(--critical)";
+function Toggle({ label, active, tone, onClick }: { label: string; active: boolean; tone: "good" | "bad"; onClick: () => void }) {
+  const color = tone === "good" ? "var(--primary)" : "var(--critical)";
   return (
     <button
       onClick={onClick}
@@ -152,7 +156,7 @@ function Toggle({ label, active, tone, onClick }: { label: string; active: boole
         borderRadius: 10,
         fontWeight: 800,
         fontSize: 13,
-        background: active ? (tone === "yes" ? "var(--primary-bg)" : "var(--critical-bg)") : "transparent",
+        background: active ? (tone === "good" ? "var(--primary-bg)" : "var(--critical-bg)") : "transparent",
         border: `1px solid ${active ? color : "var(--border-mid)"}`,
         color: active ? color : "var(--text-muted)",
       }}

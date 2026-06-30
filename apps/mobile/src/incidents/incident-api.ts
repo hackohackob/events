@@ -20,6 +20,8 @@ export interface UpdateIncidentPayload {
   description: string;
   photoUrl?: string;
   severity?: IncidentSeverity;
+  /** Participant BIB — server resolves the patient's identity + medical from it. */
+  patientBib?: string;
 }
 
 export async function createIncident(payload: PendingIncidentPayload): Promise<CreateIncidentResponse> {

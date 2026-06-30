@@ -35,6 +35,8 @@ export interface LiveIncident {
   description?: string
   severity?: string
   photoUrl?: string
+  /** All photos attached to the incident (oldest first, includes photoUrl). */
+  photoUrls?: string[]
   status: string
   responders?: string[]
   reportedBy?: string
@@ -74,6 +76,7 @@ function toLiveIncident(inc: any): LiveIncident {
     description: inc.description,
     severity: inc.severity,
     photoUrl: inc.photoUrl,
+    photoUrls: inc.photoUrls,
     status: inc.status ?? 'open',
     responders: inc.responders,
     reportedBy: inc.reportedBy,

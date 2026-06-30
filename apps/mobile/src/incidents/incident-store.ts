@@ -27,6 +27,8 @@ interface IncidentReportState {
   severity: IncidentSeverity | null;
   peopleAffected: number;
   description: string;
+  /** Participant BIB a reporting medic optionally enters to pull in the patient's medical. */
+  patientBib: string;
   photoUri: string | null;
   nearbyParamedics: NearbyParamedic[];
   isOnline: boolean;
@@ -44,6 +46,7 @@ interface IncidentReportState {
   setSeverity: (severity: IncidentSeverity) => void;
   setPeopleAffected: (count: number) => void;
   setDescription: (text: string) => void;
+  setPatientBib: (bib: string) => void;
   setPhotoUri: (uri: string | null) => void;
   setNearbyParamedics: (list: NearbyParamedic[]) => void;
   setOnline: (online: boolean) => void;
@@ -65,6 +68,7 @@ export const useIncidentStore = create<IncidentReportState>((set) => ({
   severity: null,
   peopleAffected: 1,
   description: "",
+  patientBib: "",
   photoUri: null,
   nearbyParamedics: [],
   isOnline: true,
@@ -81,6 +85,7 @@ export const useIncidentStore = create<IncidentReportState>((set) => ({
   setSeverity: (severity) => set({ severity }),
   setPeopleAffected: (peopleAffected) => set({ peopleAffected }),
   setDescription: (description) => set({ description }),
+  setPatientBib: (patientBib) => set({ patientBib }),
   setPhotoUri: (photoUri) => set({ photoUri }),
   setNearbyParamedics: (nearbyParamedics) => set({ nearbyParamedics }),
   setOnline: (isOnline) => set({ isOnline }),
@@ -112,6 +117,7 @@ export const useIncidentStore = create<IncidentReportState>((set) => ({
       severity: null,
       peopleAffected: 1,
       description: "",
+      patientBib: "",
       photoUri: null,
       nearbyParamedics: [],
     }),

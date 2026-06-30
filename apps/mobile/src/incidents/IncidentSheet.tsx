@@ -673,6 +673,18 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                             </Text>
                           ) : null}
                         </>
+                      ) : m.photoUrl ? (
+                        <>
+                          <Pressable
+                            onPress={() => {
+                              const resolved = resolveMediaUrl(m.photoUrl);
+                              if (resolved) onOpenPhoto(resolved);
+                            }}
+                          >
+                            <Image source={{ uri: resolveMediaUrl(m.photoUrl) }} style={styles.chatPhoto} />
+                          </Pressable>
+                          {m.text ? <Text style={styles.bubbleText}>{m.text}</Text> : null}
+                        </>
                       ) : (
                         <Text style={styles.bubbleText}>{m.text}</Text>
                       )}
@@ -993,6 +1005,7 @@ const styles = StyleSheet.create({
   bubbleOther: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.05)", borderTopLeftRadius: 4 },
   bubbleAuthor: { color: "#93c5fd", fontSize: 10.5, fontWeight: "900", marginBottom: 2 },
   bubbleText: { color: "#dbe5f1", fontSize: 13, lineHeight: 18 },
+  chatPhoto: { width: 180, height: 135, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)" },
   bubbleTime: { color: "#5b6b80", fontSize: 9.5, fontWeight: "700", marginTop: 3, alignSelf: "flex-end" },
   voiceRow: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 2, minWidth: 170 },
   voicePlayBtn: {

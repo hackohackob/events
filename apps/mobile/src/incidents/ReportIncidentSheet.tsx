@@ -196,7 +196,9 @@ export function ReportIncidentSheet() {
   const incidentType = useIncidentStore((s) => s.incidentType);
   const severity = useIncidentStore((s) => s.severity);
   const peopleAffected = useIncidentStore((s) => s.peopleAffected);
+  const patientBib = useIncidentStore((s) => s.patientBib);
   const setDescription = useIncidentStore((s) => s.setDescription);
+  const setPatientBib = useIncidentStore((s) => s.setPatientBib);
   const setPhotoUri = useIncidentStore((s) => s.setPhotoUri);
   const reset = useIncidentStore((s) => s.reset);
 
@@ -282,6 +284,7 @@ export function ReportIncidentSheet() {
         description,
         photoUrl,
         severity: severity ?? undefined,
+        patientBib: patientBib.trim() || undefined,
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeAndReset();
@@ -294,7 +297,7 @@ export function ReportIncidentSheet() {
     } finally {
       saving.current = false;
     }
-  }, [incidentId, photoUri, incidentType, peopleAffected, description, severity, closeAndReset]);
+  }, [incidentId, photoUri, incidentType, peopleAffected, description, severity, patientBib, closeAndReset]);
 
   const canSave = creationStatus === "created" && !!incidentId;
 
@@ -371,6 +374,17 @@ export function ReportIncidentSheet() {
           value={description}
           onChangeText={setDescription}
           textAlignVertical="top"
+        />
+
+        <Text style={styles.fieldLabel}>PARTICIPANT BIB</Text>
+        <BottomSheetTextInput
+          style={styles.bibInput}
+          placeholder="e.g. 142 — pulls in their medical"
+          placeholderTextColor="#4A5F7A"
+          value={patientBib}
+          onChangeText={setPatientBib}
+          keyboardType="number-pad"
+          returnKeyType="done"
         />
 
         <Text style={styles.fieldLabel}>PHOTO</Text>
@@ -500,6 +514,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     minHeight: 96,
+  },
+  bibInput: {
+    backgroundColor: "#101d32",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(177, 199, 224, 0.12)",
+    color: "#EFF6FF",
+    fontSize: 15,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
   },
 
   photoRow: { flexDirection: "row", gap: 10 },

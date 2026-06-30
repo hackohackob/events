@@ -14,6 +14,11 @@ interface Props {
   onToggleRecord: () => void;
   onRemoveVoice?: () => void;
   maxPhotos?: number;
+  /** When provided, the note shows an explicit Send button (used after the SOS
+   *  is sent, where each note is dispatched to the team on its own). */
+  onSendNote?: () => void;
+  sendNoteLabel?: string;
+  noteSending?: boolean;
 }
 
 /**
@@ -37,6 +42,9 @@ export function AttachmentEditor({
   onToggleRecord,
   onRemoveVoice,
   maxPhotos = 3,
+  onSendNote,
+  sendNoteLabel,
+  noteSending,
 }: Props) {
   const { t } = useT();
   const [noteOpen, setNoteOpen] = useState(false);
@@ -93,25 +101,37 @@ export function AttachmentEditor({
 
       {/* Note input */}
       {showNote && (
-        <textarea
-          value={note}
-          autoFocus={noteOpen && note.trim() === ""}
-          placeholder={notePlaceholder}
-          onChange={(e) => onNoteChange(e.target.value)}
-          rows={2}
-          style={{
-            width: "100%",
-            padding: "12px 14px",
-            borderRadius: 13,
-            background: "var(--bg-input)",
-            border: "1px solid var(--border-mid)",
-            color: "var(--text-primary)",
-            fontSize: 14,
-            fontFamily: "Manrope",
-            resize: "none",
-            outline: "none",
-          }}
-        />
+        <>
+          <textarea
+            value={note}
+            autoFocus={noteOpen && note.trim() === ""}
+            placeholder={notePlaceholder}
+            onChange={(e) => onNoteChange(e.target.value)}
+            rows={2}
+            style={{
+              width: "100%",
+              padding: "12px 14px",
+              borderRadius: 13,
+              background: "var(--bg-input)",
+              border: "1px solid var(--border-mid)",
+              color: "var(--text-primary)",
+              fontSize: 14,
+              fontFamily: "Manrope",
+              resize: "none",
+              outline: "none",
+            }}
+          />
+          {onSendNote && (
+            <button
+              onClick={onSendNote}
+              disabled={note.trim() === "" || noteSending}
+              className="btn-primary"
+              style={{ alignSelf: "flex-end", width: "auto", padding: "10px 18px", opacity: note.trim() === "" || noteSending ? 0.45 : 1 }}
+            >
+              {noteSending ? "…" : `✓ ${sendNoteLabel ?? "Send"}`}
+            </button>
+          )}
+        </>
       )}
 
       {/* Voice chip */}

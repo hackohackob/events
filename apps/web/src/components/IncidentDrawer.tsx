@@ -92,6 +92,14 @@ export default function IncidentDrawer({
   const sev = incident.severity ? SEVERITY_STYLE[incident.severity.toLowerCase()] : undefined
   const isClosed = incident.status === 'closed'
 
+  // All photos attached to the incident — the legacy single photoUrl plus any
+  // added later (gallery), deduped and oldest-first.
+  const photos = (() => {
+    const list = [...(incident.photoUrls ?? [])]
+    if (incident.photoUrl && !list.includes(incident.photoUrl)) list.unshift(incident.photoUrl)
+    return list
+  })()
+
   useEffect(() => { void loadMessages(incident.id) }, [incident.id, loadMessages])
   // Scroll only the drawer body — scrollIntoView() here used to scroll every
   // scrollable ancestor too, sending the page (and the map under it) flying.
@@ -239,8 +247,25 @@ export default function IncidentDrawer({
                 )}
               </div>
 
-              {incident.photoUrl && (
-                <img src={photoSrc(incident.photoUrl)} alt="incident" className="w-full rounded-xl" style={{ maxHeight: 220, objectFit: 'cover' }} />
+              {photos.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: '#475569' }}>
+                    PHOTOS{photos.length > 1 ? ` (${photos.length})` : ''}
+                  </div>
+                  {photos.length === 1 ? (
+                    <a href={photoSrc(photos[0])} target="_blank" rel="noreferrer">
+                      <img src={photoSrc(photos[0])} alt="incident" className="w-full rounded-xl" style={{ maxHeight: 220, objectFit: 'cover' }} />
+                    </a>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {photos.map((p, i) => (
+                        <a key={i} href={photoSrc(p)} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden" style={{ aspectRatio: '1', border: '1px solid rgba(148,163,184,0.12)' }}>
+                          <img src={photoSrc(p)} alt={`incident ${i + 1}`} className="w-full h-full" style={{ objectFit: 'cover' }} />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="flex items-center gap-2 text-xs" style={{ color: '#64748b' }}>
@@ -448,6 +473,13 @@ export default function IncidentDrawer({
                     {m.audioUrl ? (
                       <div className="mt-1">
                         <VoiceMessage src={photoSrc(m.audioUrl) ?? ''} durationMs={m.audioDurationMs} transcript={m.transcript} />
+                      </div>
+                    ) : m.photoUrl ? (
+                      <div className="mt-1">
+                        <a href={photoSrc(m.photoUrl)} target="_blank" rel="noreferrer">
+                          <img src={photoSrc(m.photoUrl)} alt="attachment" className="rounded-lg" style={{ maxHeight: 180, maxWidth: '100%', objectFit: 'cover' }} />
+                        </a>
+                        {m.text ? <div className="text-sm text-slate-300 mt-1">{m.text}</div> : null}
                       </div>
                     ) : (
                       <div className="text-sm text-slate-300">{m.text}</div>

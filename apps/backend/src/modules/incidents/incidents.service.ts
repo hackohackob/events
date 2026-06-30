@@ -114,6 +114,23 @@ function toIso(value: string | Date | null): string | undefined {
   return typeof value === "string" ? value : new Date(value).toISOString();
 }
 
+/** Human-readable one-line medical summary from resolved patient fields, mirroring
+ *  the runner PWA's `medicalSummary` (used to enrich "someone else" reports so the
+ *  notes read as well as a self-report). Empty when nothing is known. */
+function buildMedicalSummary(m: {
+  bloodType?: string | null;
+  allergies?: string | null;
+  conditions?: string | null;
+  medications?: string | null;
+}): string {
+  const parts: string[] = [];
+  if (m.bloodType) parts.push(`Blood ${m.bloodType}`);
+  if (m.allergies) parts.push(`Allergies: ${m.allergies}`);
+  if (m.conditions) parts.push(`Conditions: ${m.conditions}`);
+  if (m.medications) parts.push(`Meds: ${m.medications}`);
+  return parts.join(" · ");
+}
+
 /** Photo list = legacy single photo_url (if any) + the photo_urls array, deduped. */
 function mergePhotoUrls(photoUrl: string | null, photoUrls: string[] | null): string[] {
   const list = Array.isArray(photoUrls) ? photoUrls : [];
@@ -439,6 +456,18 @@ export class IncidentsService implements OnModuleInit {
       patientPhone = reporterPhone;
     }
 
+    // For a "someone else" report the patient's medical isn't on the reporter's
+    // device, so the PWA can't put it in the notes — enrich the description here
+    // from what we resolved by BIB, so it reads as well as a self-report. The
+    // "Patient #BIB" line the client already added is kept as-is.
+    let description = input.description ?? "";
+    if (input.forSelf === false) {
+      const medSummary = buildMedicalSummary({ bloodType, allergies, conditions, medications });
+      if (medSummary && !description.includes(medSummary)) {
+        description = [description, `🩺 ${medSummary}`].filter(Boolean).join("\n");
+      }
+    }
+
     const { rows } = await this.db.query<IncidentRow>(
       `INSERT INTO incidents
          (id, event_id, name, lat, lng, type, description, severity, category, accuracy, photo_url, status, created_by, reporter_name, reporter_phone, patient_bib, patient_name, patient_phone, allergies, medications, blood_type, conditions, created_at, updated_at, responders)
@@ -451,7 +480,7 @@ export class IncidentsService implements OnModuleInit {
         input.lat,
         input.lng,
         type,
-        input.description ?? "",
+        description,
         severity,
         category ?? null,
         input.accuracy ?? null,
@@ -670,6 +699,37 @@ export class IncidentsService implements OnModuleInit {
     const current = rowToRecord(existing[0]);
     const now = new Date().toISOString();
 
+    // A reporting medic can attach a participant BIB — resolve the patient's
+    // identity + medical from the roster (mirrors createIncident's "someone
+    // else" enrichment) and fold a readable summary into the notes.
+    let patientBib: string | null = null;
+    let patientName: string | null = null;
+    let patientPhone: string | null = null;
+    let allergies: string | null = null;
+    let medications: string | null = null;
+    let bloodType: string | null = null;
+    let conditions: string | null = null;
+    let description = input.description ?? null;
+    if (input.patientBib?.trim()) {
+      patientBib = input.patientBib.trim();
+      const match = await this.medicsService.findParticipantByBib(eventId, patientBib).catch(() => null);
+      if (match) {
+        patientName = match.name || null;
+        patientPhone = match.phone ?? null;
+        allergies = match.allergies ?? null;
+        medications = match.medications ?? null;
+        bloodType = match.bloodType ?? null;
+        conditions = match.conditions ?? null;
+      }
+      const medSummary = buildMedicalSummary({ bloodType, allergies, conditions, medications });
+      const patientLine = `👤 Patient #${patientBib}`;
+      const base = input.description ?? current.description ?? "";
+      const lines = [base];
+      if (!base.includes(patientLine)) lines.push(patientLine);
+      if (medSummary && !base.includes(medSummary)) lines.push(`🩺 ${medSummary}`);
+      description = lines.filter(Boolean).join("\n");
+    }
+
     const { rows: updated } = await this.db.query<IncidentRow>(
       `UPDATE incidents
        SET type        = COALESCE($1, type),
@@ -681,18 +741,32 @@ export class IncidentsService implements OnModuleInit {
            END,
            severity    = COALESCE($4, severity),
            status      = COALESCE($5, status),
+           patient_bib   = COALESCE($9, patient_bib),
+           patient_name  = COALESCE($10, patient_name),
+           patient_phone = COALESCE($11, patient_phone),
+           allergies     = COALESCE($12, allergies),
+           medications   = COALESCE($13, medications),
+           blood_type    = COALESCE($14, blood_type),
+           conditions    = COALESCE($15, conditions),
            updated_at  = $6
        WHERE id = $7 AND event_id = $8
        RETURNING *`,
       [
         input.type ?? null,
-        input.description ?? null,
+        description,
         input.photoUrl ?? null,
         input.severity ?? null,
         input.status ?? null,
         now,
         incidentId,
         eventId,
+        patientBib,
+        patientName,
+        patientPhone,
+        allergies,
+        medications,
+        bloodType,
+        conditions,
       ],
     );
 
@@ -1035,8 +1109,8 @@ export class IncidentsService implements OnModuleInit {
     authorId: string,
     input: { text: string; photoUrl?: string; audioUrl?: string; audioDurationMs?: number; transcript?: string },
   ): Promise<IncidentMessageRecord> {
-    const { rows: incidentRows } = await this.db.query<{ id: string }>(
-      `SELECT id FROM incidents WHERE id = $1 AND event_id = $2`,
+    const { rows: incidentRows } = await this.db.query<{ created_by: string; reporter_name: string | null }>(
+      `SELECT created_by, reporter_name FROM incidents WHERE id = $1 AND event_id = $2`,
       [incidentId, eventId],
     );
     if (!incidentRows[0]) {
@@ -1049,7 +1123,13 @@ export class IncidentsService implements OnModuleInit {
       `SELECT name FROM event_medics WHERE id::text = $1 AND event_id = $2`,
       [authorId, eventId],
     );
-    const authorName = nameRows[0]?.name ?? "Dashboard";
+    // Runners (the participant PWA) aren't on the medic roster, so when the
+    // author is the incident's own reporter, attribute the message to the stored
+    // reporter name rather than the generic "Dashboard".
+    const authorName =
+      nameRows[0]?.name ??
+      (incidentRows[0].created_by === authorId ? incidentRows[0].reporter_name ?? undefined : undefined) ??
+      "Dashboard";
 
     const id = randomUUID();
     const now = new Date().toISOString();
