@@ -6,13 +6,17 @@ import { ALL_CATEGORIES } from "../lib/types";
 import { RunnerMap } from "../map/RunnerMap";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { AttachmentEditor } from "../components/AttachmentEditor";
+import { LOW_ACCURACY_METERS } from "../hooks/useGeolocation";
 
 export function Confirm() {
   const navigate = useNavigate();
-  const { draft, patchDraft, profile } = useApp();
+  const { draft, patchDraft, profile, fix } = useApp();
   const { t } = useT();
   const [confirming, setConfirming] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
+  // Once the runner has placed the pin themselves, they've provided a location
+  // they vouch for — the raw GPS accuracy no longer matters for the send gate.
+  const [manuallyPlaced, setManuallyPlaced] = useState(false);
   const voice = useVoiceRecorder();
   // Stable clamp centre: the originally captured fix, set once (not updated as
   // the pin is dragged) so the 500 m limit is measured from the real GPS point.
@@ -23,13 +27,24 @@ export function Confirm() {
     if (!pinOrigin && draft?.fix) setPinOrigin([draft.fix.lng, draft.fix.lat]);
   }, [draft?.fix, pinOrigin]);
 
+  // A coarse fix (e.g. a browser falling back to ~2 km IP/network location
+  // instead of GPS) is dangerous for an emergency — medics would be sent to the
+  // wrong place. Keep pulling in fresh fixes while accuracy is still poor and
+  // the runner hasn't manually placed the pin, so this clears itself the
+  // moment a real GPS fix lands (mirrors the map's low-accuracy polling).
+  useEffect(() => {
+    if (!draft?.fix || manuallyPlaced || !fix) return;
+    if (fix.accuracy < draft.fix.accuracy) patchDraft({ fix });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fix]);
+
   if (!draft) {
     navigate("/map", { replace: true });
     return null;
   }
 
   const def = ALL_CATEGORIES.find((c) => c.category === draft.category)!;
-  const photos = draft.photos;
+  const lowAccuracy = !!draft.fix && draft.fix.accuracy > LOW_ACCURACY_METERS && !manuallyPlaced;
 
   async function toggleVoice() {
     if (voice.recording) {
@@ -50,7 +65,11 @@ export function Confirm() {
           <div className="archivo" style={{ fontWeight: 800, fontSize: 16 }}>{t(def.labelKey)}</div>
         </div>
         <button
-          onClick={() => navigate("/report/what", { state: { forSelf: draft.forSelf, patientBib: draft.patientBib } })}
+          onClick={() =>
+            navigate("/report/what", {
+              state: { forSelf: draft.forSelf, patientBib: draft.patientBib, reporterPhone: draft.reporterPhone },
+            })
+          }
           style={{ color: "var(--text-muted)", textDecoration: "underline", fontSize: 13 }}
         >
           {t("confirm.edit")}
@@ -102,23 +121,48 @@ export function Confirm() {
         note={draft.description}
         onNoteChange={(v) => patchDraft({ description: v })}
         notePlaceholder={t("confirm.description")}
-        photos={photos}
-        onAddPhoto={(f) => photos.length < 3 && patchDraft({ photos: [...photos, f] })}
-        onRemovePhoto={(i) => patchDraft({ photos: photos.filter((_, j) => j !== i) })}
         voice={draft.voice}
         voiceSupported={voice.supported}
         recording={voice.recording}
         onToggleRecord={toggleVoice}
         onRemoveVoice={() => patchDraft({ voice: null })}
-        maxPhotos={3}
       />
+      <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -2 }}>{t("confirm.photoAfter")}</p>
 
       <div style={{ flex: 1 }} />
 
-      <button className="btn-critical" style={{ marginTop: 24 }} onClick={() => setConfirming(true)}>
-        📍 {t("confirm.send")}
-      </button>
-      <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.4, marginTop: 10 }}>{t("confirm.legal")}</p>
+      {lowAccuracy ? (
+        <div
+          style={{
+            marginTop: 24,
+            padding: 16,
+            borderRadius: 18,
+            background: "rgba(255,176,32,0.10)",
+            border: "1px solid rgba(255,176,32,0.4)",
+          }}
+        >
+          <div className="archivo" style={{ fontWeight: 800, fontSize: 15, color: "var(--caution)" }}>
+            ⚠️ {t("confirm.lowAccuracy.title")}
+          </div>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: "6px 0 14px" }}>
+            {t("confirm.lowAccuracy.body", { meters: Math.round(draft.fix!.accuracy) })}
+          </p>
+          <button className="btn-primary" onClick={() => setAdjusting(true)}>
+            📍 {t("confirm.lowAccuracy.setLocation")}
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center", marginTop: 12 }}>
+            <span style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid var(--caution)", borderTopColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)" }}>{t("confirm.lowAccuracy.waiting")}</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          <button className="btn-critical" style={{ marginTop: 24 }} onClick={() => setConfirming(true)}>
+            📍 {t("confirm.send")}
+          </button>
+          <p style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.4, marginTop: 10 }}>{t("confirm.legal")}</p>
+        </>
+      )}
 
       {confirming && (
         <ConfirmDialog onCancel={() => setConfirming(false)} onConfirm={() => navigate("/sending")} />
@@ -130,7 +174,10 @@ export function Confirm() {
           origin={pinOrigin}
           maxMeters={Math.round(draft.fix.accuracy) + 300}
           onMove={([lng, lat]) => draft.fix && patchDraft({ fix: { ...draft.fix, lng, lat } })}
-          onDone={() => setAdjusting(false)}
+          onDone={() => {
+            setManuallyPlaced(true);
+            setAdjusting(false);
+          }}
         />
       )}
     </div>

@@ -118,8 +118,8 @@ export function ElevationChart({
           const cy = yOf(eleAtKm(p.km));
           return (
             <g key={i} style={{ pointerEvents: "none" }}>
-              <circle cx={cx} cy={cy} r="6.5" fill={v.bg} stroke="#0E1A28" strokeWidth="1.4" />
-              <text x={cx} y={cy + 0.5} textAnchor="middle" dominantBaseline="central" fontSize="7.5">
+              <circle cx={cx} cy={cy} r="9" fill={v.bg} stroke="#0E1A28" strokeWidth="1.6" />
+              <text x={cx} y={cy + 0.5} textAnchor="middle" dominantBaseline="central" fontSize="10">
                 {v.glyph}
               </text>
               {p.name && <title>{p.name}</title>}

@@ -17,23 +17,29 @@ import {
 } from "../lib/offline-queue";
 import { trackColor, type EventInfo, type RunnerProfile } from "../lib/types";
 
-/** The in-flight incident report being assembled across screens 4→7. */
+/** The in-flight incident report being assembled across screens 4→7. Photos
+ *  are deliberately not part of the draft — they can only be added once the
+ *  incident exists (from the sent screen), so the initial send never races an
+ *  upload against incident creation. */
 export interface IncidentDraft {
   category: IncidentCategory;
   fix: Fix | null;
-  photos: File[];
   description: string;
   voice: Blob | null;
   /** True when the report is for the runner themselves. */
   forSelf: boolean;
   /** BIB of the patient when reporting for someone else (optional). */
   patientBib: string | null;
+  /** Reporter's phone as typed on the "who" step — only set when there's no
+   *  registered profile to fall back to (the immediate/unregistered SOS path). */
+  reporterPhone: string | null;
 }
 
 /** Who the incident is being reported for, captured in step 1 of the flow. */
 export interface ReportSubject {
   forSelf: boolean;
   patientBib: string | null;
+  reporterPhone?: string | null;
 }
 
 interface AppValue {
@@ -195,11 +201,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setDraft({
         category,
         fix,
-        photos: [],
         description: "",
         voice: null,
         forSelf: subject?.forSelf ?? true,
         patientBib: subject?.patientBib ?? null,
+        reporterPhone: subject?.reporterPhone ?? null,
       }),
     [fix],
   );

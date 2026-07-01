@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
-import { createIncident, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
+import { createIncident, uploadIncidentVoice } from "../api";
 import { loadMedical } from "../lib/storage";
 import { medicalSummary } from "../lib/types";
 import { buildSosSmsHref } from "../lib/config";
@@ -54,8 +54,10 @@ export function Sending() {
       bibNumber: profile?.bibNumber ?? undefined,
       // Always attach the sender's phone for a callback; flag who it's for so the
       // backend resolves patient phone + medical (by BIB for someone else, or
-      // from the reporter's own opt-in medical for "me").
-      reporterPhone: profile?.phone ?? undefined,
+      // from the reporter's own opt-in medical for "me"). Falls back to the
+      // phone typed on the "who" step for the unregistered/immediate-SOS path,
+      // where there's no onboarding profile to read it from.
+      reporterPhone: profile?.phone ?? draft.reporterPhone ?? undefined,
       forSelf: draft.forSelf,
       patientBib: draft.forSelf ? undefined : draft.patientBib ?? undefined,
       allergies: myMedical?.allergies?.trim() || undefined,
@@ -65,25 +67,19 @@ export function Sending() {
       timestamp: draft.fix?.timestamp ?? new Date().toISOString(),
     };
 
-    const photos = draft.photos;
     const voiceBlob = draft.voice;
 
     (async () => {
       setSteps(["done", "active", "pending"]);
       try {
         // Core incident fields go out as their own small/fast JSON request so
-        // Race Command is notified immediately even on a bad connection.
-        // Photo/voice are large blobs — attach them as separate follow-up
-        // requests afterwards, and if those fail (poor connectivity), queue
-        // them for background retry instead of dropping them silently.
+        // Race Command is notified immediately even on a bad connection. Voice
+        // is a large blob — attach it as a separate follow-up request
+        // afterwards, and if that fails (poor connectivity), queue it for
+        // background retry instead of dropping it silently. Photos aren't part
+        // of the draft at all — they can only be added once the incident
+        // exists (from the sent screen).
         const incident = await createIncident(payload);
-        for (const p of photos) {
-          try {
-            await uploadIncidentPhoto(incident.id, p);
-          } catch {
-            await enqueueAttachment({ incidentId: incident.id, kind: "photo", blob: p });
-          }
-        }
         if (voiceBlob) {
           try {
             await uploadIncidentVoice(incident.id, voiceBlob);

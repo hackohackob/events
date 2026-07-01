@@ -369,9 +369,36 @@ export function MapShell({
       <div style={{ position: "absolute", top: 14, right: 12, display: "flex", flexDirection: "column", gap: 8 }}>
         <ControlButton glyph="🛰️" active={satellite} onClick={() => setSatellite((s) => !s)} title="Satellite" />
         <OfflineControlButton getBounds={getOfflineBounds} />
-        <ControlButton icon={<LocateIcon />} active onClick={() => setRecenter((n) => n + 1)} title="Recenter" />
         <ControlButton icon={<CompassIcon />} onClick={() => setCompass((n) => n + 1)} title="North up" />
       </div>
+
+      {/* "My location" FAB — bottom-right like Google Maps, floating just above
+          whatever's occupying the bottom of the screen (track sheet / weather
+          scrubber / safety dock + tab bar), reusing the same inset the map
+          itself is framed against. Bigger than the other controls — it's the
+          one button used constantly mid-run. */}
+      <button
+        onClick={() => setRecenter((n) => n + 1)}
+        title="Recenter"
+        aria-label="Recenter"
+        style={{
+          position: "absolute",
+          right: 12,
+          bottom: bottomInset + 14,
+          width: 52,
+          height: 52,
+          borderRadius: "50%",
+          background: "var(--bg-overlay)",
+          border: "1px solid var(--primary)",
+          color: "var(--primary)",
+          display: "grid",
+          placeItems: "center",
+          boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
+          zIndex: 6,
+        }}
+      >
+        <LocateIcon size={26} />
+      </button>
 
       {showAccuracyWarning && (
         <div
@@ -511,9 +538,9 @@ function ControlButton({
 }
 
 /** "Recenter on me" — a crisp crosshair/locator (GPS-style reticle + centre dot). */
-function LocateIcon() {
+function LocateIcon({ size = 20 }: { size?: number }) {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="4" />
       <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
       <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />

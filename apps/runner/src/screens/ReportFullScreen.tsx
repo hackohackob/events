@@ -14,9 +14,10 @@ export function ReportFullScreen() {
   const { startDraft } = useApp();
   const { t } = useT();
   const [showOthers, setShowOthers] = useState(false);
-  const subject = (location.state ?? { forSelf: true, patientBib: null }) as {
+  const subject = (location.state ?? { forSelf: true, patientBib: null, reporterPhone: null }) as {
     forSelf: boolean;
     patientBib: string | null;
+    reporterPhone?: string | null;
   };
 
   function pick(category: IncidentCategory) {

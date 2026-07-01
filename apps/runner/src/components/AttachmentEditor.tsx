@@ -5,8 +5,10 @@ interface Props {
   note: string;
   onNoteChange: (v: string) => void;
   notePlaceholder: string;
-  photos: File[];
-  onAddPhoto: (file: File) => void;
+  /** Omit both to hide the photo action entirely (e.g. the initial report —
+   *  photos can only be added once the incident exists, from the sent screen). */
+  photos?: File[];
+  onAddPhoto?: (file: File) => void;
   onRemovePhoto?: (index: number) => void;
   voice: Blob | null;
   voiceSupported: boolean;
@@ -53,13 +55,14 @@ export function AttachmentEditor({
   const libraryRef = useRef<HTMLInputElement>(null);
 
   const showNote = noteOpen || note.trim() !== "";
-  const canAddPhoto = photos.length < maxPhotos;
+  const photoEnabled = !!onAddPhoto;
+  const canAddPhoto = photoEnabled && (photos?.length ?? 0) < maxPhotos;
 
   function pick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     setPhotoChooser(false);
-    if (file && canAddPhoto) onAddPhoto(file);
+    if (file && canAddPhoto) onAddPhoto?.(file);
   }
 
   return (
@@ -72,13 +75,15 @@ export function AttachmentEditor({
           active={showNote}
           onClick={() => setNoteOpen((o) => !o)}
         />
-        <ActionButton
-          glyph="📷"
-          label={t("sent.addPhoto")}
-          active={photoChooser}
-          disabled={!canAddPhoto}
-          onClick={() => setPhotoChooser((o) => !o)}
-        />
+        {photoEnabled && (
+          <ActionButton
+            glyph="📷"
+            label={t("sent.addPhoto")}
+            active={photoChooser}
+            disabled={!canAddPhoto}
+            onClick={() => setPhotoChooser((o) => !o)}
+          />
+        )}
         {voiceSupported && (
           <ActionButton
             glyph={recording ? "⏹" : "🎙️"}
@@ -158,7 +163,7 @@ export function AttachmentEditor({
       )}
 
       {/* Photo thumbnails */}
-      {photos.length > 0 && (
+      {photos && photos.length > 0 && (
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           {photos.map((p, i) => (
             <div key={i} style={{ position: "relative", width: 64, height: 64, borderRadius: 13, overflow: "hidden", border: "1px solid var(--border-mid)" }}>
