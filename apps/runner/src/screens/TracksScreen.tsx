@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapShell } from "./MapShell";
 import { useT } from "../i18n";
-import { ElevationChart, type ElevSample } from "../components/ElevationChart";
+import { ElevationChart, type ElevPoi, type ElevSample } from "../components/ElevationChart";
 import { useApp } from "../state/AppContext";
 import { cumulativeDistances, snapToRoute, elevationStats } from "../lib/geo";
 import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
 import type { PublicMedicState } from "../api/contracts-shim";
+import type { PoiLike } from "../api";
 
 const TAB_BAR = 64;
 /** Resting sheet heights as a fraction of the viewport. PEEK is deliberately
@@ -23,6 +24,7 @@ function TrackStudioSheet({
   offsetMeters,
   gpsAltitude,
   medics,
+  pois,
   onScrub,
   onSheetInset,
 }: {
@@ -31,6 +33,7 @@ function TrackStudioSheet({
   offsetMeters: number | null;
   gpsAltitude: number | null;
   medics: PublicMedicState[];
+  pois: PoiLike[];
   onScrub: (km: number | null) => void;
   onSheetInset: (px: number) => void;
 }) {
@@ -110,6 +113,17 @@ function TrackStudioSheet({
       })
       .filter((x): x is number => x != null);
   }, [medics, track, cum]);
+
+  // POIs on the track (within 200 m), mapped to km-along for the elevation chart.
+  const poisKm = useMemo<ElevPoi[]>(() => {
+    if (!track) return [];
+    return pois
+      .map((p): ElevPoi | null => {
+        const snap = snapToRoute({ lng: p.lng, lat: p.lat }, track.coords, cum);
+        return snap.offsetMeters <= 200 ? { km: snap.kmAlong, type: p.type, name: p.name } : null;
+      })
+      .filter((x): x is ElevPoi => x != null);
+  }, [pois, track, cum]);
 
   // Elevation computed from the raw GPX heights (the precomputed meta can be
   // wrong/zero). Current height = GPS altitude if the device gives it, else the
@@ -196,6 +210,7 @@ function TrackStudioSheet({
             totalKm={totalKm}
             runnerKm={kmAlong}
             medicsKm={medicsKm}
+            pois={poisKm}
             height={expanded ? 150 : 120}
             onScrub={onScrub}
           />

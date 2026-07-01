@@ -5,6 +5,7 @@ import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { useLiveMedics } from "../hooks/useLiveMedics";
 import { useTrackGeoJson } from "../hooks/useTrackGeoJson";
+import { useRefetchOnFocus } from "../hooks/useRefetchOnFocus";
 import { LOW_ACCURACY_METERS } from "../hooks/useGeolocation";
 import { fetchMyIncidents, fetchPois, type PoiLike } from "../api";
 import { haversineMeters, cumulativeDistances, snapToRoute, pointAtKm } from "../lib/geo";
@@ -26,6 +27,7 @@ interface ShellCtx {
   /** GPS-reported altitude (m), or null when the device omits it. */
   gpsAltitude: number | null;
   medics: PublicMedicState[];
+  pois: PoiLike[];
   onScrub: (km: number | null) => void;
   onSheetInset: (px: number) => void;
 }
@@ -84,11 +86,22 @@ export function MapShell({
     }
   }, [active, track, sheetInset, profile?.selectedTrackId]);
 
-  useEffect(() => {
+  const refreshPois = useCallback(() => {
     fetchPois(eventId)
       .then(setPois)
       .catch(() => undefined);
   }, [eventId]);
+
+  useEffect(() => {
+    // Drop the previous event's POIs immediately so the map can't render a
+    // stale event's markers while the new event's POIs are loading.
+    setPois([]);
+    refreshPois();
+  }, [eventId, refreshPois]);
+
+  // Likely means the phone was locked/backgrounded — re-fetch in case POIs
+  // changed (or the previous fetch raced a still-in-flight event switch).
+  useRefetchOnFocus(refreshPois);
 
   // Surface the runner's active (unresolved) incident so they can return to it.
   useEffect(() => {
@@ -404,6 +417,7 @@ export function MapShell({
           offsetMeters: progress.offsetMeters,
           gpsAltitude: fix?.altitude ?? null,
           medics,
+          pois,
           onScrub,
           onSheetInset: setSheetInset,
         })}

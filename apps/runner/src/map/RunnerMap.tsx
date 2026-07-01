@@ -112,7 +112,9 @@ interface Props {
   pinClampCenter?: [number, number] | null;
 }
 
-function poiVisual(type: string): { bg: string; glyph: string } | null {
+/** Same POI type → glyph mapping used for the map markers below, reused by
+ *  the elevation chart so on-track POI icons match what's on the map. */
+export function poiVisual(type: string): { bg: string; glyph: string } | null {
   const t = type.toLowerCase();
   if (/ambulance/.test(t)) return { bg: "#E63946", glyph: "🚑" };
   if (/tent|camp|hospital|medical|aid/.test(t)) return { bg: "#FFFFFF", glyph: "✚" };

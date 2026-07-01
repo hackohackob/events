@@ -427,6 +427,38 @@
     "dates": [
       "2026-05-23"
     ],
-    "days": []
+    "days": [
+      {
+        "date": "2026-07-01",
+        "disciplines": [],
+        "pois": [
+          {
+            "id": "58dfadfc-ccba-48da-b484-af895ac57927",
+            "type": "water-point",
+            "lat": 42.60521,
+            "lng": 23.40672,
+            "name": "Water Stop 1",
+            "archived": true
+          },
+          {
+            "id": "ede71558-d9df-41db-8271-73b0047bb9e6",
+            "type": "medical-point",
+            "lat": 42.59861,
+            "lng": 23.41416,
+            "name": "Aid Station",
+            "archived": true
+          },
+          {
+            "id": "a8a1c804-6695-486d-849c-1dac59a9243b",
+            "type": "ambulance",
+            "lat": 42.59697,
+            "lng": 23.41916,
+            "name": "Ambulance Point",
+            "archived": true
+          }
+        ],
+        "assignments": []
+      }
+    ]
   }
 ]

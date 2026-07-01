@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { IncidentCategory } from "../api/contracts-shim";
 import { useGeolocation, type Fix } from "../hooks/useGeolocation";
+import { useRefetchOnFocus } from "../hooks/useRefetchOnFocus";
 import {
   getEventId,
   loadProfile,
@@ -106,6 +107,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [eventId]);
 
+  // Re-fetch (silently, no flicker) whenever the app regains focus — likely
+  // the phone was locked and the previously loaded tracks/title may be stale.
+  useRefetchOnFocus(
+    useCallback(() => {
+      if (!eventId) return;
+      loadEventInfo(eventId)
+        .then((info) => setEventInfo(info))
+        .catch(() => undefined);
+    }, [eventId]),
+  );
+
   const setEventId = useCallback((id: string) => {
     persistEventId(id);
     setEventIdState(id);
@@ -145,24 +157,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const flush = () => void flushQueue().then(() => flushAttachmentQueue()).then(() => refreshQueued());
     // Flush on boot too (not just on a live "online" transition) — if the tab
     // was closed while items were queued in IndexedDB, they'd otherwise sit
     // untouched until the browser fires a fresh online event, which may never
     // happen if the app is reopened already-connected.
-    void flushQueue()
-      .then(() => flushAttachmentQueue())
-      .then(() => refreshQueued());
+    flush();
     refreshQueued();
     const goOnline = () => {
       setOnline(true);
-      void flushQueue()
-        .then(() => flushAttachmentQueue())
-        .then(() => refreshQueued());
+      flush();
     };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
+    // Also retry on a timer while online: a single attachment upload can fail
+    // transiently (e.g. right after an incident is created, before the
+    // connection has "settled") without the browser ever firing an `offline`
+    // event, so waiting for `online` alone can leave it stuck until reload.
+    const poll = setInterval(() => {
+      if (navigator.onLine) flush();
+    }, 15_000);
     return () => {
+      clearInterval(poll);
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
     };

@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { poiVisual } from "../map/RunnerMap";
 
 export interface ElevSample {
   km: number;
   ele: number;
+}
+
+/** A POI on (or near) the track, already snapped to km-along. */
+export interface ElevPoi {
+  km: number;
+  type: string;
+  name?: string;
 }
 
 /**
@@ -15,6 +23,7 @@ export function ElevationChart({
   totalKm,
   runnerKm,
   medicsKm = [],
+  pois = [],
   height = 130,
   onScrub,
 }: {
@@ -22,6 +31,7 @@ export function ElevationChart({
   totalKm: number;
   runnerKm: number | null;
   medicsKm?: number[];
+  pois?: ElevPoi[];
   height?: number;
   onScrub?: (km: number | null) => void;
 }) {
@@ -97,6 +107,25 @@ export function ElevationChart({
         </defs>
         <path d={area} fill="url(#elevFill)" />
         <path d={line} fill="none" stroke="#2BE3A0" strokeWidth="2.4" />
+
+        {/* POIs on/near the track — small glyph badges, not interactive (must
+            never intercept the scrub gesture, which is handled by the parent
+            <svg>'s pointer capture regardless of what's underneath). */}
+        {pois.map((p, i) => {
+          const v = poiVisual(p.type);
+          if (!v) return null;
+          const cx = xOf(Math.min(p.km, totalKm));
+          const cy = yOf(eleAtKm(p.km));
+          return (
+            <g key={i} style={{ pointerEvents: "none" }}>
+              <circle cx={cx} cy={cy} r="6.5" fill={v.bg} stroke="#0E1A28" strokeWidth="1.4" />
+              <text x={cx} y={cy + 0.5} textAnchor="middle" dominantBaseline="central" fontSize="7.5">
+                {v.glyph}
+              </text>
+              {p.name && <title>{p.name}</title>}
+            </g>
+          );
+        })}
 
         {/* Medics on/near the track */}
         {medicsKm.map((km, i) => (

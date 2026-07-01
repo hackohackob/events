@@ -70,13 +70,34 @@ export default defineConfig({
           },
           {
             // Read-only race data (tracks geojson, medics, pois). Excludes the
-            // weather overlays (handled above).
+            // weather overlays (handled above) and /incidents (a runner's own
+            // reports change by the second — polled every 8s for the "view
+            // active alert" button — and must never be served stale/cached).
             urlPattern: ({ url, request }) =>
-              request.method === "GET" && /\/api\//.test(url.pathname) && !/\/api\/weather\//.test(url.pathname),
+              request.method === "GET" &&
+              /\/api\//.test(url.pathname) &&
+              !/\/api\/weather\//.test(url.pathname) &&
+              !/\/api\/incidents/.test(url.pathname),
             handler: "StaleWhileRevalidate",
             options: {
               cacheName: "race-api",
               expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 },
+              // Requests like /events/tracks and /events/pois scope by the
+              // x-event-id HEADER, not the URL — Workbox's default cache key is
+              // URL-only, so switching events could serve the previous event's
+              // cached tracks/POIs. Fold the header into the cache key so each
+              // event gets its own entry.
+              plugins: [
+                {
+                  cacheKeyWillBeUsed: async ({ request }) => {
+                    const eventId = request.headers.get("x-event-id");
+                    if (!eventId) return request.url;
+                    const url = new URL(request.url);
+                    url.searchParams.set("_eid", eventId);
+                    return url.toString();
+                  },
+                },
+              ],
             },
           },
         ],
