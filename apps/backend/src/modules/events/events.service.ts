@@ -59,6 +59,9 @@ export interface EventRecord {
   description?: string;
   status: "draft" | "active" | "closed";
   imageUrl?: string;
+  /** Command Center phone number for this event. Runners call/text it from the
+   *  PWA; unset hides the call/SMS options there. */
+  commandPhone?: string;
   dates: string[];
   location?: StoredLocation;
   days: StoredDay[];
@@ -69,6 +72,7 @@ export interface EventSummary {
   title: string;
   status: "draft" | "active" | "closed";
   imageUrl?: string;
+  commandPhone?: string;
   dates: string[];
   location?: string;
   disciplineCount: number;
@@ -142,6 +146,7 @@ function toSummary(event: EventRecord): EventSummary {
     title: event.title,
     status: event.status,
     imageUrl: event.imageUrl,
+    commandPhone: event.commandPhone,
     dates: event.dates,
     location: event.location?.name,
     disciplineCount,
@@ -213,6 +218,7 @@ export class EventsService implements OnModuleInit {
       description: payload.description,
       status: "draft",
       imageUrl: payload.imageUrl,
+      commandPhone: payload.commandPhone,
       dates: sortedDates,
       location: payload.location,
       days: payload.days.map((d) => ({
@@ -250,6 +256,7 @@ export class EventsService implements OnModuleInit {
       title: payload.title,
       description: payload.description,
       imageUrl: payload.imageUrl,
+      commandPhone: payload.commandPhone,
       dates: sortedDates,
       location: payload.location,
       days: payload.days.map((d) => ({

@@ -6,6 +6,7 @@ export interface ApiEventSummary {
   title: string;
   status: "draft" | "active" | "closed";
   imageUrl?: string;
+  commandPhone?: string;
   dates: string[];
   location?: string;
   disciplineCount: number;
@@ -42,6 +43,7 @@ export async function createEvent(data: EventFormData) {
     title: data.title,
     description: data.description || undefined,
     imageUrl: data.imageUrl || undefined,
+    commandPhone: data.commandPhone.trim() || undefined,
     dates: data.dates.map((d) => d.toISOString().split("T")[0]),
     location: data.location
       ? {
@@ -97,6 +99,7 @@ export async function updateEvent(id: string, data: EventFormData) {
     title: data.title,
     description: data.description || undefined,
     imageUrl: data.imageUrl || undefined,
+    commandPhone: data.commandPhone.trim() || undefined,
     dates: data.dates.map((d) => d.toISOString().split("T")[0]),
     location: data.location
       ? { name: data.location.name, lng: data.location.coordinates[0], lat: data.location.coordinates[1] }
@@ -137,6 +140,7 @@ export async function duplicateEvent(id: string): Promise<ApiEventSummary> {
   const source = await fetchEventById(id);
   const payload = {
     title: `Copy of ${source.title}`,
+    commandPhone: source.commandPhone,
     dates: source.dates,
     days: (source.days ?? []).map((day) => ({
       date: day.date,

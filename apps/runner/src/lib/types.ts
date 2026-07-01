@@ -31,6 +31,9 @@ export interface EventInfo {
   id: string;
   title: string;
   tracks: TrackChoice[];
+  /** Command Center phone number, set per event by the organizer. When unset,
+   *  the "Call Race Command" button and SOS SMS fallback are hidden. */
+  commandPhone?: string;
 }
 
 /** Optional medical / ICE profile, kept on-device and attached to any SOS.

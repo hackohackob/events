@@ -14,6 +14,12 @@
       "port": 8503
     },
     {
+      "name": "backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start:dev", "--workspace=@events/backend"],
+      "port": 8500
+    },
+    {
       "name": "runner",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:runner"],

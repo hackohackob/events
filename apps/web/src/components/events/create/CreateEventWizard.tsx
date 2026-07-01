@@ -29,6 +29,7 @@ function makeInitialData(): EventFormData {
     title: '',
     description: '',
     imageUrl: null,
+    commandPhone: '',
     dates: [today],
     location: null,
     days: [{ id: 'day-1', date: today, disciplines: [], pois: [], assignments: [] }],
@@ -69,6 +70,7 @@ export default function CreateEventWizard({
           title: event.title,
           description: '',
           imageUrl: event.imageUrl ?? null,
+          commandPhone: event.commandPhone ?? '',
           dates: event.dates.length > 0
             ? event.dates.map(d => { const dt = new Date(d); dt.setHours(0, 0, 0, 0); return dt })
             : [today],

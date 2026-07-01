@@ -229,6 +229,27 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
             </div>
           </div>
 
+          {/* Command Center phone */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-2">Command Center Phone</label>
+            <input
+              type="tel"
+              value={data.commandPhone}
+              onChange={e => update({ commandPhone: e.target.value })}
+              className="w-full px-3.5 py-2.5 rounded-xl text-sm text-slate-100 outline-none transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(148,163,184,0.12)',
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = 'rgba(34,197,94,0.5)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'rgba(148,163,184,0.12)')}
+              placeholder="+359 88 123 4567"
+            />
+            <p className="mt-2 text-[10px] leading-relaxed" style={{ color: '#475569' }}>
+              Runners can call or text this number for help. Leave blank to hide those options in the runner app.
+            </p>
+          </div>
+
           {/* Summary stats */}
           <div
             className="grid grid-cols-5 gap-2 pt-4 mt-4"

@@ -13,7 +13,8 @@ type StepState = "pending" | "active" | "done";
 
 export function Sending() {
   const navigate = useNavigate();
-  const { draft, profile, clearDraft, refreshQueued } = useApp();
+  const { draft, profile, clearDraft, refreshQueued, eventInfo } = useApp();
+  const commandPhone = eventInfo?.commandPhone;
   const { t } = useT();
   const [steps, setSteps] = useState<StepState[]>(["active", "pending", "pending"]);
   const [queued, setQueued] = useState(false);
@@ -104,16 +105,20 @@ export function Sending() {
         await enqueueIncident(payload);
         refreshQueued();
         setQueued(true);
-        setSmsHref(
-          buildSosSmsHref({
-            category: draft.category,
-            name: profile?.runnerName ?? undefined,
-            bib: profile?.bibNumber ?? undefined,
-            lat: draft.fix?.lat,
-            lng: draft.fix?.lng,
-            medical: med || undefined,
-          }),
-        );
+        // No SMS fallback when the event hasn't set a Command Center phone —
+        // there's no generic number to text.
+        if (commandPhone) {
+          setSmsHref(
+            buildSosSmsHref(commandPhone, {
+              category: draft.category,
+              name: profile?.runnerName ?? undefined,
+              bib: profile?.bibNumber ?? undefined,
+              lat: draft.fix?.lat,
+              lng: draft.fix?.lng,
+              medical: med || undefined,
+            }),
+          );
+        }
         setSteps(["done", "done", "pending"]);
       }
     })();

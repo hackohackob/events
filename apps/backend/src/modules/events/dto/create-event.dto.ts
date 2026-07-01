@@ -142,6 +142,12 @@ export class CreateEventDto {
   @IsOptional()
   imageUrl?: string;
 
+  /** Command Center phone number. Powers the runner PWA's "Call Race Command"
+   *  button and SOS SMS fallback — both are hidden when this is unset. */
+  @IsString()
+  @IsOptional()
+  commandPhone?: string;
+
   @IsArray()
   @IsISO8601({}, { each: true })
   dates!: string[];

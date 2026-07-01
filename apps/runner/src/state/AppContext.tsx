@@ -64,6 +64,7 @@ async function loadEventInfo(id: string): Promise<EventInfo> {
     id,
     title: event.title,
     tracks: tracks.map((t, i) => ({ id: t.id, label: t.label, color: trackColor(i, t.color) })),
+    commandPhone: event.commandPhone?.trim() || undefined,
   };
 }
 

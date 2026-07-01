@@ -20,6 +20,7 @@ export async function joinEvent(payload: JoinEventRequest) {
 interface EventRecordLike {
   id: string;
   title: string;
+  commandPhone?: string;
   days?: Array<{ disciplines?: Array<{ name: string; color?: string; trackId?: string }> }>;
 }
 

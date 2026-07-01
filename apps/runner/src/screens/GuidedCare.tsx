@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
-import { COMMAND_PHONE } from "../lib/config";
+import { useApp } from "../state/AppContext";
 import { TRIAGE, TRIAGE_START, type OptionTone } from "../lib/triage";
 import { CprMode } from "../components/CprMode";
 
 export function GuidedCare() {
   const navigate = useNavigate();
   const { t, lang } = useT();
+  const { eventInfo } = useApp();
+  const commandPhone = eventInfo?.commandPhone;
   const [nodeId, setNodeId] = useState(TRIAGE_START);
   const [showCpr, setShowCpr] = useState(false);
 
@@ -27,15 +29,19 @@ export function GuidedCare() {
         <button onClick={() => navigate("/map")} style={{ width: 38, height: 38, borderRadius: 12, background: "var(--bg-input)", border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontSize: 18 }}>✕</button>
       </div>
 
-      {/* Call Race Command — always available */}
-      <a href={`tel:${COMMAND_PHONE}`} style={{ textDecoration: "none" }}>
-        <button className="btn-critical" style={{ width: "100%", marginTop: 14, minHeight: 50 }}>
-          📞 {t("guided.call")}
-        </button>
-      </a>
-      <div style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", marginTop: 6 }}>
-        {t("guided.callBanner")}
-      </div>
+      {/* Call Race Command — hidden when the event has no command phone set */}
+      {commandPhone && (
+        <>
+          <a href={`tel:${commandPhone}`} style={{ textDecoration: "none" }}>
+            <button className="btn-critical" style={{ width: "100%", marginTop: 14, minHeight: 50 }}>
+              📞 {t("guided.call")}
+            </button>
+          </a>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", marginTop: 6 }}>
+            {t("guided.callBanner")}
+          </div>
+        </>
+      )}
 
       {/* Triage card */}
       <div

@@ -79,6 +79,9 @@ export interface EventFormData {
   title: string
   description: string
   imageUrl: string | null
+  /** Command Center phone number. Powers the runner PWA's "Call Race Command"
+   *  button and SOS SMS fallback — both are hidden there when this is blank. */
+  commandPhone: string
   dates: Date[]
   location: { name: string; coordinates: [number, number] } | null
   days: EventDay[]

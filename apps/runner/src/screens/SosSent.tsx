@@ -4,14 +4,14 @@ import { useT } from "../i18n";
 import { sendIncidentMessage, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { AttachmentEditor } from "../components/AttachmentEditor";
-import { COMMAND_PHONE } from "../lib/config";
 import { enqueueAttachment } from "../lib/offline-queue";
 import { useApp } from "../state/AppContext";
 
 export function SosSent() {
   const navigate = useNavigate();
   const { t } = useT();
-  const { refreshQueued } = useApp();
+  const { refreshQueued, eventInfo } = useApp();
+  const commandPhone = eventInfo?.commandPhone;
   const location = useLocation();
   const state = (location.state ?? {}) as { incidentId?: string; queued?: boolean };
   const incidentId = state.incidentId;
@@ -136,11 +136,13 @@ export function SosSent() {
 
       <div style={{ flex: 1 }} />
       <div style={{ width: "100%", maxWidth: 420, marginTop: 24 }}>
-        <a href={`tel:${COMMAND_PHONE}`} style={{ textDecoration: "none" }}>
-          <button className="btn-critical" style={{ width: "100%", marginBottom: 12 }}>
-            📞 {t("sent.call")}
-          </button>
-        </a>
+        {commandPhone && (
+          <a href={`tel:${commandPhone}`} style={{ textDecoration: "none" }}>
+            <button className="btn-critical" style={{ width: "100%", marginBottom: 12 }}>
+              📞 {t("sent.call")}
+            </button>
+          </a>
+        )}
         <button className="btn-primary" onClick={() => navigate("/guided")}>{t("sent.guided")}</button>
         <button onClick={() => navigate("/map")} style={{ width: "100%", marginTop: 12, padding: 14, borderRadius: 16, border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontWeight: 700 }}>
           {t("sent.backToMap")}
