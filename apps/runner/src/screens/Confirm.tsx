@@ -14,18 +14,14 @@ export function Confirm() {
   const { t } = useT();
   const [confirming, setConfirming] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
-  // Once the runner has placed the pin themselves, they've provided a location
-  // they vouch for — the raw GPS accuracy no longer matters for the send gate.
-  const [manuallyPlaced, setManuallyPlaced] = useState(false);
   const voice = useVoiceRecorder();
-  // Stable clamp centre: the originally captured fix, set once (not updated as
-  // the pin is dragged) so the 500 m limit is measured from the real GPS point.
-  const [pinOrigin, setPinOrigin] = useState<[number, number] | null>(
-    draft?.fix ? [draft.fix.lng, draft.fix.lat] : null,
-  );
-  useEffect(() => {
-    if (!pinOrigin && draft?.fix) setPinOrigin([draft.fix.lng, draft.fix.lat]);
-  }, [draft?.fix, pinOrigin]);
+  // Clamp centre for dragging: the originally captured fix, stored on the
+  // draft itself (immutable) so the allowed radius — and the "moved N m" note
+  // — are both measured from the real GPS point, not wherever `fix` has since
+  // drifted to.
+  const pinOrigin: [number, number] | null = draft?.originalFix
+    ? [draft.originalFix.lng, draft.originalFix.lat]
+    : null;
 
   // A coarse fix (e.g. a browser falling back to ~2 km IP/network location
   // instead of GPS) is dangerous for an emergency — medics would be sent to the
@@ -33,7 +29,7 @@ export function Confirm() {
   // the runner hasn't manually placed the pin, so this clears itself the
   // moment a real GPS fix lands (mirrors the map's low-accuracy polling).
   useEffect(() => {
-    if (!draft?.fix || manuallyPlaced || !fix) return;
+    if (!draft?.fix || draft.manuallyMoved || !fix) return;
     if (fix.accuracy < draft.fix.accuracy) patchDraft({ fix });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fix]);
@@ -44,7 +40,9 @@ export function Confirm() {
   }
 
   const def = ALL_CATEGORIES.find((c) => c.category === draft.category)!;
-  const lowAccuracy = !!draft.fix && draft.fix.accuracy > LOW_ACCURACY_METERS && !manuallyPlaced;
+  // Once the runner has placed the pin themselves, they've provided a location
+  // they vouch for — the raw GPS accuracy no longer matters for the send gate.
+  const lowAccuracy = !!draft.fix && draft.fix.accuracy > LOW_ACCURACY_METERS && !draft.manuallyMoved;
 
   async function toggleVoice() {
     if (voice.recording) {
@@ -173,11 +171,8 @@ export function Confirm() {
           start={[draft.fix.lng, draft.fix.lat]}
           origin={pinOrigin}
           maxMeters={Math.round(draft.fix.accuracy) + 300}
-          onMove={([lng, lat]) => draft.fix && patchDraft({ fix: { ...draft.fix, lng, lat } })}
-          onDone={() => {
-            setManuallyPlaced(true);
-            setAdjusting(false);
-          }}
+          onMove={([lng, lat]) => draft.fix && patchDraft({ fix: { ...draft.fix, lng, lat }, manuallyMoved: true })}
+          onDone={() => setAdjusting(false)}
         />
       )}
     </div>

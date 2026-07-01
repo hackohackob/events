@@ -33,6 +33,12 @@ export interface IncidentDraft {
   /** Reporter's phone as typed on the "who" step — only set when there's no
    *  registered profile to fall back to (the immediate/unregistered SOS path). */
   reporterPhone: string | null;
+  /** The raw GPS fix captured when the draft was started, kept immutable even
+   *  as `fix` is later replaced by a better auto-fix or dragged by the runner —
+   *  the anchor for measuring how far a manually-placed pin moved. */
+  originalFix: { lat: number; lng: number } | null;
+  /** True once the runner has dragged the pin via "Fix marker location". */
+  manuallyMoved: boolean;
 }
 
 /** Who the incident is being reported for, captured in step 1 of the flow. */
@@ -206,6 +212,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         forSelf: subject?.forSelf ?? true,
         patientBib: subject?.patientBib ?? null,
         reporterPhone: subject?.reporterPhone ?? null,
+        originalFix: fix ? { lat: fix.lat, lng: fix.lng } : null,
+        manuallyMoved: false,
       }),
     [fix],
   );

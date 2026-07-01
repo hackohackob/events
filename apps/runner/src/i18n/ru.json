@@ -106,6 +106,8 @@
   "sending.command": "Оповещение Командного центра…",
   "sending.medic": "Оповещение ближайшего полевого медика",
   "sending.queued": "⚠ В очереди — отправится при подключении",
+  "sending.notesAccuracy": "📍 Точность GPS ±{meters} м",
+  "sending.notesAccuracyMoved": "📍 Точность GPS ±{meters} м · метка перемещена на {moved} м отправителем",
   "sent.title": "SOS ОТПРАВЛЕН",
   "sent.sub": "Командный центр получил ваше оповещение и точное местоположение.",
   "sent.dispatched": "Медик в пути · ETA ~{eta} мин",

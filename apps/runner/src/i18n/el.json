@@ -106,6 +106,8 @@
   "sending.command": "Ειδοποίηση Κέντρου Επιχειρήσεων…",
   "sending.medic": "Ειδοποίηση πλησιέστερου διασώστη πεδίου",
   "sending.queued": "⚠ Σε αναμονή — θα σταλεί με τη σύνδεση",
+  "sending.notesAccuracy": "📍 Ακρίβεια GPS ±{meters} μ",
+  "sending.notesAccuracyMoved": "📍 Ακρίβεια GPS ±{meters} μ · ο δείκτης μετακινήθηκε κατά {moved} μ από τον αποστολέα",
   "sent.title": "ΤΟ SOS ΣΤΑΛΘΗΚΕ",
   "sent.sub": "Το Κέντρο Επιχειρήσεων έχει την ειδοποίηση και την ακριβή σας θέση.",
   "sent.dispatched": "Διασώστης καθ’ οδόν · ETA ~{eta} λεπτά",

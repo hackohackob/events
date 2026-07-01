@@ -20,6 +20,30 @@ import type { IncidentRecordLike, PublicMedicState } from "../api/contracts-shim
 
 const HEADER_INSET = 70; // identity header height reserved at the top
 
+/**
+ * Measures the rendered height of a bottom-docked panel (the safety dock, the
+ * weather scrubber) so other floating UI — namely the "my location" FAB — can
+ * sit reliably above it instead of a hardcoded guess that drifts whenever the
+ * panel's content changes height (e.g. an active alert adds a second button,
+ * or a longer localized condition label wraps to two lines).
+ */
+function useDockedPanelHeight(active: boolean) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setHeight(0);
+      return;
+    }
+    const el = wrapRef.current?.firstElementChild as HTMLElement | null | undefined;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => setHeight(entries[0].contentRect.height));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [active]);
+  return [wrapRef, height] as const;
+}
+
 interface ShellCtx {
   track: ResolvedTrack | null;
   kmAlong: number | null;
@@ -58,6 +82,8 @@ export function MapShell({
 
   // ── Weather overlay state ──
   const [weatherOpen, setWeatherOpen] = useState(false);
+  const [dockWrapRef, dockHeight] = useDockedPanelHeight(active === "map" && !weatherOpen);
+  const [wxWrapRef, wxHeight] = useDockedPanelHeight(active === "map" && weatherOpen);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [wxIndex, setWxIndex] = useState(0);
   const [wxPlaying, setWxPlaying] = useState(false);
@@ -276,9 +302,21 @@ export function MapShell({
     }
   };
 
-  // Bottom occlusion fed to the map so centring/fit frame the visible area.
+  // Bottom occlusion fed to the map (and the "my location" FAB) so both frame
+  // above whatever's actually rendered at the bottom — measured live off the
+  // dock/weather panel rather than a fixed guess, since their height varies
+  // (an active alert adds a second button; longer localized text wraps).
+  // 74 is the dock/weather panel's own fixed bottom offset (see SafetyDock.tsx
+  // / WeatherPanel.tsx); fall back to a reasonable guess before the first
+  // ResizeObserver measurement lands.
   const bottomInset =
-    active === "tracks" ? sheetInset : weatherOpen ? 250 : active === "map" ? 190 : 0;
+    active === "tracks"
+      ? sheetInset
+      : weatherOpen
+        ? (wxHeight || 226) + 74
+        : active === "map"
+          ? (dockHeight || 190) + 74
+          : 0;
 
   // Scrubbing the elevation chart → show that point on the route.
   const onScrub = (km: number | null) => {
@@ -384,7 +422,7 @@ export function MapShell({
         style={{
           position: "absolute",
           right: 12,
-          bottom: bottomInset + 14,
+          bottom: `calc(${bottomInset + 20}px + env(safe-area-inset-bottom))`,
           width: 52,
           height: 52,
           borderRadius: "50%",
@@ -394,7 +432,7 @@ export function MapShell({
           display: "grid",
           placeItems: "center",
           boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
-          zIndex: 6,
+          zIndex: 7,
         }}
       >
         <LocateIcon size={26} />
@@ -423,17 +461,19 @@ export function MapShell({
 
       {/* Weather radar + 12h scrubber */}
       {active === "map" && weatherOpen && (
-        <WeatherPanel
-          forecast={forecast}
-          scrubIndex={wxIndex}
-          onScrub={(i) => {
-            setWxPlaying(false);
-            setWxIndex(i);
-          }}
-          playing={wxPlaying}
-          onTogglePlay={() => setWxPlaying((p) => !p)}
-          onClose={toggleWeather}
-        />
+        <div ref={wxWrapRef}>
+          <WeatherPanel
+            forecast={forecast}
+            scrubIndex={wxIndex}
+            onScrub={(i) => {
+              setWxPlaying(false);
+              setWxIndex(i);
+            }}
+            playing={wxPlaying}
+            onTogglePlay={() => setWxPlaying((p) => !p)}
+            onClose={toggleWeather}
+          />
+        </div>
       )}
 
       {children}
@@ -452,20 +492,22 @@ export function MapShell({
       {/* Bottom safety dock (medic radar + report / live-alert) — hidden while
           the weather scrubber is up so they don't stack. */}
       {active === "map" && !weatherOpen && (
-        <SafetyDock
-          nearest={nearest}
-          // A report can be confirmed by the server (activeIncident) or still
-          // sitting in the offline queue (no id yet, e.g. reported with no
-          // signal) — either way the runner reported something and should be
-          // able to get back to it instead of only seeing "report new".
-          hasActiveAlert={!!activeIncident || queued > 0}
-          onReport={() => navigate("/report")}
-          onViewAlert={() =>
-            activeIncident
-              ? navigate("/sent", { state: { incidentId: activeIncident.id } })
-              : navigate("/sent", { state: { queued: true } })
-          }
-        />
+        <div ref={dockWrapRef}>
+          <SafetyDock
+            nearest={nearest}
+            // A report can be confirmed by the server (activeIncident) or still
+            // sitting in the offline queue (no id yet, e.g. reported with no
+            // signal) — either way the runner reported something and should be
+            // able to get back to it instead of only seeing "report new".
+            hasActiveAlert={!!activeIncident || queued > 0}
+            onReport={() => navigate("/report")}
+            onViewAlert={() =>
+              activeIncident
+                ? navigate("/sent", { state: { incidentId: activeIncident.id } })
+                : navigate("/sent", { state: { queued: true } })
+            }
+          />
+        </div>
       )}
 
       {/* Bottom tab bar */}

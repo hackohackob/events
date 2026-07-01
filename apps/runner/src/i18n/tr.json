@@ -106,6 +106,8 @@
   "sending.command": "Yarış Komutası bilgilendiriliyor…",
   "sending.medic": "En yakın saha sağlık görevlisi uyarılıyor",
   "sending.queued": "⚠ Sırada — bağlanınca gönderilecek",
+  "sending.notesAccuracy": "📍 GPS doğruluğu ±{meters} m",
+  "sending.notesAccuracyMoved": "📍 GPS doğruluğu ±{meters} m · işaretçi bildiren kişi tarafından {moved} m taşındı",
   "sent.title": "SOS GÖNDERİLDİ",
   "sent.sub": "Yarış Komutası uyarınızı ve tam konumunuzu aldı.",
   "sent.dispatched": "Sağlık görevlisi yolda · THS ~{eta} dk",

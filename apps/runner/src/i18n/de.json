@@ -106,6 +106,8 @@
   "sending.command": "Einsatzleitung wird benachrichtigt…",
   "sending.medic": "Nächster Feldsanitäter wird alarmiert",
   "sending.queued": "⚠ In Warteschlange — wird bei Verbindung gesendet",
+  "sending.notesAccuracy": "📍 GPS-Genauigkeit ±{meters} m",
+  "sending.notesAccuracyMoved": "📍 GPS-Genauigkeit ±{meters} m · Markierung vom Melder um {moved} m verschoben",
   "sent.title": "SOS GESENDET",
   "sent.sub": "Die Einsatzleitung hat deinen Alarm und deinen genauen Standort.",
   "sent.dispatched": "Sanitäter unterwegs · ETA ~{eta} Min.",

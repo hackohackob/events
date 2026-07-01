@@ -106,6 +106,8 @@
   "sending.command": "Se notifică Comandamentul Cursei…",
   "sending.medic": "Se alertează cel mai apropiat medic de teren",
   "sending.queued": "⚠ În așteptare — se trimite la reconectare",
+  "sending.notesAccuracy": "📍 Precizie GPS ±{meters} m",
+  "sending.notesAccuracyMoved": "📍 Precizie GPS ±{meters} m · marcaj mutat cu {moved} m de raportor",
   "sent.title": "SOS TRIMIS",
   "sent.sub": "Comandamentul Cursei are alerta ta și locația exactă.",
   "sent.dispatched": "Medic în drum · ETA ~{eta} min",

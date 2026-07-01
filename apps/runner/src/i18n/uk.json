@@ -106,6 +106,8 @@
   "sending.command": "Сповіщення Командного центру…",
   "sending.medic": "Сповіщення найближчого польового медика",
   "sending.queued": "⚠ У черзі — надішлеться при з’єднанні",
+  "sending.notesAccuracy": "📍 Точність GPS ±{meters} м",
+  "sending.notesAccuracyMoved": "📍 Точність GPS ±{meters} м · мітку переміщено на {moved} м відправником",
   "sent.title": "SOS НАДІСЛАНО",
   "sent.sub": "Командний центр отримав ваше сповіщення та точне місцезнаходження.",
   "sent.dispatched": "Медик у дорозі · ETA ~{eta} хв",

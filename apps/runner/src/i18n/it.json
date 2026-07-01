@@ -106,6 +106,8 @@
   "sending.command": "Notifica al Comando Gara…",
   "sending.medic": "Allerta del soccorritore sul campo più vicino",
   "sending.queued": "⚠ In coda — verrà inviato alla connessione",
+  "sending.notesAccuracy": "📍 Precisione GPS ±{meters} m",
+  "sending.notesAccuracyMoved": "📍 Precisione GPS ±{meters} m · indicatore spostato di {moved} m da chi ha segnalato",
   "sent.title": "SOS INVIATO",
   "sent.sub": "Il Comando Gara ha il tuo allarme e la tua posizione esatta.",
   "sent.dispatched": "Soccorritore in arrivo · ETA ~{eta} min",

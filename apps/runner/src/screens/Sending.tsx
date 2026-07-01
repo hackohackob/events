@@ -7,6 +7,7 @@ import { loadMedical } from "../lib/storage";
 import { medicalSummary } from "../lib/types";
 import { buildSosSmsHref } from "../lib/config";
 import { enqueueAttachment, enqueueIncident } from "../lib/offline-queue";
+import { haversineMeters } from "../lib/geo";
 import type { CreateIncidentRequest } from "../api/contracts-shim";
 
 type StepState = "pending" | "active" | "done";
@@ -39,8 +40,19 @@ export function Sending() {
       : draft.patientBib
         ? `👤 ${t("who.notesForBib", { bib: draft.patientBib })}`
         : `👤 ${t("who.notesForOther")}`;
+    // Always note the GPS accuracy sent to Race Command; only mention the pin
+    // being moved (and by how much) if the runner actually dragged it.
+    const movedMeters =
+      draft.manuallyMoved && draft.originalFix && draft.fix
+        ? Math.round(haversineMeters(draft.originalFix, draft.fix))
+        : null;
+    const locationLine = draft.fix
+      ? movedMeters != null && movedMeters > 0
+        ? t("sending.notesAccuracyMoved", { meters: Math.round(draft.fix.accuracy), moved: movedMeters })
+        : t("sending.notesAccuracy", { meters: Math.round(draft.fix.accuracy) })
+      : undefined;
     const description =
-      [subjectLine, med && `🩺 ${med}`, draft.description].filter(Boolean).join("\n") || undefined;
+      [subjectLine, locationLine, med && `🩺 ${med}`, draft.description].filter(Boolean).join("\n") || undefined;
 
     const payload: CreateIncidentRequest = {
       eventId: "",

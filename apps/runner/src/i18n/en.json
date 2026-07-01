@@ -111,6 +111,8 @@
   "sending.command": "Notifying Race Command…",
   "sending.medic": "Alerting nearest field medic",
   "sending.queued": "⚠ Queued — will send when connected",
+  "sending.notesAccuracy": "📍 GPS accuracy ±{meters} m",
+  "sending.notesAccuracyMoved": "📍 GPS accuracy ±{meters} m · marker moved {moved} m by reporter",
   "sent.title": "SOS SENT",
   "sent.sub": "Race Command has your alert and your exact location.",
   "sent.dispatched": "Medic en route · ETA ~{eta} min",

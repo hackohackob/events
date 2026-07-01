@@ -106,6 +106,8 @@
   "sending.command": "Obaveštavanje Komandnog centra…",
   "sending.medic": "Obaveštavanje najbližeg medicinara",
   "sending.queued": "⚠ U redu — poslaće se kad bude veze",
+  "sending.notesAccuracy": "📍 GPS preciznost ±{meters} m",
+  "sending.notesAccuracyMoved": "📍 GPS preciznost ±{meters} m · oznaku je pomerio prijavitelj za {moved} m",
   "sent.title": "SOS POSLAT",
   "sent.sub": "Komandni centar ima tvoju prijavu i tačnu lokaciju.",
   "sent.dispatched": "Medicinar stiže · ETA ~{eta} min",

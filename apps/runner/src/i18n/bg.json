@@ -131,6 +131,8 @@
   "sending.command": "Уведомяване на Командния център…",
   "sending.medic": "Известяване на най-близкия медик",
   "sending.queued": "⚠ В опашка — ще се изпрати при връзка",
+  "sending.notesAccuracy": "📍 GPS точност ±{meters} м",
+  "sending.notesAccuracyMoved": "📍 GPS точност ±{meters} м · маркерът е преместен с {moved} м от подателя",
   "sent.title": "SOS ИЗПРАТЕН",
   "sent.sub": "Командният център има твоя сигнал и точна локация.",
   "sent.dispatched": "Медик пътува · ETA ~{eta} мин",
