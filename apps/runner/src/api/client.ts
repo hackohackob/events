@@ -27,7 +27,9 @@ export function authHeaders(): Record<string, string> {
 }
 
 export async function apiGet<T>(path: string, extraHeaders?: Record<string, string>): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { headers: { ...authHeaders(), ...extraHeaders } });
+  // no-store: event/track lookups must never be served from the HTTP cache —
+  // switching events must always hit the network for the new event's data.
+  const res = await fetch(`${BASE}${path}`, { headers: { ...authHeaders(), ...extraHeaders }, cache: "no-store" });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return (await res.json()) as T;
 }

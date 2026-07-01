@@ -5,7 +5,7 @@ import {
   ArrowUp, ArrowDown, Layers, ChevronRight, ChevronDown,
   Phone, MapPin, Clock, Pill, AlertTriangle, Users, Droplet, HeartPulse, Crosshair,
 } from 'lucide-react'
-import type { ParticipantLastLocation } from '@events/contracts'
+import { computeFreshness, type ParticipantLastLocation } from '@events/contracts'
 
 /** Any of the four medical fields filled in. */
 function hasMedical(p: ParticipantLastLocation): boolean {
@@ -245,7 +245,11 @@ function ParticipantRow({ p, expanded, flash, rowRef, onToggle, onLocate }: {
   onToggle: () => void
   onLocate?: (p: ParticipantLastLocation) => void
 }) {
-  const dot = FRESHNESS_COLOR[p.freshness ?? 'offline'] ?? '#64748b'
+  // Derive freshness live from the fix timestamp on every render (matching
+  // timeAgo's live "ago" text) rather than trusting `p.freshness`, which is
+  // computed once server-side at fetch time and goes stale between polls or
+  // when a live update patches lat/lng/recordedAt without recomputing it.
+  const dot = FRESHNESS_COLOR[computeFreshness(p.recordedAt)] ?? '#64748b'
   const hasLocation = p.lat != null && p.lng != null
 
   return (
@@ -333,6 +337,7 @@ function ParticipantRow({ p, expanded, flash, rowRef, onToggle, onLocate }: {
             {hasLocation && (
               <span className="flex items-center gap-1">
                 <MapPin className="w-3 h-3" /> {p.lat!.toFixed(5)}, {p.lng!.toFixed(5)}
+                {p.accuracy != null && ` (±${Math.round(p.accuracy)}m)`}
               </span>
             )}
             <span className="flex items-center gap-1">

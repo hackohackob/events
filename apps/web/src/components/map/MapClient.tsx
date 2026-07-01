@@ -95,7 +95,7 @@ interface MapClientProps {
   /** Clicking a medic → open its detail drawer (map focuses automatically). */
   onMedicClick?: (medicId: string) => void
   /** Live participant roster as clickable, identity-carrying dots. */
-  participantMarkers?: Array<{ userId: string; lat: number; lng: number; name?: string; bibNumber?: string; freshness?: string }>
+  participantMarkers?: Array<{ userId: string; lat: number; lng: number; name?: string; bibNumber?: string; freshness?: string; accuracy?: number }>
   /** Show the participant dots layer. */
   showParticipantDots?: boolean
   /** Clicking a participant dot → open the People tab + highlight them. */
@@ -1073,10 +1073,51 @@ const PARTICIPANT_FRESH: Record<string, string> = {
   fresh: '#22c55e', warning: '#f59e0b', stale: '#f97316', offline: '#64748b',
 }
 
+/** Build a GeoJSON circle polygon (in degrees) approximating a real-world
+ *  radius in meters — used for the GPS accuracy halo, à la Google Maps' blue
+ *  dot. Scales correctly with zoom since it's real geometry, not a fixed
+ *  pixel-radius marker. */
+function circlePolygon(lng: number, lat: number, radiusMeters: number, points = 48) {
+  const coords: [number, number][] = []
+  const earthRadius = 6371000
+  const latRad = (lat * Math.PI) / 180
+  for (let i = 0; i <= points; i++) {
+    const angle = (i / points) * 2 * Math.PI
+    const dx = (radiusMeters * Math.cos(angle)) / (earthRadius * Math.cos(latRad))
+    const dy = (radiusMeters * Math.sin(angle)) / earthRadius
+    coords.push([lng + (dx * 180) / Math.PI, lat + (dy * 180) / Math.PI])
+  }
+  return { type: 'Feature' as const, properties: {}, geometry: { type: 'Polygon' as const, coordinates: [coords] } }
+}
+
+/** Translucent halo showing GPS accuracy radius (meters) around a participant
+ *  dot — mirrors how other radius/corridor overlays in this file are drawn as
+ *  a GeoJSON Source + fill/line Layer pair. */
+function ParticipantAccuracyCircle({ lng, lat, radiusMeters, color }: {
+  lng: number
+  lat: number
+  radiusMeters: number
+  color: string
+}) {
+  const data = useMemo(() => circlePolygon(lng, lat, radiusMeters), [lng, lat, radiusMeters])
+  return (
+    <Source type="geojson" data={data}>
+      <Layer
+        type="fill"
+        paint={{ 'fill-color': color, 'fill-opacity': 0.15 }}
+      />
+      <Layer
+        type="line"
+        paint={{ 'line-color': color, 'line-opacity': 0.5, 'line-width': 1.5 }}
+      />
+    </Source>
+  )
+}
+
 /** A clickable, identity-carrying participant dot from the live roster. The
  *  highlighted one (just located, or clicked in the panel) gets a pulse + label. */
 function ParticipantDot({ p, highlighted, onSelect }: {
-  p: { userId: string; lat: number; lng: number; name?: string; bibNumber?: string; freshness?: string }
+  p: { userId: string; lat: number; lng: number; name?: string; bibNumber?: string; freshness?: string; accuracy?: number }
   highlighted: boolean
   onSelect?: () => void
 }) {
@@ -1423,14 +1464,26 @@ export default function MapClient({
       )}
 
       {/* Live participant dots (identity-carrying, clickable → People tab) */}
-      {showParticipantDots && participantMarkers.filter(p => isFiniteLngLat(p.lng, p.lat)).map(p => (
-        <ParticipantDot
-          key={p.userId}
-          p={p}
-          highlighted={p.userId === highlightedParticipantId}
-          onSelect={() => { focusOn(p.lng, p.lat, { rightDrawer: false }); onParticipantClick?.(p.userId) }}
-        />
-      ))}
+      {showParticipantDots && participantMarkers.filter(p => isFiniteLngLat(p.lng, p.lat)).map(p => {
+        const isHighlighted = p.userId === highlightedParticipantId
+        return (
+          <Fragment key={p.userId}>
+            {isHighlighted && p.accuracy != null && p.accuracy > 0 && (
+              <ParticipantAccuracyCircle
+                lng={p.lng}
+                lat={p.lat}
+                radiusMeters={p.accuracy}
+                color={PARTICIPANT_FRESH[p.freshness ?? 'offline'] ?? '#64748b'}
+              />
+            )}
+            <ParticipantDot
+              p={p}
+              highlighted={isHighlighted}
+              onSelect={() => { focusOn(p.lng, p.lat, { rightDrawer: false }); onParticipantClick?.(p.userId) }}
+            />
+          </Fragment>
+        )
+      })}
 
       {/* Incident markers */}
       {liveIncidents.map(inc => (

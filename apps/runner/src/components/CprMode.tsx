@@ -10,15 +10,13 @@ type Phase = "idle" | "compressions" | "breaths";
 
 /**
  * Full-screen CPR coach: a metronome at 110 bpm with audio + haptic beats, a
- * pulsing PUSH target, 30 compressions then a 2-breath pause, repeating. An
- * optional screen strobe helps rescuers/medics spot the location.
+ * pulsing PUSH target, 30 compressions then a 2-breath pause, repeating.
  */
 export function CprMode({ onClose }: { onClose: () => void }) {
   const { t } = useT();
   const [phase, setPhase] = useState<Phase>("idle");
   const [count, setCount] = useState(0);
   const [cycle, setCycle] = useState(1);
-  const [strobe, setStrobe] = useState(false);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -113,9 +111,6 @@ export function CprMode({ onClose }: { onClose: () => void }) {
         padding: "44px 20px 24px",
       }}
     >
-      {strobe && active && (
-        <div style={{ position: "absolute", inset: 0, background: "#fff", animation: "livePulse 0.5s steps(1) infinite", pointerEvents: "none", opacity: 0.0 }} />
-      )}
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span className="archivo" style={{ fontWeight: 900, fontSize: 16, color: "#fff" }}>{t("cpr.title")}</span>
         <button onClick={onClose} style={{ width: 38, height: 38, borderRadius: 12, background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 18 }}>✕</button>
@@ -167,12 +162,6 @@ export function CprMode({ onClose }: { onClose: () => void }) {
         </button>
       ) : (
         <div style={{ width: "100%", display: "flex", gap: 10 }}>
-          <button
-            onClick={() => setStrobe((s) => !s)}
-            style={{ flex: 1, padding: 16, borderRadius: 16, border: `1px solid ${strobe ? "var(--caution)" : "var(--border-mid)"}`, color: strobe ? "var(--caution)" : "var(--text-secondary)", fontWeight: 700, background: "transparent" }}
-          >
-            ⚡ {t("cpr.strobe")}
-          </button>
           <button
             onClick={() => {
               clearTimer();

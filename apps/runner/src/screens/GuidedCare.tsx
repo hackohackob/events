@@ -68,15 +68,13 @@ export function GuidedCare() {
       )}
 
       {/* Big answer buttons */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
         {node.options.map((opt, i) => (
           <button key={i} onClick={() => setNodeId(opt.next)} style={bigBtnStyle(opt.tone)}>
             {tr(opt.label)}
           </button>
         ))}
       </div>
-
-      <div style={{ flex: 1 }} />
 
       {showCpr && <CprMode onClose={() => setShowCpr(false)} />}
 

@@ -1470,7 +1470,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Last location of a participant the user chose to locate from the roster —
   // drawn as a transient pin and centred by the camera. Tap it to dismiss.
   const [locatedParticipant, setLocatedParticipant] = useState<
-    { lng: number; lat: number; name?: string; bibNumber?: string } | null
+    { lng: number; lat: number; name?: string; bibNumber?: string; accuracy?: number } | null
   >(null);
   // Tapping a participant dot opens the People list and highlights them there
   // (matched by userId, falling back to BIB) instead of a marker detail sheet.
@@ -3227,6 +3227,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </Marker>
         ) : null}
 
+        {locatedParticipant && locatedParticipant.accuracy != null && locatedParticipant.accuracy > 0 ? (
+          <GeoJSONSource
+            id="participant-accuracy-circle-source"
+            data={buildAccuracyCircle(locatedParticipant.lat, locatedParticipant.lng, locatedParticipant.accuracy)}
+          >
+            <Layer
+              id="participant-accuracy-circle-fill"
+              type="fill"
+              paint={{ "fill-color": "#22c55e", "fill-opacity": 0.12 }}
+            />
+            <Layer
+              id="participant-accuracy-circle-outline"
+              type="line"
+              paint={{ "line-color": "#22c55e", "line-width": 1.5, "line-opacity": 0.5 }}
+            />
+          </GeoJSONSource>
+        ) : null}
+
         {locatedParticipant ? (
           <Marker key="participant-focus" lngLat={[locatedParticipant.lng, locatedParticipant.lat]}>
             <Pressable onPress={() => setLocatedParticipant(null)} style={styles.participantFocusWrap}>
@@ -4095,7 +4113,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               // Make sure the participant dots layer is on so the focused runner
               // is actually visible among the rest of the field.
               setParticipantsMode("individual");
-              setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber });
+              setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber, accuracy: p.accuracy });
               setSelectedMarkerId(null);
               setActiveTab("map");
               cameraRef.current?.easeTo({

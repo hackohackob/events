@@ -290,7 +290,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     () =>
       participants
         .filter((p) => p.lat != null && p.lng != null)
-        .map((p) => ({ userId: p.userId, lat: p.lat as number, lng: p.lng as number, name: p.name, bibNumber: p.bibNumber, freshness: p.freshness })),
+        .map((p) => ({ userId: p.userId, lat: p.lat as number, lng: p.lng as number, name: p.name, bibNumber: p.bibNumber, freshness: p.freshness, accuracy: p.accuracy })),
     [participants],
   )
 

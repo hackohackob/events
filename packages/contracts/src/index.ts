@@ -177,6 +177,35 @@ export interface ParticipantLastLocation {
   freshness?: "fresh" | "warning" | "stale" | "offline";
 }
 
+/** Freshness bucket type, shared by backend + both frontends so status dots
+ *  and "time ago" text can never disagree. */
+export type FreshnessState = "fresh" | "warning" | "stale" | "offline";
+
+/**
+ * Derive the freshness bucket for a location fix from its timestamp, using
+ * "now" at call time — NOT a value computed once server-side. Callers should
+ * invoke this on every render (e.g. alongside a live-updating "time ago"
+ * label) rather than trusting a `freshness` field that was set when a
+ * record was first fetched/pushed, since that field goes stale as time
+ * passes or when only lat/lng/recordedAt are patched via a live update.
+ *
+ * Thresholds match the participant-roster freshness used by the dashboard
+ * and mobile participant list (`MedicsService.participantFreshness`):
+ *   0–2 min   → fresh
+ *   2–5 min   → warning
+ *   5–15 min  → stale
+ *   15+ min or no fix yet (`recordedAt` undefined/invalid) → offline
+ */
+export function computeFreshness(recordedAt?: string): FreshnessState {
+  if (!recordedAt) return "offline";
+  const ageMs = Date.now() - new Date(recordedAt).getTime();
+  if (!Number.isFinite(ageMs)) return "offline";
+  if (ageMs < 120_000) return "fresh";
+  if (ageMs < 300_000) return "warning";
+  if (ageMs < 900_000) return "stale";
+  return "offline";
+}
+
 /** Runner self-registration payload — name/BIB/phone/track + optional medical,
  *  stored server-side and keyed by event + BIB for incident lookups. */
 export interface RegisterParticipantRequest {

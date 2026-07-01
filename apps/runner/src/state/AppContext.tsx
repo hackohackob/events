@@ -8,7 +8,12 @@ import {
   setEventId as persistEventId,
 } from "../lib/storage";
 import { fetchEvent, fetchTracks, postParticipantLocation } from "../api";
-import { flushQueue, queuedCount } from "../lib/offline-queue";
+import {
+  flushAttachmentQueue,
+  flushQueue,
+  queuedAttachmentCount,
+  queuedCount,
+} from "../lib/offline-queue";
 import { trackColor, type EventInfo, type RunnerProfile } from "../lib/types";
 
 /** The in-flight incident report being assembled across screens 4→7. */
@@ -80,6 +85,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     let alive = true;
+    // Drop the previous event's info immediately so nothing (e.g. the track
+    // picker) can render stale tracks/title while the new event is loading.
+    setEventInfo(null);
     setEventStatus("loading");
     loadEventInfo(eventId)
       .then((info) => {
@@ -130,14 +138,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshQueued = useCallback(() => {
-    void queuedCount().then(setQueued);
+    void Promise.all([queuedCount(), queuedAttachmentCount()]).then(([incidents, attachments]) =>
+      setQueued(incidents + attachments),
+    );
   }, []);
 
   useEffect(() => {
+    // Flush on boot too (not just on a live "online" transition) — if the tab
+    // was closed while items were queued in IndexedDB, they'd otherwise sit
+    // untouched until the browser fires a fresh online event, which may never
+    // happen if the app is reopened already-connected.
+    void flushQueue()
+      .then(() => flushAttachmentQueue())
+      .then(() => refreshQueued());
     refreshQueued();
     const goOnline = () => {
       setOnline(true);
-      void flushQueue().then(() => refreshQueued());
+      void flushQueue()
+        .then(() => flushAttachmentQueue())
+        .then(() => refreshQueued());
     };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);

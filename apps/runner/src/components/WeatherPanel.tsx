@@ -108,19 +108,35 @@ export function WeatherPanel({
 
       {/* Readout: condition on the left, prominent time on the right */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 2px 10px" }}>
-        <span style={{ fontSize: 38, lineHeight: 1 }}>{glyph.icon}</span>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-            <span
-              className="archivo"
-              style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: cur ? tempColor(cur.tempC) : "var(--text-primary)", flexShrink: 0 }}
-            >
-              {cur ? `${Math.round(cur.tempC)}°` : "—"}
-            </span>
-            {/* One line — a long localized condition must not wrap and push the
-                temperature up; truncate instead (the glyph already shows it). */}
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{condLabel}</span>
-          </div>
+        <span style={{ fontSize: 38, lineHeight: 1, flexShrink: 0 }}>{glyph.icon}</span>
+        <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "flex-start", gap: 8 }}>
+          {/* Fixed-size temperature cell — its width/size never changes when the
+              condition label next to it wraps onto a second line. */}
+          <span
+            className="archivo"
+            style={{ fontWeight: 800, fontSize: 30, lineHeight: 1, color: cur ? tempColor(cur.tempC) : "var(--text-primary)", flexShrink: 0 }}
+          >
+            {cur ? `${Math.round(cur.tempC)}°` : "—"}
+          </span>
+          {/* Condition label can wrap to 2 lines for longer localized text
+              without shifting or resizing the temperature next to it. */}
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "var(--text-secondary)",
+              minWidth: 0,
+              flex: 1,
+              whiteSpace: "normal",
+              overflow: "hidden",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              lineHeight: 1.25,
+            }}
+          >
+            {condLabel}
+          </span>
         </div>
         {/* Prominent time */}
         <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -152,7 +168,7 @@ export function WeatherPanel({
         </span>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-          {cur ? `☁ ${Math.round(cur.cloudPct)}% · 💧 ${cur.precipMm.toFixed(1)}mm` : t("weather.loading")}
+          {cur ? `☁️ ${Math.round(cur.cloudPct)}% · 💧 ${cur.precipMm.toFixed(1)}mm` : t("weather.loading")}
         </span>
       </div>
 

@@ -6,7 +6,7 @@ import { createIncident, uploadIncidentPhoto, uploadIncidentVoice } from "../api
 import { loadMedical } from "../lib/storage";
 import { medicalSummary } from "../lib/types";
 import { buildSosSmsHref } from "../lib/config";
-import { enqueueIncident } from "../lib/offline-queue";
+import { enqueueAttachment, enqueueIncident } from "../lib/offline-queue";
 import type { CreateIncidentRequest } from "../api/contracts-shim";
 
 type StepState = "pending" | "active" | "done";
@@ -70,21 +70,27 @@ export function Sending() {
     (async () => {
       setSteps(["done", "active", "pending"]);
       try {
+        // Core incident fields go out as their own small/fast JSON request so
+        // Race Command is notified immediately even on a bad connection.
+        // Photo/voice are large blobs — attach them as separate follow-up
+        // requests afterwards, and if those fail (poor connectivity), queue
+        // them for background retry instead of dropping them silently.
         const incident = await createIncident(payload);
         for (const p of photos) {
           try {
             await uploadIncidentPhoto(incident.id, p);
           } catch {
-            /* photo upload is best-effort */
+            await enqueueAttachment({ incidentId: incident.id, kind: "photo", blob: p });
           }
         }
         if (voiceBlob) {
           try {
             await uploadIncidentVoice(incident.id, voiceBlob);
           } catch {
-            /* voice upload is best-effort */
+            await enqueueAttachment({ incidentId: incident.id, kind: "voice", blob: voiceBlob });
           }
         }
+        refreshQueued();
         setSteps(["done", "done", "active"]);
         setTimeout(() => {
           setSteps(["done", "done", "done"]);

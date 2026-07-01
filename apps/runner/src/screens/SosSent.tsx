@@ -5,10 +5,13 @@ import { sendIncidentMessage, uploadIncidentPhoto, uploadIncidentVoice } from ".
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { AttachmentEditor } from "../components/AttachmentEditor";
 import { COMMAND_PHONE } from "../lib/config";
+import { enqueueAttachment } from "../lib/offline-queue";
+import { useApp } from "../state/AppContext";
 
 export function SosSent() {
   const navigate = useNavigate();
   const { t } = useT();
+  const { refreshQueued } = useApp();
   const location = useLocation();
   const state = (location.state ?? {}) as { incidentId?: string; queued?: boolean };
   const incidentId = state.incidentId;
@@ -62,7 +65,13 @@ export function SosSent() {
     // just the gallery, so the team sees it appear in the timeline.
     uploadIncidentPhoto(incidentId, file, { postToChat: true })
       .then(() => showToast(t("sent.photoSent")))
-      .catch(() => showToast(t("sent.sendFailed")));
+      .catch(() => {
+        // Bad connection — don't drop it, queue for background retry like the
+        // core incident-create queue does.
+        void enqueueAttachment({ incidentId, kind: "photo", blob: file, postToChat: true });
+        refreshQueued();
+        showToast(t("sent.sendFailed"));
+      });
   }
 
   async function toggleVoice() {
@@ -73,7 +82,16 @@ export function SosSent() {
         if (incidentId) {
           uploadIncidentVoice(incidentId, res.blob, res.durationMs)
             .then(() => showToast(t("sent.voiceSent")))
-            .catch(() => showToast(t("sent.sendFailed")));
+            .catch(() => {
+              void enqueueAttachment({
+                incidentId,
+                kind: "voice",
+                blob: res.blob,
+                durationMs: res.durationMs,
+              });
+              refreshQueued();
+              showToast(t("sent.sendFailed"));
+            });
         }
       }
     } else {

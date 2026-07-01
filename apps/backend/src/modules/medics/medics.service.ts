@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
-import { MedicDestination, MedicRoute, MedicState, MedicStatus, MedicType, PublicMedicState } from "@events/contracts";
+import { computeFreshness, MedicDestination, MedicRoute, MedicState, MedicStatus, MedicType, PublicMedicState } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -659,18 +659,6 @@ export class MedicsService implements OnModuleInit {
     };
   }
 
-  /** Location freshness bucket from the last fetch time (mirrors the live-map
-   *  thresholds: <2min fresh, <5min warning, <15min stale, else offline). */
-  private participantFreshness(recordedAt: string | null): "fresh" | "warning" | "stale" | "offline" {
-    if (!recordedAt) return "offline";
-    const ageMs = Date.now() - new Date(recordedAt).getTime();
-    if (!Number.isFinite(ageMs)) return "offline";
-    if (ageMs < 120_000) return "fresh";
-    if (ageMs < 300_000) return "warning";
-    if (ageMs < 900_000) return "stale";
-    return "offline";
-  }
-
   /**
    * Full participant roster for the dashboard + medic app: registered identity
    * (name/BIB/phone/track/medical) joined with the latest known location and a
@@ -725,7 +713,7 @@ export class MedicsService implements OnModuleInit {
       battery: r.battery ?? undefined,
       recordedAt: r.recorded_at ?? undefined,
       lastSeenAt: r.last_seen_at ?? undefined,
-      freshness: this.participantFreshness(r.recorded_at),
+      freshness: computeFreshness(r.recorded_at ?? undefined),
     }));
   }
 }

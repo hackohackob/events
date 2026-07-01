@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import type { ParticipantLastLocation } from "@events/contracts";
+import { computeFreshness, type ParticipantLastLocation } from "@events/contracts";
 import { apiFetch } from "../ui/api-client";
 import { useSessionStore } from "../security/session-store";
 
@@ -277,7 +277,11 @@ function Row({ p, open, flash, onLayoutY, onToggle, onLocate }: {
   onToggle: () => void;
   onLocate?: (p: ParticipantLastLocation) => void;
 }) {
-  const dot = FRESHNESS_COLOR[p.freshness ?? "offline"] ?? "#64748b";
+  // Derive freshness live from the fix timestamp on every render (matching
+  // timeAgo's live "ago" text) rather than trusting `p.freshness`, which is
+  // computed once server-side at fetch time and goes stale between polls or
+  // when a live update patches lat/lng/recordedAt without recomputing it.
+  const dot = FRESHNESS_COLOR[computeFreshness(p.recordedAt)] ?? "#64748b";
   const hasMedical = Boolean(p.allergies || p.medications || p.bloodType || p.conditions);
   const hasLocation = p.lat != null && p.lng != null;
 
@@ -330,6 +334,7 @@ function Row({ p, open, flash, onLayoutY, onToggle, onLocate }: {
             {hasLocation ? (
               <Text style={styles.detailMetaText}>
                 <Feather name="map-pin" size={10} color="#64748b" /> {p.lat!.toFixed(5)}, {p.lng!.toFixed(5)}
+                {p.accuracy != null ? ` (±${Math.round(p.accuracy)}m)` : ""}
               </Text>
             ) : null}
             <Text style={styles.detailMetaText}>

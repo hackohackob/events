@@ -39,7 +39,7 @@ export function MapShell({
   children?: React.ReactNode;
   renderSheet?: (ctx: ShellCtx) => React.ReactNode;
 }) {
-  const { eventId, profile, fix, gpsDenied } = useApp();
+  const { eventId, profile, fix, gpsDenied, queued } = useApp();
   const { t } = useT();
   const navigate = useNavigate();
   const medics = useLiveMedics(eventId);
@@ -238,6 +238,8 @@ export function MapShell({
               precipMm: h.precipMm,
               precipProb: h.precipProb,
               cloudPct: h.cloudPct,
+              code: h.code,
+              isDay: h.isDay,
               primary: i === 0,
             }
           : null;
@@ -411,9 +413,17 @@ export function MapShell({
       {active === "map" && !weatherOpen && (
         <SafetyDock
           nearest={nearest}
-          hasActiveAlert={!!activeIncident}
+          // A report can be confirmed by the server (activeIncident) or still
+          // sitting in the offline queue (no id yet, e.g. reported with no
+          // signal) — either way the runner reported something and should be
+          // able to get back to it instead of only seeing "report new".
+          hasActiveAlert={!!activeIncident || queued > 0}
           onReport={() => navigate("/report")}
-          onViewAlert={() => activeIncident && navigate("/sent", { state: { incidentId: activeIncident.id } })}
+          onViewAlert={() =>
+            activeIncident
+              ? navigate("/sent", { state: { incidentId: activeIncident.id } })
+              : navigate("/sent", { state: { queued: true } })
+          }
         />
       )}
 

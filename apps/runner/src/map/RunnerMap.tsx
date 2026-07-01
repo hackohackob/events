@@ -5,7 +5,7 @@ import type { Fix } from "../hooks/useGeolocation";
 import type { PoiLike } from "../api";
 import { haversineMeters } from "../lib/geo";
 import { OSM_TILE_URL } from "../lib/offline-map";
-import { tempColor, WEATHER_BBOX } from "../lib/weather";
+import { tempColor, weatherGlyph, WEATHER_BBOX } from "../lib/weather";
 
 // Image-overlay corner coordinates (top-left, top-right, bottom-right, bottom-left)
 // for the Bulgaria weather overlays, from the [W,S,E,N] bbox.
@@ -23,6 +23,8 @@ export interface WeatherPoint {
   precipMm: number;
   precipProb: number;
   cloudPct: number;
+  code: number;
+  isDay: boolean;
   primary?: boolean;
 }
 
@@ -542,7 +544,8 @@ export function RunnerMap({
         `font-weight:800;font-size:${p.primary ? 14 : 12}px;white-space:nowrap`,
         "border:2px solid rgba(255,255,255,0.9);box-shadow:0 3px 8px rgba(0,0,0,0.45)",
       ].join(";");
-      el.textContent = `${Math.round(p.tempC)}°${p.precipMm >= 0.1 ? " 💧" : ""}`;
+      const glyph = weatherGlyph(p.code, p.cloudPct, p.isDay);
+      el.textContent = `${glyph.icon} ${Math.round(p.tempC)}°${p.precipMm >= 0.1 ? " 💧" : ""}`;
       weatherMarkersRef.current.push(
         new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map),
       );
