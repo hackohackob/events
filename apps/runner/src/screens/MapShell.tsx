@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { RunnerMap, type WeatherPoint } from "../map/RunnerMap";
+import { RunnerMap, type BaseLayer, type WeatherPoint } from "../map/RunnerMap";
 import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { useLiveMedics } from "../hooks/useLiveMedics";
@@ -73,7 +73,7 @@ export function MapShell({
   const [pois, setPois] = useState<PoiLike[]>([]);
   const [recenter, setRecenter] = useState(0);
   const [compass, setCompass] = useState(0);
-  const [satellite, setSatellite] = useState(false);
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>("map");
   const [activeIncident, setActiveIncident] = useState<IncidentRecordLike | null>(null);
   const [scrubPoint, setScrubPoint] = useState<[number, number] | null>(null);
   const [fitSignal, setFitSignal] = useState<number | undefined>(undefined);
@@ -338,7 +338,7 @@ export function MapShell({
         medics={weatherOpen || active === "tracks" ? [] : medics}
         pois={weatherOpen ? [] : pois}
         fix={fix}
-        satellite={satellite}
+        baseLayer={baseLayer}
         scrubPoint={scrubPoint}
         fitSignal={fitSignal}
         weatherLayers={weatherLayers}
@@ -404,8 +404,8 @@ export function MapShell({
       </div>
 
       {/* Floating controls */}
-      <div style={{ position: "absolute", top: 14, right: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-        <ControlButton glyph="🛰️" active={satellite} onClick={() => setSatellite((s) => !s)} title="Satellite" />
+      <div style={{ position: "absolute", top: 14, right: 12, display: "flex", flexDirection: "column", gap: 8, zIndex: 8 }}>
+        <LayerPicker value={baseLayer} onChange={setBaseLayer} />
         <OfflineControlButton getBounds={getOfflineBounds} />
         <ControlButton icon={<CompassIcon />} onClick={() => setCompass((n) => n + 1)} title="North up" />
       </div>
@@ -542,6 +542,165 @@ export function MapShell({
 function cssVar(v: string): string {
   const name = v.replace(/var\((--[^)]+)\)/, "$1");
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#2BE3A0";
+}
+
+// Real map tiles over Rila (z11) as option previews — every base variant shows
+// its actual cartography, no bundled thumbnail assets.
+const LAYER_THUMBS: Record<BaseLayer, string> = {
+  map: "https://a.tile.openstreetmap.org/11/1157/759.png",
+  satellite: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/11/759/1157",
+  terrain: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/11/759/1157",
+};
+
+/**
+ * Base-layer control: one square button in the control stack that fans out into
+ * a card of live-tile preview options (standard / satellite / 3D terrain).
+ */
+function LayerPicker({ value, onChange }: { value: BaseLayer; onChange: (v: BaseLayer) => void }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const options: Array<{ id: BaseLayer; label: string; badge?: string }> = [
+    { id: "map", label: t("map.layerMap") },
+    { id: "satellite", label: t("map.layerSatellite") },
+    { id: "terrain", label: t("map.layer3d"), badge: "3D" },
+  ];
+
+  return (
+    <div style={{ position: "relative" }}>
+      <ControlButton
+        icon={<LayersIcon />}
+        active={open || value !== "map"}
+        onClick={() => setOpen((o) => !o)}
+        title={t("map.layers")}
+      />
+
+      {open && (
+        <>
+          {/* Tap-away backdrop */}
+          <div style={{ position: "fixed", inset: 0, zIndex: 8 }} onClick={() => setOpen(false)} />
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 48,
+              zIndex: 9,
+              display: "flex",
+              gap: 10,
+              padding: "10px 12px",
+              borderRadius: 20,
+              background: "var(--bg-overlay)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+              transformOrigin: "right 20px",
+              animation: "layerFanOut 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2)",
+            }}
+          >
+            {options.map((o) => {
+              const isActive = value === o.id;
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => {
+                    onChange(o.id);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 6,
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "relative",
+                      width: 58,
+                      height: 58,
+                      borderRadius: 15,
+                      backgroundImage: `url(${LAYER_THUMBS[o.id]})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                      border: `2px solid ${isActive ? "var(--primary)" : "rgba(255,255,255,0.14)"}`,
+                      boxShadow: isActive ? "0 0 0 3px rgba(43,227,160,0.22)" : "0 2px 8px rgba(0,0,0,0.35)",
+                      overflow: "hidden",
+                      display: "block",
+                    }}
+                  >
+                    {o.badge && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          left: 4,
+                          bottom: 4,
+                          padding: "1px 5px",
+                          borderRadius: 7,
+                          background: "rgba(6,18,29,0.85)",
+                          color: "var(--primary)",
+                          fontFamily: "Sofia Sans",
+                          fontWeight: 900,
+                          fontSize: 10,
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        {o.badge}
+                      </span>
+                    )}
+                    {isActive && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          right: 3,
+                          top: 3,
+                          width: 16,
+                          height: 16,
+                          borderRadius: "50%",
+                          background: "var(--primary)",
+                          color: "#05140E",
+                          fontSize: 10,
+                          fontWeight: 900,
+                          display: "grid",
+                          placeItems: "center",
+                        }}
+                      >
+                        ✓
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "Manrope",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: 0.3,
+                      color: isActive ? "var(--primary)" : "var(--text-secondary)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {o.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Stacked-layers glyph for the base-layer picker button. */
+function LayersIcon({ size = 19 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 22 8.5 12 15 2 8.5" />
+      <polyline points="2 12.5 12 19 22 12.5" />
+    </svg>
+  );
 }
 
 function ControlButton({

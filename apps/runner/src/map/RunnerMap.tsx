@@ -48,6 +48,17 @@ const WEATHER_MAX_BOUNDS: [[number, number], [number, number]] = [
   [WEATHER_BBOX[2] + _WX_W * 0.05, WEATHER_BBOX[3] + _WX_H * 0.05],
 ];
 
+/** Selectable base map: standard OSM, satellite imagery, or 3D terrain. */
+export type BaseLayer = "map" | "satellite" | "terrain";
+
+/** DEM exaggeration + camera tilt for the 3D terrain view. */
+const TERRAIN_EXAGGERATION = 1.6;
+const TERRAIN_PITCH = 60;
+
+// All base variants live in ONE static style (alternates hidden via layer
+// visibility), so switching never calls setStyle — no reload glitch, and the
+// terrain DEM source exists from map creation (maplibre only fetches DEM tiles
+// once setTerrain points at it).
 const MAP_STYLE: StyleSpecification = {
   version: 8,
   sources: {
@@ -64,10 +75,27 @@ const MAP_STYLE: StyleSpecification = {
       tileSize: 256,
       attribution: "© Esri",
     },
+    // Shaded topo base shown while in 3D — reads much better draped over the
+    // relief than the flat OSM cartography.
+    topo: {
+      type: "raster",
+      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      attribution: "© Esri",
+    },
+    // Keyless AWS Terrain Tiles (Terrarium encoding) for the 3D elevation mesh.
+    "terrain-dem": {
+      type: "raster-dem",
+      tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+      encoding: "terrarium",
+      tileSize: 256,
+      maxzoom: 15,
+    },
   },
   layers: [
     { id: "osm", type: "raster", source: "osm" },
     { id: "satellite", type: "raster", source: "satellite", layout: { visibility: "none" } },
+    { id: "topo", type: "raster", source: "topo", layout: { visibility: "none" } },
   ],
 };
 
@@ -81,7 +109,8 @@ interface Props {
   recenterSignal?: number;
   compassSignal?: number;
   fitSignal?: number;
-  satellite?: boolean;
+  /** Base map variant — standard OSM, satellite imagery, or 3D terrain. */
+  baseLayer?: BaseLayer;
   scrubPoint?: [number, number] | null;
   /** Open-Meteo weather image overlays (Bulgaria PNGs), drawn under the route in
    *  list order (bottom→top). Every forecast hour for both fields is passed at
@@ -163,7 +192,7 @@ export function RunnerMap({
   recenterSignal,
   compassSignal,
   fitSignal,
-  satellite,
+  baseLayer = "map",
   scrubPoint,
   weatherLayers,
   weatherPoints,
@@ -226,7 +255,7 @@ export function RunnerMap({
     mapRef.current = map;
     if (fix) centeredOnFixRef.current = true;
     map.on("load", () => {
-      map.getCanvas().style.filter = satellite ? "none" : "var(--map-filter)";
+      map.getCanvas().style.filter = baseLayer === "map" ? "var(--map-filter)" : "none";
       setReady(true);
     });
     return () => {
@@ -282,13 +311,27 @@ export function RunnerMap({
     }
   }, [ready, coords, routeColor, fix, editablePin]);
 
-  // Satellite toggle
+  // Base layer switch (map / satellite / 3D terrain) — pure visibility flips on
+  // the one static style, plus attaching/detaching the elevation mesh for 3D.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    map.setLayoutProperty("satellite", "visibility", satellite ? "visible" : "none");
-    map.getCanvas().style.filter = satellite ? "none" : "var(--map-filter)";
-  }, [satellite, ready]);
+    map.setLayoutProperty("satellite", "visibility", baseLayer === "satellite" ? "visible" : "none");
+    map.setLayoutProperty("topo", "visibility", baseLayer === "terrain" ? "visible" : "none");
+    // The dark-mode CSS filter is tuned for OSM cartography only.
+    map.getCanvas().style.filter = baseLayer === "map" ? "var(--map-filter)" : "none";
+
+    const wantTerrain = baseLayer === "terrain";
+    if (wantTerrain && !map.getTerrain()) {
+      map.setTerrain({ source: "terrain-dem", exaggeration: TERRAIN_EXAGGERATION });
+      // The tilt is what makes the relief visible — ease into it on entry, and
+      // flatten back when leaving so the other bases stay top-down.
+      map.easeTo({ pitch: TERRAIN_PITCH, duration: 800 });
+    } else if (!wantTerrain && map.getTerrain()) {
+      map.setTerrain(null);
+      map.easeTo({ pitch: 0, duration: 600 });
+    }
+  }, [baseLayer, ready]);
 
   // Medic + POI markers
   useEffect(() => {
