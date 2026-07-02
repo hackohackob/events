@@ -9,9 +9,12 @@ interface SessionState {
   eventId: string | null;
   eventTitle: string | null;
   userId: string | null;
+  /** Display name from the join response — sent with location fixes so external
+   *  guests (not on the roster) still show a human name on the dashboard. */
+  name: string | null;
   role: UserRole;
   hydrated: boolean;
-  setSession: (next: { token: string; eventId: string; userId: string; role: UserRole }) => void;
+  setSession: (next: { token: string; eventId: string; userId: string; role: UserRole; name?: string }) => void;
   setEventTitle: (title: string) => void;
   setRole: (role: UserRole) => void;
   clear: () => void;
@@ -23,29 +26,31 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   eventId: null,
   eventTitle: null,
   userId: null,
+  name: null,
   role: "runner",
   hydrated: false,
 
   setSession: (next) => {
-    set({ token: next.token, eventId: next.eventId, userId: next.userId, role: next.role });
+    const name = next.name ?? null;
+    set({ token: next.token, eventId: next.eventId, userId: next.userId, role: next.role, name });
     void AsyncStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ token: next.token, eventId: next.eventId, userId: next.userId, role: next.role, eventTitle: get().eventTitle }),
+      JSON.stringify({ token: next.token, eventId: next.eventId, userId: next.userId, role: next.role, name, eventTitle: get().eventTitle }),
     );
   },
 
   setEventTitle: (eventTitle) => {
     set({ eventTitle });
-    const { token, eventId, userId, role } = get();
+    const { token, eventId, userId, role, name } = get();
     if (token) {
-      void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token, eventId, userId, role, eventTitle }));
+      void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token, eventId, userId, role, name, eventTitle }));
     }
   },
 
   setRole: (role) => set({ role }),
 
   clear: () => {
-    set({ token: null, eventId: null, eventTitle: null, userId: null, role: "runner" });
+    set({ token: null, eventId: null, eventTitle: null, userId: null, name: null, role: "runner" });
     void AsyncStorage.removeItem(STORAGE_KEY);
   },
 
@@ -58,14 +63,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           eventId: string;
           userId?: string;
           role: UserRole;
+          name?: string;
           eventTitle?: string;
         };
         if (saved.token && saved.eventId) {
-          const decoded = JSON.parse(atob(saved.token)) as { userId?: string };
+          const decoded = JSON.parse(atob(saved.token)) as { userId?: string; name?: string };
           set({
             token: saved.token,
             eventId: saved.eventId,
             userId: saved.userId ?? decoded.userId ?? null,
+            name: saved.name ?? decoded.name ?? null,
             role: saved.role ?? "runner",
             eventTitle: saved.eventTitle ?? null,
           });

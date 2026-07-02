@@ -61,7 +61,7 @@ import { ParticipantsScreen } from "../participants/ParticipantsScreen";
 import { useSettingsStore } from "../settings/settings-store";
 import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
-import { archivePoi, assignDestination, setMyRoute, type PoiDto } from "../ui/event-actions";
+import { archivePoi, assignDestination, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
 import { OfflineControlButton } from "./OfflineControlButton";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
@@ -1488,6 +1488,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [mapCenterLat, setMapCenterLat] = useState(FALLBACK_LAT);
   const [layersOpen, setLayersOpen] = useState(false);
   const [pendingPoi, setPendingPoi] = useState<{ lat: number; lng: number } | null>(null);
+  // Move-POI mode: set from the POI sheet; the next map tap becomes the point's
+  // new position (confirmed to the server via PATCH + broadcast to everyone).
+  const [movingPoi, setMovingPoi] = useState<{ id: string; label: string } | null>(null);
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
@@ -1924,6 +1927,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const existing = useMapStore.getState().markers;
       setMarkers(existing.filter((m) => m.id !== payload.id));
     });
+    // POI edited elsewhere (e.g. moved to a new position) — upsert in place.
+    socket.on("poi.updated", (poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string; icon?: string }) => {
+      const existing = useMapStore.getState().markers;
+      setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+    });
 
     return () => {
       socket.off("location.updated");
@@ -1935,6 +1943,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       socket.off("broadcast");
       socket.off("poi.created");
       socket.off("poi.removed");
+      socket.off("poi.updated");
     };
     // Re-subscribe when the session token changes: getSocket() reconnects with
     // the new identity, so we must re-attach listeners to the fresh socket.
@@ -2750,13 +2759,26 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           }
         }}
         onPress={(event: any) => {
+          const lngLat = event?.nativeEvent?.lngLat;
+          if (!Array.isArray(lngLat) || lngLat.length < 2) return;
+          // Move-POI mode: this tap is the point's new position.
+          if (movingPoi) {
+            const poiId = movingPoi.id;
+            setMovingPoi(null);
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Optimistic: reposition locally; the poi.updated broadcast confirms
+            // it for everyone else.
+            const existing = useMapStore.getState().markers;
+            setMarkers(existing.map((m) => (m.id === poiId ? { ...m, lat: lngLat[1], lng: lngLat[0] } : m)));
+            void updatePoi(poiId, { lat: lngLat[1], lng: lngLat[0] }).catch((err) =>
+              debugLog("api", "error", "move POI failed", String(err)),
+            );
+            return;
+          }
           // During route editing, a tap places the pending inserted waypoint.
           if (navPhase !== "editing" || navPendingInsert === null) return;
-          const lngLat = event?.nativeEvent?.lngLat;
-          if (Array.isArray(lngLat) && lngLat.length >= 2) {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            void useNavStore.getState().placePoint({ lat: lngLat[1], lng: lngLat[0] });
-          }
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          void useNavStore.getState().placePoint({ lat: lngLat[1], lng: lngLat[0] });
         }}
       >
         <Camera
@@ -3260,6 +3282,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </Marker>
         ) : null}
       </MapLibreMap>
+
+      {/* Move-POI helper: shown while the next tap will reposition the point. */}
+      {movingPoi ? (
+        <View style={styles.poiMoveBanner}>
+          <Text style={styles.poiMoveBannerText} numberOfLines={1}>
+            📍 Tap the map to move “{movingPoi.label}”
+          </Text>
+          <Pressable style={styles.poiMoveBannerCancel} onPress={() => setMovingPoi(null)}>
+            <Text style={styles.poiMoveBannerCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* Heatmap temporary tuner (disabled with heatmap).
       <View style={styles.heatTunerPanel}>
@@ -3906,6 +3940,19 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                       label: selectedMarker.name ?? selectedMarker.label,
                     }}
                   />
+                  <Pressable
+                    style={styles.poiMoveBtn}
+                    onPress={() => {
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      setMovingPoi({
+                        id: selectedMarker.id,
+                        label: selectedMarker.name ?? selectedMarker.label,
+                      });
+                      closeSelection();
+                    }}
+                  >
+                    <Text style={styles.poiMoveBtnText}>📍  Move point (tap the new location)</Text>
+                  </Pressable>
                   <Pressable
                     style={styles.poiArchiveBtn}
                     onPress={() => {
@@ -5008,6 +5055,43 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#f25656",
   },
+  poiMoveBtn: {
+    marginTop: 4,
+    marginBottom: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(52,211,153,0.35)",
+    backgroundColor: "rgba(52,211,153,0.08)",
+  },
+  poiMoveBtnText: { color: "#34d399", fontSize: 13, fontWeight: "800" },
+  poiMoveBanner: {
+    position: "absolute",
+    top: 66,
+    left: 12,
+    right: 12,
+    zIndex: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: "rgba(8, 15, 28, 0.95)",
+    borderWidth: 1,
+    borderColor: "rgba(52,211,153,0.45)",
+  },
+  poiMoveBannerText: { flex: 1, color: "#d9fbe9", fontSize: 13, fontWeight: "700" },
+  poiMoveBannerCancel: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(148,163,184,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.28)",
+  },
+  poiMoveBannerCancelText: { color: "#cbd5e1", fontSize: 12, fontWeight: "800" },
   poiArchiveBtn: {
     marginTop: 4,
     paddingVertical: 12,

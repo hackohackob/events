@@ -74,7 +74,7 @@ export class EventsController {
   updatePoi(
     @Param("id") id: string,
     @Param("poiId") poiId: string,
-    @Body() body: { name?: string; description?: string },
+    @Body() body: { name?: string; description?: string; lat?: number; lng?: number },
   ) {
     return this.eventsService.updatePoi(id, poiId, body);
   }

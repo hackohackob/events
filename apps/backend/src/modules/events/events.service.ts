@@ -467,11 +467,11 @@ export class EventsService implements OnModuleInit {
     throw new NotFoundException(`POI ${poiId} not found`);
   }
 
-  /** Edit a single POI (name/description) while the event is live. */
+  /** Edit a single POI (name/description/position) while the event is live. */
   async updatePoi(
     eventId: string,
     poiId: string,
-    patch: { name?: string; description?: string },
+    patch: { name?: string; description?: string; lat?: number; lng?: number },
   ): Promise<StoredPoi> {
     const event = this.events.find((e) => e.id === eventId);
     if (!event) throw new NotFoundException(`Event ${eventId} not found`);
@@ -480,7 +480,14 @@ export class EventsService implements OnModuleInit {
       if (poi) {
         if (patch.name !== undefined) poi.name = patch.name;
         if (patch.description !== undefined) poi.description = patch.description;
+        if (Number.isFinite(patch.lat)) poi.lat = patch.lat!;
+        if (Number.isFinite(patch.lng)) poi.lng = patch.lng!;
         await this.persist();
+        // Live clients (mobile map) upsert the point in place.
+        await this.redisService.publish(`event:${eventId}:map`, {
+          type: "poi.updated",
+          payload: poi,
+        });
         return poi;
       }
     }

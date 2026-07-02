@@ -4,6 +4,8 @@ import {
   Animated,
   Easing,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -132,6 +134,7 @@ export function JoinScreen() {
         eventId: response.session.eventId,
         userId: response.session.userId,
         role: response.session.role,
+        name: response.session.name,
       });
       apiFetch<{ title: string }>(`/events/${response.session.eventId}`)
         .then((event) => setEventTitle(event.title))
@@ -163,6 +166,13 @@ export function JoinScreen() {
         />
       </View>
 
+      {/* Android's adjustResize doesn't shrink this screen (edge-to-edge), so the
+          keyboard used to cover the external-name input with no way to scroll —
+          the KeyboardAvoidingView pads the scroll area by the keyboard height. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? undefined : "padding"}
+      >
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
@@ -309,6 +319,7 @@ export function JoinScreen() {
           )}
         </Animated.View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

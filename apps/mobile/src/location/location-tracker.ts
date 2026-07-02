@@ -136,6 +136,9 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
 
   if (isMedic) {
     const payload = {
+      // Display name for the HTTP path — external guests aren't on the roster,
+      // so without this the server can only fall back to the "external_…" id.
+      name: session.name ?? undefined,
       lat: location.coords.latitude,
       lng: location.coords.longitude,
       accuracy: location.coords.accuracy ?? undefined,

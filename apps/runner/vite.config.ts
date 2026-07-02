@@ -19,9 +19,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg"],
       manifest: {
-        name: "Paramedic Event — Runner",
-        short_name: "PE Runner",
-        description: "Live course map + 2-tap emergency reporting for race participants.",
+        name: "RaceSafe — Academy First Aid",
+        short_name: "RaceSafe",
+        description: "Live course map + 2-tap emergency reporting for race participants, by Academy First Aid.",
         theme_color: "#0A1118",
         background_color: "#0A1118",
         display: "standalone",

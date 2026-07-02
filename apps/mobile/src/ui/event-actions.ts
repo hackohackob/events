@@ -160,3 +160,14 @@ export async function createPoi(input: {
 export async function archivePoi(poiId: string): Promise<{ id: string }> {
   return apiFetch<{ id: string }>(`/events/pois/${poiId}`, { method: "DELETE" });
 }
+
+/** Update a POI — e.g. move it to a new position. Broadcast to everyone live. */
+export async function updatePoi(
+  poiId: string,
+  patch: { name?: string; description?: string; lat?: number; lng?: number },
+): Promise<PoiDto> {
+  return apiFetch<PoiDto>(`/events/${eventId()}/pois/${poiId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}

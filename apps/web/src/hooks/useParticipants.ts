@@ -29,9 +29,14 @@ export function useParticipants(eventId: string | null, enabled: boolean, interv
         })
     tick()
     const id = setInterval(tick, intervalMs)
+    // Refresh immediately when the tab regains focus instead of waiting out
+    // the remainder of the poll interval.
+    const onFocus = () => tick()
+    window.addEventListener('focus', onFocus)
     return () => {
       alive = false
       clearInterval(id)
+      window.removeEventListener('focus', onFocus)
     }
   }, [eventId, enabled, intervalMs])
 

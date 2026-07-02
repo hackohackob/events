@@ -103,7 +103,8 @@ export default function ParticipantsPanel({
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc((v) => !v)
-    else { setSortKey(key); setSortAsc(true) }
+    // "Last fix" starts descending (latest fixes on top); text/number keys ascending.
+    else { setSortKey(key); setSortAsc(key !== 'recent') }
   }
 
   const toggleGroup = (key: string) =>

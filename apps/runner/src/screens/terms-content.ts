@@ -26,7 +26,7 @@ const en: TermsDoc = {
   title: "Terms & Conditions",
   lastUpdated: `Last updated: ${TERMS_LAST_UPDATED}`,
   intro:
-    "These Terms & Conditions (the “**Terms**”) form a binding agreement between you (“**you**”, the “**Participant**” or “**User**”) and the operator of the Paramedic Event platform (the “**Service**”, “**we**”, “**us**” or “**our**”). The Service is provided to support on-course safety and emergency medical coordination at organised sporting events. By creating a profile, joining an event, or otherwise using the Service, you confirm that you have read, understood and agree to be bound by these Terms and by our Privacy Notice set out below. If you do not agree, do not use the Service.",
+    "These Terms & Conditions (the “**Terms**”) form a binding agreement between you (“**you**”, the “**Participant**” or “**User**”) and **Academy First Aid**, the operator of the RaceSafe platform (the “**Service**”, “**we**”, “**us**” or “**our**”). The Service is provided to support on-course safety and emergency medical coordination at organised sporting events. By creating a profile, joining an event, or otherwise using the Service, you confirm that you have read, understood and agree to be bound by these Terms and by our Privacy Notice set out below. If you do not agree, do not use the Service.",
   banner:
     "⚠️ The Service is an aid to event safety only. It does **not** replace your local emergency services. In any life-threatening situation, call **112** (or your local emergency number) immediately.",
   sections: [
@@ -132,7 +132,7 @@ const bg: TermsDoc = {
   title: "Общи условия",
   lastUpdated: `Последна актуализация: ${TERMS_LAST_UPDATED}`,
   intro:
-    "Настоящите Общи условия (наричани „**Условията**“) представляват обвързващо споразумение между Вас („**Вие**“, „**Участникът**“ или „**Потребителят**“) и оператора на платформата Paramedic Event („**Услугата**“, „**ние**“, „**нас**“ или „**нашия**“). Услугата се предоставя в подкрепа на безопасността по трасето и координацията на спешната медицинска помощ на организирани спортни събития. Като създавате профил, присъединявате се към събитие или по друг начин използвате Услугата, Вие потвърждавате, че сте прочели, разбрали и приемате да бъдете обвързани с настоящите Условия и с Уведомлението за поверителност по-долу. Ако не сте съгласни, не използвайте Услугата.",
+    "Настоящите Общи условия (наричани „**Условията**“) представляват обвързващо споразумение между Вас („**Вие**“, „**Участникът**“ или „**Потребителят**“) и **Academy First Aid**, оператора на платформата RaceSafe („**Услугата**“, „**ние**“, „**нас**“ или „**нашия**“). Услугата се предоставя в подкрепа на безопасността по трасето и координацията на спешната медицинска помощ на организирани спортни събития. Като създавате профил, присъединявате се към събитие или по друг начин използвате Услугата, Вие потвърждавате, че сте прочели, разбрали и приемате да бъдете обвързани с настоящите Условия и с Уведомлението за поверителност по-долу. Ако не сте съгласни, не използвайте Услугата.",
   banner:
     "⚠️ Услугата е само помощно средство за безопасност на събитието. Тя **не** замества местните спешни служби. При всяка животозастрашаваща ситуация незабавно се обадете на **112** (или на местния спешен номер).",
   sections: [
@@ -238,7 +238,7 @@ const uk: TermsDoc = {
   title: "Умови та положення",
   lastUpdated: `Останнє оновлення: ${TERMS_LAST_UPDATED}`,
   intro:
-    "Ці Умови та положення (далі — „**Умови**“) становлять обов’язкову угоду між Вами („**Ви**“, „**Учасник**“ або „**Користувач**“) та оператором платформи Paramedic Event („**Сервіс**“, „**ми**“, „**нас**“ або „**наш**“). Сервіс надається для підтримки безпеки на трасі та координації екстреної медичної допомоги на організованих спортивних заходах. Створюючи профіль, приєднуючись до заходу або іншим чином використовуючи Сервіс, Ви підтверджуєте, що прочитали, зрозуміли та погоджуєтесь дотримуватися цих Умов і нашого Повідомлення про конфіденційність, наведеного нижче. Якщо Ви не згодні, не використовуйте Сервіс.",
+    "Ці Умови та положення (далі — „**Умови**“) становлять обов’язкову угоду між Вами („**Ви**“, „**Учасник**“ або „**Користувач**“) та **Academy First Aid**, оператором платформи RaceSafe („**Сервіс**“, „**ми**“, „**нас**“ або „**наш**“). Сервіс надається для підтримки безпеки на трасі та координації екстреної медичної допомоги на організованих спортивних заходах. Створюючи профіль, приєднуючись до заходу або іншим чином використовуючи Сервіс, Ви підтверджуєте, що прочитали, зрозуміли та погоджуєтесь дотримуватися цих Умов і нашого Повідомлення про конфіденційність, наведеного нижче. Якщо Ви не згодні, не використовуйте Сервіс.",
   banner:
     "⚠️ Сервіс є лише допоміжним засобом для безпеки заходу. Він **не** замінює місцеві служби екстреної допомоги. У будь-якій ситуації, що загрожує життю, негайно телефонуйте **112** (або на місцевий номер екстреної допомоги).",
   sections: [
@@ -344,7 +344,7 @@ const it: TermsDoc = {
   title: "Termini e condizioni",
   lastUpdated: `Ultimo aggiornamento: ${TERMS_LAST_UPDATED}`,
   intro:
-    "I presenti Termini e condizioni (i „**Termini**“) costituiscono un accordo vincolante tra te („**tu**“, il „**Partecipante**“ o l’„**Utente**“) e il gestore della piattaforma Paramedic Event (il „**Servizio**“, „**noi**“, „**ci**“ o „**nostro**“). Il Servizio è fornito per supportare la sicurezza sul percorso e il coordinamento dell’assistenza medica d’emergenza in eventi sportivi organizzati. Creando un profilo, partecipando a un evento o utilizzando in altro modo il Servizio, confermi di aver letto, compreso e accettato di essere vincolato dai presenti Termini e dalla nostra Informativa sulla privacy riportata di seguito. Se non accetti, non utilizzare il Servizio.",
+    "I presenti Termini e condizioni (i „**Termini**“) costituiscono un accordo vincolante tra te („**tu**“, il „**Partecipante**“ o l’„**Utente**“) e **Academy First Aid**, il gestore della piattaforma RaceSafe (il „**Servizio**“, „**noi**“, „**ci**“ o „**nostro**“). Il Servizio è fornito per supportare la sicurezza sul percorso e il coordinamento dell’assistenza medica d’emergenza in eventi sportivi organizzati. Creando un profilo, partecipando a un evento o utilizzando in altro modo il Servizio, confermi di aver letto, compreso e accettato di essere vincolato dai presenti Termini e dalla nostra Informativa sulla privacy riportata di seguito. Se non accetti, non utilizzare il Servizio.",
   banner:
     "⚠️ Il Servizio è solo un ausilio alla sicurezza dell’evento. **Non** sostituisce i servizi di emergenza locali. In qualsiasi situazione di pericolo di vita, chiama immediatamente il **112** (o il numero di emergenza locale).",
   sections: [
@@ -450,7 +450,7 @@ const de: TermsDoc = {
   title: "Allgemeine Geschäftsbedingungen",
   lastUpdated: `Zuletzt aktualisiert: ${TERMS_LAST_UPDATED}`,
   intro:
-    "Diese Allgemeinen Geschäftsbedingungen (die „**Bedingungen**“) bilden eine verbindliche Vereinbarung zwischen Ihnen („**Sie**“, der „**Teilnehmer**“ oder „**Nutzer**“) und dem Betreiber der Paramedic-Event-Plattform (der „**Dienst**“, „**wir**“, „**uns**“ oder „**unser**“). Der Dienst wird bereitgestellt, um die Sicherheit auf der Strecke und die Koordination der medizinischen Notfallversorgung bei organisierten Sportveranstaltungen zu unterstützen. Indem Sie ein Profil erstellen, an einer Veranstaltung teilnehmen oder den Dienst anderweitig nutzen, bestätigen Sie, dass Sie diese Bedingungen und unsere nachstehende Datenschutzerklärung gelesen und verstanden haben und sich damit einverstanden erklären. Wenn Sie nicht einverstanden sind, nutzen Sie den Dienst nicht.",
+    "Diese Allgemeinen Geschäftsbedingungen (die „**Bedingungen**“) bilden eine verbindliche Vereinbarung zwischen Ihnen („**Sie**“, der „**Teilnehmer**“ oder „**Nutzer**“) und **Academy First Aid**, dem Betreiber der RaceSafe-Plattform (der „**Dienst**“, „**wir**“, „**uns**“ oder „**unser**“). Der Dienst wird bereitgestellt, um die Sicherheit auf der Strecke und die Koordination der medizinischen Notfallversorgung bei organisierten Sportveranstaltungen zu unterstützen. Indem Sie ein Profil erstellen, an einer Veranstaltung teilnehmen oder den Dienst anderweitig nutzen, bestätigen Sie, dass Sie diese Bedingungen und unsere nachstehende Datenschutzerklärung gelesen und verstanden haben und sich damit einverstanden erklären. Wenn Sie nicht einverstanden sind, nutzen Sie den Dienst nicht.",
   banner:
     "⚠️ Der Dienst ist lediglich eine Hilfe für die Sicherheit der Veranstaltung. Er ersetzt **nicht** die örtlichen Rettungsdienste. Rufen Sie in jeder lebensbedrohlichen Situation sofort **112** (oder Ihre örtliche Notrufnummer) an.",
   sections: [
@@ -556,7 +556,7 @@ const ro: TermsDoc = {
   title: "Termeni și condiții",
   lastUpdated: `Ultima actualizare: ${TERMS_LAST_UPDATED}`,
   intro:
-    "Acești Termeni și condiții („**Termenii**“) constituie un acord obligatoriu între dumneavoastră („**dumneavoastră**“, „**Participantul**“ sau „**Utilizatorul**“) și operatorul platformei Paramedic Event („**Serviciul**“, „**noi**“, „**nouă**“ sau „**al nostru**“). Serviciul este furnizat pentru a sprijini siguranța pe traseu și coordonarea asistenței medicale de urgență la evenimente sportive organizate. Prin crearea unui profil, participarea la un eveniment sau utilizarea în alt mod a Serviciului, confirmați că ați citit, ați înțeles și sunteți de acord să respectați acești Termeni și Nota de informare privind confidențialitatea de mai jos. Dacă nu sunteți de acord, nu utilizați Serviciul.",
+    "Acești Termeni și condiții („**Termenii**“) constituie un acord obligatoriu între dumneavoastră („**dumneavoastră**“, „**Participantul**“ sau „**Utilizatorul**“) și **Academy First Aid**, operatorul platformei RaceSafe („**Serviciul**“, „**noi**“, „**nouă**“ sau „**al nostru**“). Serviciul este furnizat pentru a sprijini siguranța pe traseu și coordonarea asistenței medicale de urgență la evenimente sportive organizate. Prin crearea unui profil, participarea la un eveniment sau utilizarea în alt mod a Serviciului, confirmați că ați citit, ați înțeles și sunteți de acord să respectați acești Termeni și Nota de informare privind confidențialitatea de mai jos. Dacă nu sunteți de acord, nu utilizați Serviciul.",
   banner:
     "⚠️ Serviciul este doar un ajutor pentru siguranța evenimentului. **Nu** înlocuiește serviciile locale de urgență. În orice situație care vă pune viața în pericol, sunați imediat la **112** (sau la numărul local de urgență).",
   sections: [
@@ -662,7 +662,7 @@ const ru: TermsDoc = {
   title: "Условия и положения",
   lastUpdated: `Последнее обновление: ${TERMS_LAST_UPDATED}`,
   intro:
-    "Настоящие Условия и положения («**Условия**») представляют собой обязывающее соглашение между вами («**вы**», «**Участник**» или «**Пользователь**») и оператором платформы Paramedic Event («**Сервис**», «**мы**», «**нас**» или «**наш**»). Сервис предоставляется для обеспечения безопасности на трассе и координации экстренной медицинской помощи на организованных спортивных мероприятиях. Создавая профиль, присоединяясь к мероприятию или иным образом используя Сервис, вы подтверждаете, что прочитали, поняли и согласны соблюдать настоящие Условия и приведённое ниже Уведомление о конфиденциальности. Если вы не согласны, не используйте Сервис.",
+    "Настоящие Условия и положения («**Условия**») представляют собой обязывающее соглашение между вами («**вы**», «**Участник**» или «**Пользователь**») и **Academy First Aid**, оператором платформы RaceSafe («**Сервис**», «**мы**», «**нас**» или «**наш**»). Сервис предоставляется для обеспечения безопасности на трассе и координации экстренной медицинской помощи на организованных спортивных мероприятиях. Создавая профиль, присоединяясь к мероприятию или иным образом используя Сервис, вы подтверждаете, что прочитали, поняли и согласны соблюдать настоящие Условия и приведённое ниже Уведомление о конфиденциальности. Если вы не согласны, не используйте Сервис.",
   banner:
     "⚠️ Сервис является лишь вспомогательным средством для обеспечения безопасности мероприятия. Он **не** заменяет местные службы экстренной помощи. В любой угрожающей жизни ситуации немедленно звоните **112** (или по местному номеру экстренной помощи).",
   sections: [
@@ -768,7 +768,7 @@ const tr: TermsDoc = {
   title: "Şartlar ve Koşullar",
   lastUpdated: `Son güncelleme: ${TERMS_LAST_UPDATED}`,
   intro:
-    "İşbu Şartlar ve Koşullar (“**Şartlar**”), sizinle (“**siz**”, “**Katılımcı**” veya “**Kullanıcı**”) Paramedic Event platformunun işletmecisi (“**Hizmet**”, “**biz**”, “**bize**” veya “**bizim**”) arasında bağlayıcı bir sözleşme oluşturur. Hizmet, düzenlenen spor etkinliklerinde parkur güvenliğini ve acil tıbbi koordinasyonu desteklemek amacıyla sunulur. Bir profil oluşturarak, bir etkinliğe katılarak veya Hizmeti başka bir şekilde kullanarak, işbu Şartları ve aşağıda yer alan Gizlilik Bildirimini okuduğunuzu, anladığınızı ve bunlarla bağlı olmayı kabul ettiğinizi onaylarsınız. Kabul etmiyorsanız Hizmeti kullanmayın.",
+    "İşbu Şartlar ve Koşullar (“**Şartlar**”), sizinle (“**siz**”, “**Katılımcı**” veya “**Kullanıcı**”) RaceSafe platformunun işletmecisi **Academy First Aid** (“**Hizmet**”, “**biz**”, “**bize**” veya “**bizim**”) arasında bağlayıcı bir sözleşme oluşturur. Hizmet, düzenlenen spor etkinliklerinde parkur güvenliğini ve acil tıbbi koordinasyonu desteklemek amacıyla sunulur. Bir profil oluşturarak, bir etkinliğe katılarak veya Hizmeti başka bir şekilde kullanarak, işbu Şartları ve aşağıda yer alan Gizlilik Bildirimini okuduğunuzu, anladığınızı ve bunlarla bağlı olmayı kabul ettiğinizi onaylarsınız. Kabul etmiyorsanız Hizmeti kullanmayın.",
   banner:
     "⚠️ Hizmet yalnızca etkinlik güvenliğine yardımcı bir araçtır. Yerel acil servislerin yerine **geçmez**. Hayati tehlike arz eden her durumda derhal **112**’yi (veya yerel acil durum numaranızı) arayın.",
   sections: [
@@ -874,7 +874,7 @@ const el: TermsDoc = {
   title: "Όροι και Προϋποθέσεις",
   lastUpdated: `Τελευταία ενημέρωση: ${TERMS_LAST_UPDATED}`,
   intro:
-    "Οι παρόντες Όροι και Προϋποθέσεις (οι «**Όροι**») συνιστούν δεσμευτική συμφωνία ανάμεσα σε εσάς («**εσείς**», ο «**Συμμετέχων**» ή ο «**Χρήστης**») και τον φορέα εκμετάλλευσης της πλατφόρμας Paramedic Event (η «**Υπηρεσία**», «**εμείς**», «**εμάς**» ή «**μας**»). Η Υπηρεσία παρέχεται για την υποστήριξη της ασφάλειας στη διαδρομή και του συντονισμού της επείγουσας ιατρικής βοήθειας σε οργανωμένες αθλητικές εκδηλώσεις. Δημιουργώντας προφίλ, συμμετέχοντας σε εκδήλωση ή χρησιμοποιώντας με άλλον τρόπο την Υπηρεσία, επιβεβαιώνετε ότι έχετε διαβάσει, κατανοήσει και αποδέχεστε να δεσμεύεστε από τους παρόντες Όρους και από την Ειδοποίηση Απορρήτου που παρατίθεται παρακάτω. Αν δεν συμφωνείτε, μην χρησιμοποιείτε την Υπηρεσία.",
+    "Οι παρόντες Όροι και Προϋποθέσεις (οι «**Όροι**») συνιστούν δεσμευτική συμφωνία ανάμεσα σε εσάς («**εσείς**», ο «**Συμμετέχων**» ή ο «**Χρήστης**») και την **Academy First Aid**, τον φορέα εκμετάλλευσης της πλατφόρμας RaceSafe (η «**Υπηρεσία**», «**εμείς**», «**εμάς**» ή «**μας**»). Η Υπηρεσία παρέχεται για την υποστήριξη της ασφάλειας στη διαδρομή και του συντονισμού της επείγουσας ιατρικής βοήθειας σε οργανωμένες αθλητικές εκδηλώσεις. Δημιουργώντας προφίλ, συμμετέχοντας σε εκδήλωση ή χρησιμοποιώντας με άλλον τρόπο την Υπηρεσία, επιβεβαιώνετε ότι έχετε διαβάσει, κατανοήσει και αποδέχεστε να δεσμεύεστε από τους παρόντες Όρους και από την Ειδοποίηση Απορρήτου που παρατίθεται παρακάτω. Αν δεν συμφωνείτε, μην χρησιμοποιείτε την Υπηρεσία.",
   banner:
     "⚠️ Η Υπηρεσία αποτελεί μόνο βοήθημα για την ασφάλεια της εκδήλωσης. **Δεν** αντικαθιστά τις τοπικές υπηρεσίες έκτακτης ανάγκης. Σε κάθε απειλητική για τη ζωή κατάσταση, καλέστε αμέσως το **112** (ή τον τοπικό αριθμό έκτακτης ανάγκης).",
   sections: [

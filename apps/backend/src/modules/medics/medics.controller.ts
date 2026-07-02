@@ -11,6 +11,15 @@ import { RegisterParticipantDto } from "./dto/register-participant.dto";
 import { MedicsService } from "./medics.service";
 import { IncidentsService } from "../incidents/incidents.service";
 
+/** "external_ivan_petrov" → "Ivan Petrov" — readable fallback for external
+ *  guests (their slugged userId is derived from the name they typed). */
+function externalIdToName(medicId: string): string | null {
+  if (!medicId.startsWith("external_")) return null;
+  const words = medicId.slice("external_".length).split("_").filter(Boolean);
+  if (words.length === 0) return null;
+  return words.map((w) => w[0]!.toUpperCase() + w.slice(1)).join(" ");
+}
+
 @Controller("events/:eventId")
 @UseGuards(AuthGuard)
 export class MedicsController {
@@ -49,13 +58,17 @@ export class MedicsController {
   async postMedicLocation(
     @Param("eventId") eventId: string,
     @Param("medicId") medicId: string,
-    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number; timestamp?: string },
+    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number; timestamp?: string; name?: string },
   ) {
+    // External guests aren't on the roster, so getMedicById returns null for
+    // them — fall back to the name the app sends, then to a humanised form of
+    // the "external_ivan_petrov" userId, never the raw id (it used to render
+    // as "external_ivan_petrov" with an "E" avatar on the dashboard).
     const medic = await this.medicsService.getMedicById(eventId, medicId);
     await this.medicsService.upsertMedicLocation({
       eventId,
       medicId,
-      name: medic?.name ?? medicId,
+      name: medic?.name ?? (body.name?.trim() || undefined) ?? externalIdToName(medicId) ?? medicId,
       lat: body.lat,
       lng: body.lng,
       accuracy: body.accuracy,

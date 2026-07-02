@@ -10,7 +10,7 @@ import type { MedicState } from '@events/contracts'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import type { LiveIncident } from '@/hooks/useLiveMap'
-import type { StyleSpecification } from 'maplibre-gl'
+import type { StyleSpecification, TerrainSpecification } from 'maplibre-gl'
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 
@@ -35,6 +35,13 @@ function styleFor(base: BaseLayer): string | StyleSpecification {
     return rasterStyle('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', '© Esri')
   return MAP_STYLE
 }
+
+// 3D terrain elevation: keyless AWS Terrain Tiles (Terrarium encoding), enabled
+// while the "terrain" base layer is selected.
+const TERRAIN_DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+const TERRAIN_EXAGGERATION = 1.3
+/** Pitch applied when switching into the 3D terrain view. */
+const TERRAIN_PITCH = 60
 
 export interface TrackLayer {
   id: string
@@ -1223,6 +1230,22 @@ export default function MapClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget?.nonce])
 
+  // Tilt into a 3D perspective when the terrain base layer is picked, and flatten
+  // back to a top-down view when leaving it (terrain looks broken at pitch 0 only
+  // in the sense that you can't see it — the tilt is what sells the relief).
+  const is3dTerrain = baseLayer === 'terrain'
+  // `null` (not undefined) is required to actively clear terrain when leaving the
+  // terrain layer — undefined means "don't touch". The prop type only admits
+  // undefined, but the runtime handles null (setTerrain(null)).
+  const terrainProp = (
+    is3dTerrain ? { source: 'terrain-dem', exaggeration: TERRAIN_EXAGGERATION } : null
+  ) as TerrainSpecification | undefined
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    map.easeTo({ pitch: is3dTerrain ? TERRAIN_PITCH : 0, duration: 800 })
+  }, [is3dTerrain])
+
   const boundsKey = fitBounds ? JSON.stringify(fitBounds) : null
 
   // Aggregate runner locations into ~100m grid cells, weighting each ping by
@@ -1322,6 +1345,8 @@ export default function MapClient({
       ref={mapRef}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
       mapStyle={styleFor(baseLayer)}
+      terrain={terrainProp}
+      maxPitch={70}
       style={{ width: '100%', height: '100%' }}
       cursor={interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
       onClick={handleClick}
@@ -1334,7 +1359,19 @@ export default function MapClient({
       }}
     >
       {showControls && (
-        <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={false} />
+        <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={is3dTerrain} />
+      )}
+
+      {/* Elevation source for the 3D terrain view (keyless AWS Terrarium DEM). */}
+      {is3dTerrain && (
+        <Source
+          id="terrain-dem"
+          type="raster-dem"
+          tiles={[TERRAIN_DEM_TILES]}
+          encoding="terrarium"
+          tileSize={256}
+          maxzoom={15}
+        />
       )}
 
       {/* Track layers */}

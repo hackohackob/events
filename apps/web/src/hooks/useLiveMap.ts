@@ -125,19 +125,30 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
   useEffect(() => {
     if (!eventId || !enabled) return
 
-    getActiveMedics(eventId)
-      .then((initial) => {
-        initial.forEach((m) => medicsRef.current.set(m.medicId, m))
-        scheduleSync()
-      })
-      .catch(() => {/* non-critical */})
+    const refetchSnapshot = () => {
+      getActiveMedics(eventId)
+        .then((initial) => {
+          initial.forEach((m) => medicsRef.current.set(m.medicId, m))
+          scheduleSync()
+        })
+        .catch(() => {/* non-critical */})
 
-    listIncidents(eventId)
-      .then((initial) => {
-        initial.forEach((inc) => { if (inc.id) incidentsRef.current.set(inc.id, toLiveIncident(inc)) })
-        scheduleSync()
-      })
-      .catch(() => {/* non-critical */})
+      listIncidents(eventId)
+        .then((initial) => {
+          initial.forEach((inc) => { if (inc.id) incidentsRef.current.set(inc.id, toLiveIncident(inc)) })
+          scheduleSync()
+        })
+        .catch(() => {/* non-critical */})
+    }
+
+    refetchSnapshot()
+
+    // WS events missed while the tab was hidden/unfocused never replay, so
+    // refetch the full snapshot whenever the dashboard regains focus.
+    const onFocus = () => refetchSnapshot()
+    const onVisible = () => { if (document.visibilityState === 'visible') refetchSnapshot() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
 
     const socket = io(wsUrl, {
       transports: ['websocket'],
@@ -220,6 +231,8 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     })
 
     return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
       socket.disconnect()
       socketRef.current = null
       setConnected(false)
