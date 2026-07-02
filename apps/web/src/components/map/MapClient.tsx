@@ -10,7 +10,7 @@ import type { MedicState } from '@events/contracts'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import type { LiveIncident } from '@/hooks/useLiveMap'
-import type { StyleSpecification, TerrainSpecification } from 'maplibre-gl'
+import type { StyleSpecification } from 'maplibre-gl'
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 
@@ -26,22 +26,55 @@ function rasterStyle(tiles: string, attribution: string): StyleSpecification {
   }
 }
 
-/** Base map style per selected layer. Satellite + terrain use keyless Esri
- *  rasters; streets is the default Carto vector style. */
-function styleFor(base: BaseLayer): string | StyleSpecification {
-  if (base === 'satellite')
-    return rasterStyle('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', '© Esri, Maxar')
-  if (base === 'terrain')
-    return rasterStyle('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', '© Esri')
-  return MAP_STYLE
-}
-
 // 3D terrain elevation: keyless AWS Terrain Tiles (Terrarium encoding), enabled
 // while the "terrain" base layer is selected.
 const TERRAIN_DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
-const TERRAIN_EXAGGERATION = 1.3
+const TERRAIN_EXAGGERATION = 1.6
 /** Pitch applied when switching into the 3D terrain view. */
 const TERRAIN_PITCH = 60
+
+// Built once at module level: react-map-gl compares mapStyle by REFERENCE, so a
+// fresh object per render triggers a full setStyle() reload on every re-render
+// (visible glitch, and a maplibre "shaderPreludeCode" crash when the 3D terrain
+// depth pass renders mid style-swap).
+const SATELLITE_STYLE = rasterStyle(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  '© Esri, Maxar',
+)
+// The DEM source + `terrain` live INSIDE the style JSON — not as a <Source>
+// child + `terrain` prop. react-map-gl re-attaches style components right after
+// the style loads, and terrain attached before its just-added DEM source has
+// loaded makes the first wave of DEM tiles error pre-fetch; errored terrain
+// tiles are never retried, so the map silently renders flat. Baked into the
+// style, maplibre sequences source load → terrain itself.
+const TERRAIN_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    base: {
+      type: 'raster',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
+      attribution: '© Esri',
+    },
+    'terrain-dem': {
+      type: 'raster-dem',
+      tiles: [TERRAIN_DEM_TILES],
+      encoding: 'terrarium',
+      tileSize: 256,
+      maxzoom: 15,
+    },
+  },
+  layers: [{ id: 'base', type: 'raster', source: 'base' }],
+  terrain: { source: 'terrain-dem', exaggeration: TERRAIN_EXAGGERATION },
+}
+
+/** Base map style per selected layer. Satellite + terrain use keyless Esri
+ *  rasters; streets is the default Carto vector style. */
+function styleFor(base: BaseLayer): string | StyleSpecification {
+  if (base === 'satellite') return SATELLITE_STYLE
+  if (base === 'terrain') return TERRAIN_STYLE
+  return MAP_STYLE
+}
 
 export interface TrackLayer {
   id: string
@@ -1234,17 +1267,27 @@ export default function MapClient({
   // back to a top-down view when leaving it (terrain looks broken at pitch 0 only
   // in the sense that you can't see it — the tilt is what sells the relief).
   const is3dTerrain = baseLayer === 'terrain'
-  // `null` (not undefined) is required to actively clear terrain when leaving the
-  // terrain layer — undefined means "don't touch". The prop type only admits
-  // undefined, but the runtime handles null (setTerrain(null)).
-  const terrainProp = (
-    is3dTerrain ? { source: 'terrain-dem', exaggeration: TERRAIN_EXAGGERATION } : null
-  ) as TerrainSpecification | undefined
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
     map.easeTo({ pitch: is3dTerrain ? TERRAIN_PITCH : 0, duration: 800 })
   }, [is3dTerrain])
+
+  // The base style actually applied to the map lags `baseLayer` by one commit
+  // when LEAVING terrain: 3D terrain must be torn down (setTerrain(null) is
+  // synchronous) before the style swap, or maplibre's terrain depth pass renders
+  // against the half-replaced style and crashes ("shaderPreludeCode" TypeError).
+  const [appliedBaseLayer, setAppliedBaseLayer] = useState(baseLayer)
+  useEffect(() => {
+    if (baseLayer === appliedBaseLayer) return
+    if (appliedBaseLayer === 'terrain') {
+      try {
+        const map = mapRef.current?.getMap()
+        if (map?.getTerrain()) map.setTerrain(null)
+      } catch {/* style mid-load — swapping it out is safe anyway */}
+    }
+    setAppliedBaseLayer(baseLayer)
+  }, [baseLayer, appliedBaseLayer])
 
   const boundsKey = fitBounds ? JSON.stringify(fitBounds) : null
 
@@ -1344,8 +1387,7 @@ export default function MapClient({
     <MapGL
       ref={mapRef}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
-      mapStyle={styleFor(baseLayer)}
-      terrain={terrainProp}
+      mapStyle={styleFor(appliedBaseLayer)}
       maxPitch={70}
       style={{ width: '100%', height: '100%' }}
       cursor={interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
@@ -1360,18 +1402,6 @@ export default function MapClient({
     >
       {showControls && (
         <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={is3dTerrain} />
-      )}
-
-      {/* Elevation source for the 3D terrain view (keyless AWS Terrarium DEM). */}
-      {is3dTerrain && (
-        <Source
-          id="terrain-dem"
-          type="raster-dem"
-          tiles={[TERRAIN_DEM_TILES]}
-          encoding="terrarium"
-          tileSize={256}
-          maxzoom={15}
-        />
       )}
 
       {/* Track layers */}
