@@ -48,8 +48,10 @@ export default function ParticipantsPanel({
   /** Expand + scroll to + flash a participant (e.g. their map dot was clicked). */
   highlight?: { userId: string; nonce: number } | null
 }) {
-  const [sortKey, setSortKey] = useState<SortKey>('bib')
-  const [sortAsc, setSortAsc] = useState(true)
+  // Default: freshest fix on top — during a race "who is reporting right now"
+  // matters more than roster order (BIB/name are one tap away).
+  const [sortKey, setSortKey] = useState<SortKey>('recent')
+  const [sortAsc, setSortAsc] = useState(false)
   const [grouped, setGrouped] = useState(false)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())

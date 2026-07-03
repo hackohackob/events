@@ -25,6 +25,13 @@
       "runtimeArgs": ["run", "dev:runner"],
       "port": 8506,
       "autoPort": false
+    },
+    {
+      "name": "runner-alt",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "apps/runner", "--port", "8516", "--host"],
+      "port": 8516,
+      "autoPort": false
     }
   ]
 }

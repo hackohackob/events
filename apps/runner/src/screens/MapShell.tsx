@@ -136,7 +136,12 @@ export function MapShell({
       fetchMyIncidents()
         .then((list) => {
           if (!alive) return;
-          const open = list.find((i) => i.status !== "resolved" && i.status !== "closed");
+          // "archived" is set by the dashboard's archive action — treat it as
+          // done just like resolved/closed, or the "view your alert" button
+          // would stick around forever after the coordinator archives it.
+          const open = list.find(
+            (i) => i.status !== "resolved" && i.status !== "closed" && i.status !== "archived",
+          );
           setActiveIncident(open ?? null);
         })
         .catch(() => undefined);

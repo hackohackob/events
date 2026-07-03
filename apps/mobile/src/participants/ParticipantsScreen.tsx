@@ -60,8 +60,10 @@ export function ParticipantsScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("bib");
-  const [sortAsc, setSortAsc] = useState(true);
+  // Default: freshest fix on top — during a race "who is reporting right now"
+  // matters more than roster order (BIB/name are one tap away).
+  const [sortKey, setSortKey] = useState<SortKey>("recent");
+  const [sortAsc, setSortAsc] = useState(false);
   const [grouped, setGrouped] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -147,7 +149,8 @@ export function ParticipantsScreen({
     if (sortKey === key) setSortAsc((v) => !v);
     else {
       setSortKey(key);
-      setSortAsc(true);
+      // "Last fix" starts descending (latest fixes on top); text/number keys ascending.
+      setSortAsc(key !== "recent");
     }
   };
 

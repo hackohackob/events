@@ -59,7 +59,9 @@ services:
     depends_on:
       - api
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8504"]
+      # 127.0.0.1, not localhost: busybox wget prefers ::1 but nginx in the
+      # image only listens on IPv4, so "localhost" reports unhealthy forever.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8504"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -75,7 +77,8 @@ services:
     depends_on:
       - api
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8506"]
+      # 127.0.0.1, not localhost — same IPv6 pitfall as the simulator above.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8506"]
       interval: 15s
       timeout: 5s
       retries: 5
