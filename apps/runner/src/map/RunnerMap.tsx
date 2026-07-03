@@ -219,6 +219,12 @@ export function RunnerMap({
   const weatherLayerIdsRef = useRef<Set<string>>(new Set());
   const weatherUrlRef = useRef<Record<string, string>>({});
   const [ready, setReady] = useState(false);
+  // Bumped to tear down and rebuild the map after unrecoverable WebGL context
+  // loss (PWA frozen in the background long enough for the GPU context to be
+  // reclaimed — the canvas comes back black and stays black otherwise).
+  const [mapEpoch, setMapEpoch] = useState(0);
+  // Camera to restore on a context-loss rebuild, so the view doesn't jump.
+  const savedCameraRef = useRef<{ center: maplibregl.LngLat; zoom: number; bearing: number; pitch: number } | null>(null);
   const fittedRef = useRef(false);
   const centeredOnFixRef = useRef(false);
   // Latest fix without re-triggering the recenter effect on every GPS update.
@@ -244,21 +250,70 @@ export function RunnerMap({
         : coords && coords.length
           ? coords[Math.floor(coords.length / 2)]
           : [23.32, 42.7];
+    const saved = savedCameraRef.current;
+    savedCameraRef.current = null;
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: MAP_STYLE,
-      center,
-      zoom: editablePin ? 15.5 : 13.5,
+      center: saved ? saved.center : center,
+      zoom: saved ? saved.zoom : editablePin ? 15.5 : 13.5,
+      bearing: saved?.bearing ?? 0,
+      pitch: saved?.pitch ?? 0,
       attributionControl: false,
       interactive,
     });
     mapRef.current = map;
     if (fix) centeredOnFixRef.current = true;
+    if (saved) {
+      // Rebuild after context loss: keep the restored camera — don't refit the
+      // route or fly to the fix as if this were a fresh open.
+      fittedRef.current = true;
+      centeredOnFixRef.current = true;
+    }
     map.on("load", () => {
       map.getCanvas().style.filter = baseLayer === "map" ? "var(--map-filter)" : "none";
       setReady(true);
     });
+
+    // WebGL context-loss recovery. When the PWA is frozen in the background the
+    // browser can reclaim the GPU context; if it isn't restored shortly after
+    // resume, the canvas stays black forever. Detect that (context-lost event
+    // with no restore, or returning to the foreground with a dead context) and
+    // rebuild the map in place at the same camera.
+    const contextDead = () => {
+      const canvas = map.getCanvas();
+      const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+      return !gl || gl.isContextLost();
+    };
+    const rebuild = () => {
+      savedCameraRef.current = {
+        center: map.getCenter(),
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      };
+      setMapEpoch((e) => e + 1);
+    };
+    let lostTimer: number | undefined;
+    const onContextLost = () => {
+      window.clearTimeout(lostTimer);
+      lostTimer = window.setTimeout(() => {
+        // Hidden pages can't render anyway; the visibility handler below picks
+        // this up on return so we don't rebuild while frozen.
+        if (!document.hidden && contextDead()) rebuild();
+      }, 2000);
+    };
+    const onContextRestored = () => window.clearTimeout(lostTimer);
+    map.on("webglcontextlost", onContextLost);
+    map.on("webglcontextrestored", onContextRestored);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && contextDead()) rebuild();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
+      window.clearTimeout(lostTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
       map.remove();
       mapRef.current = null;
       setReady(false);
@@ -268,11 +323,14 @@ export function RunnerMap({
       scrubMarkerRef.current = null;
       pinMarkerRef.current = null;
       markersRef.current = [];
+      weatherMarkersRef.current = [];
+      weatherLayerIdsRef.current.clear();
+      weatherUrlRef.current = {};
       fittedRef.current = false;
       centeredOnFixRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapEpoch]);
 
   // Draw / update route — runs once the map is ready and whenever coords change,
   // so it can't lose a coords update that arrived before load.
@@ -354,7 +412,7 @@ export function RunnerMap({
           .addTo(map),
       );
     }
-  }, [medics, pois]);
+  }, [medics, pois, mapEpoch]);
 
   // YOU marker (pulsing) — recenter the first time a fix arrives.
   useEffect(() => {
@@ -381,7 +439,7 @@ export function RunnerMap({
       centeredOnFixRef.current = true;
       map.flyTo({ center: [fix.lng, fix.lat], zoom: 14.5, duration: 600 });
     }
-  }, [fix, youLabel, editablePin]);
+  }, [fix, youLabel, editablePin, mapEpoch]);
 
   // Editable incident pin (draggable, clamped to pinMaxMeters from origin).
   useEffect(() => {
@@ -421,7 +479,7 @@ export function RunnerMap({
       map.setCenter(editablePin);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editablePin, pinDraggable]);
+  }, [editablePin, pinDraggable, mapEpoch]);
 
   // Allowed-radius circle for the editable pin (only while it's draggable).
   useEffect(() => {
@@ -463,7 +521,7 @@ export function RunnerMap({
       map.fitBounds(bounds, { padding: fitPad(), duration: 300, maxZoom: map.getZoom() });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrubPoint]);
+  }, [scrubPoint, mapEpoch]);
 
   // Recenter ONLY when the button is pressed (recenterSignal changes) — not on
   // every GPS update. Reading the fix from a ref keeps the map free to pan so
@@ -595,7 +653,7 @@ export function RunnerMap({
         new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map),
       );
     }
-  }, [weatherPoints]);
+  }, [weatherPoints, mapEpoch]);
 
   return <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />;
 }

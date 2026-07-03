@@ -96,10 +96,24 @@ export function useGeolocation(onStream?: (fix: Fix) => void, streamEveryMs = 18
         timeout: 15_000,
       });
 
+    // The page freezes while locked/backgrounded (no background geolocation on
+    // the web), so a runner's dot can only refresh while they're looking at the
+    // phone. Make every unlock count: on return to foreground, poll right away
+    // (instead of waiting out the suspended timer, up to 45 s) and reset the
+    // stream throttle so that fix is pushed to the dashboard immediately.
+    const onVisible = () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      lastStreamRef.current = 0;
+      if (timer) clearTimeout(timer);
+      poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     // Fast first fix, then poll on an adaptive cadence.
     poll();
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
       if (timer) clearTimeout(timer);
     };
   }, [streamEveryMs]);
