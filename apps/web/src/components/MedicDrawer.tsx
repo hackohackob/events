@@ -8,6 +8,7 @@ import type { LiveIncident } from '@/hooks/useLiveMap'
 const STATUS_STYLE: Record<string, { label: string; color: string }> = {
   available:  { label: 'Available',  color: '#22c55e' },
   stationary: { label: 'Stationary', color: '#22c55e' },
+  sweeper:    { label: 'Sweeper',    color: '#38bdf8' },
   rest:       { label: 'Rest',       color: '#a78bfa' },
   going_to:   { label: 'En route',   color: '#f59e0b' },
 }

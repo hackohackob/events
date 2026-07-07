@@ -13,6 +13,7 @@ import type {
   TrackGeoJson,
 } from "./contracts-shim";
 import { apiGet, apiPatch, apiPost, apiPostForm } from "./client";
+import { compressImage } from "../lib/compress-image";
 
 export async function joinEvent(payload: JoinEventRequest) {
   return apiPost<{ token: string; session: SessionPayload }>("/auth/join", payload);
@@ -72,8 +73,11 @@ export async function uploadIncidentPhoto(
   file: File | Blob,
   opts?: { postToChat?: boolean },
 ) {
+  // Downscale + re-encode client-side — camera originals are 5–15 MB, which is
+  // hopeless over course mobile data. Falls back to the original on failure.
+  const photo = await compressImage(file);
   const form = new FormData();
-  form.append("photo", file);
+  form.append("photo", photo, photo === file && file instanceof File ? file.name : "photo.jpg");
   // Flag photos added after the report so the backend also drops them into the
   // incident chat (event log), not just the gallery.
   if (opts?.postToChat) form.append("postToChat", "true");

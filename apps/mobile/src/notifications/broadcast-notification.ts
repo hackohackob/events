@@ -1,4 +1,5 @@
 import notifee, { AndroidCategory, AndroidGroupAlertBehavior, AndroidImportance, AndroidVisibility } from "@notifee/react-native";
+import * as Notifications from "expo-notifications";
 import { AppState, Platform } from "react-native";
 import { NOTIFICATION_GROUP_ID } from "./foreground-notification";
 import { debugLog } from "../debug/debug-log";
@@ -6,36 +7,57 @@ import { debugLog } from "../debug/debug-log";
 const ALERT_CHANNEL_ID = "alerts";
 /**
  * Alarm-grade channel for incident alerts: max importance, bypasses Do Not
- * Disturb (honored once the user allows it for the app/channel), strong
- * vibration. The backend sends remote pushes on this same channel id so
- * closed-app deliveries behave identically.
+ * Disturb (honored once the user grants the app DND access), strong vibration.
+ * The backend sends remote pushes on this same channel id so closed-app
+ * deliveries behave identically.
+ *
+ * v5: created via expo-notifications (NOT notifee) so the siren gets
+ * AudioAttributes USAGE_ALARM — it plays on the ALARM volume stream, which
+ * stays audible when the ring/notification volume is turned down. Notifee
+ * still *displays* on this channel (channels are app-global).
  */
-export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v4";
-let channelsEnsured = false;
+export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v5";
+let alertChannelEnsured = false;
 
 async function ensureChannels(): Promise<void> {
-  if (channelsEnsured || Platform.OS !== "android") return;
-  await notifee.createChannel({
-    id: ALERT_CHANNEL_ID,
-    name: "Alerts & Broadcasts",
-    importance: AndroidImportance.HIGH, // heads-up + sound
-    visibility: AndroidVisibility.PUBLIC,
-  });
-  await notifee.createChannel({
-    id: INCIDENT_ALARM_CHANNEL_ID,
+  if (Platform.OS !== "android") return;
+  if (!alertChannelEnsured) {
+    await notifee.createChannel({
+      id: ALERT_CHANNEL_ID,
+      name: "Alerts & Broadcasts",
+      importance: AndroidImportance.HIGH, // heads-up + sound
+      visibility: AndroidVisibility.PUBLIC,
+    });
+    alertChannelEnsured = true;
+  }
+  await ensureIncidentAlarmChannel();
+}
+
+/**
+ * (Re-)create the alarm channel. Runs on every alarm rather than once:
+ * `bypassDnd` is silently stripped by Android while the app lacks DND access,
+ * but an app WITH access may update it on an existing channel — so re-applying
+ * here picks the flag up as soon as the user grants access in settings.
+ */
+export async function ensureIncidentAlarmChannel(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  await Notifications.setNotificationChannelAsync(INCIDENT_ALARM_CHANNEL_ID, {
     name: "Incident alarms",
     description: "Critical incident alerts — rings and vibrates even in Do Not Disturb.",
-    importance: AndroidImportance.HIGH,
-    visibility: AndroidVisibility.PUBLIC,
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
     // Bundled siren (assets/sounds/incident_alarm.wav → res/raw) — plays for
     // remote pushes too, where a looping sound isn't possible.
-    sound: "incident_alarm",
-    vibration: true,
+    sound: "incident_alarm.wav",
+    audioAttributes: {
+      usage: Notifications.AndroidAudioUsage.ALARM,
+      contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+    },
+    enableVibrate: true,
     vibrationPattern: [300, 600, 300, 600, 300, 600],
-    lights: true,
+    enableLights: true,
   });
-  channelsEnsured = true;
 }
 
 /**

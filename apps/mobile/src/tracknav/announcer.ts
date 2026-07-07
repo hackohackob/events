@@ -10,6 +10,14 @@
 import * as Speech from "expo-speech";
 import * as Haptics from "expo-haptics";
 import type { TrackInstruction } from "./turn-detection";
+import type { ManeuverKind } from "../navigation/types";
+
+/** Minimal instruction shape the announcer needs — satisfied both by track
+ *  instructions and by GraphHopper route instructions (regular navigation). */
+export interface SpokenInstruction {
+  maneuver: ManeuverKind;
+  text: string;
+}
 
 const LANGUAGE = "en-US";
 const MIN_GAP_MS = 4_000;
@@ -33,13 +41,13 @@ function spokenDistance(meters: number): string {
 }
 
 export interface Announcer {
-  /** Session opener: "Following <label>, 12.4 kilometers." */
-  start(label: string, totalMeters: number): void;
+  /** Session opener: "<verb> <label>, 12.4 kilometers." (verb defaults to "Following"). */
+  start(label: string, totalMeters: number, verb?: string): void;
   /** Per-fix tick — decides whether an early / now / arrive cue is due. */
   onProgress(input: {
     toManeuverMeters: number;
     instructionIndex: number;
-    instructions: TrackInstruction[];
+    instructions: SpokenInstruction[];
     remainingMeters: number;
     speedMps: number | null;
     atMs: number;
@@ -47,6 +55,8 @@ export interface Announcer {
   offTrack(distanceBackMeters: number): void;
   backOnTrack(): void;
   loopSkipped(jumpMeters: number): void;
+  /** A fresh route was computed mid-navigation: forget one-shot cues + announce. */
+  rerouted(): void;
   paused(): void;
   resumed(): void;
   /** After a loop-skip jump: forget cues behind the new position, re-arm ahead. */
@@ -74,11 +84,11 @@ export function createAnnouncer(): Announcer {
   };
 
   return {
-    start(label, totalMeters) {
+    start(label, totalMeters, verb = "Following") {
       announced = new Set();
       announcedArrive = false;
       announcedOffTrack = false;
-      speak(`Following ${label}, ${spokenDistance(totalMeters)}.`, { urgent: true });
+      speak(`${verb} ${label}, ${spokenDistance(totalMeters)}.`, { urgent: true });
     },
 
     onProgress({ toManeuverMeters, instructionIndex, instructions, remainingMeters, speedMps, atMs }) {
@@ -128,6 +138,14 @@ export function createAnnouncer(): Announcer {
       announcedOffTrack = false;
       speak(`Loop skipped. Continuing ${spokenDistance(jumpMeters)} ahead.`, { urgent: true });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+
+    rerouted() {
+      // Instruction indexes refer to the new route now — drop stale one-shots.
+      announced = new Set();
+      announcedArrive = false;
+      announcedOffTrack = false;
+      speak("Route recalculated.", { urgent: true });
     },
 
     paused() {

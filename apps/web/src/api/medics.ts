@@ -28,7 +28,7 @@ export async function assignMedicDestination(
 export async function updateMedicStatus(
   eventId: string,
   medicId: string,
-  status: "available" | "rest",
+  status: "available" | "stationary" | "rest" | "sweeper",
 ): Promise<MedicState> {
   const { data } = await client.patch<MedicState>(`/events/${eventId}/medics/${medicId}/status`, { status });
   return data;

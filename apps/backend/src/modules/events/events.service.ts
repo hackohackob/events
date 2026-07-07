@@ -47,6 +47,23 @@ export interface StoredAssignment {
   description?: string;
 }
 
+/**
+ * Hand-drawn team zone (danger area, sector …). Kept OUT of EventSummary /
+ * findById responses — those are served to runners; zones are medic-only and
+ * flow through the dedicated /events/zones endpoints + the :incidents room.
+ */
+export interface StoredZone {
+  id: string;
+  name: string;
+  color: string;
+  /** Polygon ring, [lng, lat]; the closing point is implicit. */
+  polygon: [number, number][];
+  visible: boolean;
+  alarm: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredLocation {
   name: string;
   lng: number;
@@ -67,6 +84,8 @@ export interface EventRecord {
   /** Daily window (Europe/Sofia) outside which medic locations are coordinator-only. */
   activeHours?: EventActiveHours;
   days: StoredDay[];
+  /** Medic-only map regions — never included in summaries served to runners. */
+  zones?: StoredZone[];
 }
 
 export interface EventSummary {
@@ -530,6 +549,79 @@ export class EventsService implements OnModuleInit {
       }
     }
     throw new NotFoundException(`POI ${poiId} not found`);
+  }
+
+  // ─── Zones (medic-only map regions) ────────────────────────────────────────
+  // Realtime zone events go to the `:incidents` room — joined only by medics,
+  // paramedics and coordinators — so participants never receive them.
+
+  listZonesForEvent(eventId: string): StoredZone[] {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    return event.zones ?? [];
+  }
+
+  async createZone(
+    eventId: string,
+    input: { name: string; color?: string; polygon: [number, number][]; visible?: boolean; alarm?: boolean },
+  ): Promise<StoredZone> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (!Array.isArray(input.polygon) || input.polygon.length < 3) {
+      throw new ConflictException("A zone needs at least 3 points");
+    }
+    const now = new Date().toISOString();
+    const zone: StoredZone = {
+      id: randomUUID(),
+      name: input.name?.trim() || "Zone",
+      color: input.color?.trim() || "#f59e0b",
+      polygon: input.polygon.map(([lng, lat]) => [lng, lat] as [number, number]),
+      // Off by default — the team turns a zone on when it becomes relevant.
+      visible: input.visible ?? false,
+      alarm: input.alarm ?? false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    event.zones = [...(event.zones ?? []), zone];
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, { type: "zone.created", payload: zone });
+    return zone;
+  }
+
+  async updateZone(
+    eventId: string,
+    zoneId: string,
+    patch: { name?: string; color?: string; polygon?: [number, number][]; visible?: boolean; alarm?: boolean },
+  ): Promise<StoredZone> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    const zone = event.zones?.find((z) => z.id === zoneId);
+    if (!zone) throw new NotFoundException(`Zone ${zoneId} not found`);
+    if (patch.name !== undefined) zone.name = patch.name.trim() || zone.name;
+    if (patch.color !== undefined) zone.color = patch.color.trim() || zone.color;
+    if (Array.isArray(patch.polygon) && patch.polygon.length >= 3) {
+      zone.polygon = patch.polygon.map(([lng, lat]) => [lng, lat] as [number, number]);
+    }
+    if (typeof patch.visible === "boolean") zone.visible = patch.visible;
+    if (typeof patch.alarm === "boolean") zone.alarm = patch.alarm;
+    zone.updatedAt = new Date().toISOString();
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, { type: "zone.updated", payload: zone });
+    return zone;
+  }
+
+  async removeZone(eventId: string, zoneId: string): Promise<{ id: string }> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    const before = event.zones?.length ?? 0;
+    event.zones = (event.zones ?? []).filter((z) => z.id !== zoneId);
+    if (event.zones.length === before) throw new NotFoundException(`Zone ${zoneId} not found`);
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "zone.removed",
+      payload: { id: zoneId },
+    });
+    return { id: zoneId };
   }
 
   private async syncMedicRoster(event: EventRecord): Promise<void> {

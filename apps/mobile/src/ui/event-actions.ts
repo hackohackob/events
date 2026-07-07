@@ -14,8 +14,8 @@ export interface Destination {
   label: string;
 }
 
-/** Set my own status (Available / Rest). "Going to X" is set via assignDestination. */
-export async function setMyStatus(status: "available" | "stationary" | "rest") {
+/** Set my own status (Available / Stationary / Rest / Sweeper). "Going to X" is set via assignDestination. */
+export async function setMyStatus(status: "available" | "stationary" | "rest" | "sweeper") {
   return apiFetch(`/events/${eventId()}/medics/${myId()}/status`, {
     method: "PATCH",
     body: JSON.stringify({ status }),

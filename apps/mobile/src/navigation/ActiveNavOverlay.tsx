@@ -22,6 +22,8 @@ export function ActiveNavOverlay() {
   const selectedRouteId = useNavStore((s) => s.selectedRouteId);
   const progress = useNavStore((s) => s.progress);
   const rerouting = useNavStore((s) => s.rerouting);
+  const voiceMuted = useNavStore((s) => s.voiceMuted);
+  const toggleVoiceMuted = useNavStore((s) => s.toggleVoiceMuted);
   const stop = useNavStore((s) => s.stop);
 
   if (phase !== "active") return null;
@@ -60,6 +62,18 @@ export function ActiveNavOverlay() {
           <OffRoutePrompt meters={progress?.offRouteMeters ?? 0} rerouting={rerouting} />
         ) : null}
       </View>
+
+      {/* Voice guidance mute toggle — stacked above the End button. */}
+      <Pressable
+        style={({ pressed }) => [styles.voiceButton, pressed && styles.voiceButtonPressed]}
+        onPress={() => {
+          void Haptics.selectionAsync();
+          toggleVoiceMuted();
+        }}
+        hitSlop={8}
+      >
+        <Feather name={voiceMuted ? "volume-x" : "volume-2"} size={19} color={voiceMuted ? "#f5b301" : "#dbe7f5"} />
+      </Pressable>
 
       {/* End navigation — bold red action, bottom-right above the status bar. */}
       <Pressable
@@ -259,6 +273,26 @@ const styles = StyleSheet.create({
     zIndex: 30,
   },
   endButtonPressed: { backgroundColor: "#dc2626", transform: [{ scale: 0.96 }] },
+  voiceButton: {
+    position: "absolute",
+    right: 14,
+    bottom: NAV_BOTTOM_INSET + STATUS_BAR_HEIGHT + 108,
+    width: 46,
+    height: 46,
+    borderRadius: 17,
+    backgroundColor: "rgba(9,14,24,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 12,
+    zIndex: 30,
+  },
+  voiceButtonPressed: { transform: [{ scale: 0.94 }] },
   endStopIcon: { width: 13, height: 13, borderRadius: 3.5, backgroundColor: "#fff" },
   endText: { color: "#ffffff", fontSize: 15, fontWeight: "900", letterSpacing: 0.4 },
   statusWrap: {

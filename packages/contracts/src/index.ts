@@ -9,7 +9,7 @@ export type VehicleType =
   | "suv"
   | "ambulance";
 
-export type MedicStatus = "available" | "stationary" | "rest" | "going_to";
+export type MedicStatus = "available" | "stationary" | "rest" | "going_to" | "sweeper";
 
 /** Roster-level classification of a medic. */
 export type MedicType = "coordinator" | "paramedic" | "medic";
@@ -62,7 +62,7 @@ export interface AddMedicRequest {
 }
 
 export interface UpdateMedicStatusRequest {
-  status: Extract<MedicStatus, "available" | "stationary" | "rest">;
+  status: Extract<MedicStatus, "available" | "stationary" | "rest" | "sweeper">;
 }
 
 /** Dashboard → all medics broadcast alert */
@@ -218,6 +218,45 @@ export interface RegisterParticipantRequest {
   medications?: string;
   bloodType?: string;
   conditions?: string;
+}
+
+// ─── Zones ───────────────────────────────────────────────────────────────────
+
+/**
+ * A named, hand-drawn map region for the response team (danger areas, sectors,
+ * closed sections …). Zones are NEVER exposed to participants — the API and the
+ * realtime broadcasts are both medic/coordinator-only.
+ */
+export interface EventZone {
+  id: string;
+  eventId: string;
+  name: string;
+  /** Display colour (hex). */
+  color: string;
+  /** Polygon ring, `[lng, lat]`; the closing point is implicit. */
+  polygon: [number, number][];
+  /** Zones start hidden; the team toggles them on when relevant. */
+  visible: boolean;
+  /** Medic devices raise an alert when entering this zone. */
+  alarm: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateZoneRequest {
+  name: string;
+  color?: string;
+  polygon: [number, number][];
+  visible?: boolean;
+  alarm?: boolean;
+}
+
+export interface UpdateZoneRequest {
+  name?: string;
+  color?: string;
+  polygon?: [number, number][];
+  visible?: boolean;
+  alarm?: boolean;
 }
 
 // ─── Legacy location (kept for backwards compat) ─────────────────────────────

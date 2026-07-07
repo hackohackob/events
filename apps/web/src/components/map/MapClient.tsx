@@ -6,7 +6,8 @@ import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapPin } from 'lucide-react'
 import type { PointOfInterest, POIType } from '@/lib/types'
-import type { MedicState } from '@events/contracts'
+import type { EventZone, MedicState } from '@events/contracts'
+import { smoothZonePolygon, zoneFeature } from '@/lib/zone-geometry'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import type { LiveIncident } from '@/hooks/useLiveMap'
@@ -142,6 +143,12 @@ interface MapClientProps {
   onParticipantClick?: (userId: string) => void
   /** Emphasise one participant's dot (e.g. just located from the roster). */
   highlightedParticipantId?: string
+  /** Team zones to render (already filtered to the visible ones). */
+  zones?: EventZone[]
+  /** Freehand zone drawing mode: panning is disabled, drag sketches a region. */
+  zoneDrawActive?: boolean
+  /** The smoothed polygon of a finished sketch ([lng, lat] ring). */
+  onZoneDrawn?: (polygon: [number, number][]) => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -491,6 +498,7 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
   // Status visuals matched to the mobile app.
   const isResting = medic.status === 'rest'
   const isStationary = medic.status === 'stationary'
+  const isSweeper = medic.status === 'sweeper'
   // Responding to an *active* incident → flashing blue lights (everyone sees it).
   // A medic's route can stay tagged with an incident id after that incident is
   // resolved/closed/archived, so the route-based check is gated on the incident
@@ -558,12 +566,15 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
           >
             {getInitials(medic.name)}
           </div>
-          {/* Stationary (anchored) / heading-to-point badges */}
+          {/* Stationary (anchored) / sweeper / heading-to-point badges */}
           {isStationary && online && (
-            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -3, right: -3, width: 15, height: 15, background: '#34d399', border: '1.5px solid #04121f', zIndex: 4, fontSize: 8 }}>⚓</div>
+            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -6, right: -6, width: 21, height: 21, background: '#34d399', border: '1.5px solid #04121f', zIndex: 4, fontSize: 12 }}>⚓</div>
+          )}
+          {isSweeper && online && (
+            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -6, right: -6, width: 21, height: 21, background: '#38bdf8', border: '1.5px solid #04121f', zIndex: 4, fontSize: 12 }}>🧹</div>
           )}
           {isGoingToPoint && online && (
-            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -3, right: -3, width: 15, height: 15, background: '#fbbf24', border: '1.5px solid #04121f', zIndex: 4, fontSize: 9, color: '#04121f', fontWeight: 900 }}>›</div>
+            <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -6, right: -6, width: 21, height: 21, background: '#fbbf24', border: '1.5px solid #04121f', zIndex: 4, fontSize: 13, color: '#04121f', fontWeight: 900 }}>›</div>
           )}
           {/* Last-seen badge when offline */}
           {!online && (
@@ -1228,9 +1239,47 @@ export default function MapClient({
   showParticipantDots = false,
   onParticipantClick,
   highlightedParticipantId,
+  zones = [],
+  zoneDrawActive = false,
+  onZoneDrawn,
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
+
+  // ── Freehand zone sketch (mouse or touch) ──
+  const sketchingRef = useRef(false)
+  const [sketch, setSketch] = useState<[number, number][]>([])
+  const sketchRef = useRef<[number, number][]>([])
+  // Both MapLayerMouseEvent and MapLayerTouchEvent carry `lngLat`.
+  type SketchEvent = { lngLat: { lng: number; lat: number }; preventDefault?: () => void }
+  const sketchStart = useCallback((e: SketchEvent) => {
+    if (!zoneDrawActive) return
+    e.preventDefault?.()
+    sketchingRef.current = true
+    sketchRef.current = [[e.lngLat.lng, e.lngLat.lat]]
+    setSketch(sketchRef.current)
+  }, [zoneDrawActive])
+  const sketchMove = useCallback((e: SketchEvent) => {
+    if (!zoneDrawActive || !sketchingRef.current) return
+    sketchRef.current = [...sketchRef.current, [e.lngLat.lng, e.lngLat.lat]]
+    setSketch(sketchRef.current)
+  }, [zoneDrawActive])
+  const sketchEnd = useCallback(() => {
+    if (!zoneDrawActive || !sketchingRef.current) return
+    sketchingRef.current = false
+    const polygon = smoothZonePolygon(sketchRef.current)
+    sketchRef.current = []
+    setSketch([])
+    if (polygon.length >= 3) onZoneDrawn?.(polygon)
+  }, [zoneDrawActive, onZoneDrawn])
+  // Leaving draw mode mid-sketch drops the sketch.
+  useEffect(() => {
+    if (!zoneDrawActive) {
+      sketchingRef.current = false
+      sketchRef.current = []
+      setSketch([])
+    }
+  }, [zoneDrawActive])
   // Heatmap freshness: re-tick so ages keep decaying live; trust window filters.
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [trustMin, setTrustMin] = useState(DEFAULT_TRUST_MIN)
@@ -1390,10 +1439,18 @@ export default function MapClient({
       mapStyle={styleFor(appliedBaseLayer)}
       maxPitch={70}
       style={{ width: '100%', height: '100%' }}
-      cursor={interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
+      cursor={zoneDrawActive ? 'crosshair' : interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
       onClick={handleClick}
       onLoad={handleLoad}
       onMoveEnd={(e) => setLiveZoom(e.viewState.zoom)}
+      // Zone drawing: one-finger drag / mouse drag sketches instead of panning.
+      dragPan={!zoneDrawActive}
+      onMouseDown={sketchStart}
+      onMouseMove={sketchMove}
+      onMouseUp={sketchEnd}
+      onTouchStart={sketchStart}
+      onTouchMove={sketchMove}
+      onTouchEnd={sketchEnd}
       attributionControl={false}
       onContextMenu={(e: MapLayerMouseEvent) => {
         e.preventDefault?.()
@@ -1402,6 +1459,57 @@ export default function MapClient({
     >
       {showControls && (
         <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={is3dTerrain} />
+      )}
+
+      {/* Team zones (medic-only regions) */}
+      {zones.filter(z => z.polygon.length >= 3).map(zone => (
+        <Source key={`zone-${zone.id}`} id={`zone-${zone.id}`} type="geojson" data={zoneFeature(zone.polygon)}>
+          <Layer
+            id={`zone-fill-${zone.id}`}
+            type="fill"
+            paint={{ 'fill-color': zone.color, 'fill-opacity': zone.alarm ? 0.22 : 0.14 }}
+          />
+          <Layer
+            id={`zone-line-${zone.id}`}
+            type="line"
+            paint={{
+              'line-color': zone.color,
+              'line-width': 2,
+              'line-opacity': 0.85,
+              ...(zone.alarm ? { 'line-dasharray': [2, 1.5] } : {}),
+            }}
+          />
+        </Source>
+      ))}
+
+      {/* Zone name labels */}
+      {zones.filter(z => z.polygon.length >= 3).map(zone => {
+        const [lng, lat] = zone.polygon.reduce((acc, p) => [acc[0] + p[0] / zone.polygon.length, acc[1] + p[1] / zone.polygon.length], [0, 0])
+        return (
+          <Marker key={`zone-label-${zone.id}`} longitude={lng} latitude={lat}>
+            <div
+              className="px-2 py-0.5 rounded-md text-[11px] font-bold whitespace-nowrap"
+              style={{ background: 'rgba(8,15,28,0.78)', color: zone.color, border: `1px solid ${zone.color}66`, pointerEvents: 'none' }}
+            >
+              {zone.alarm ? '🔔 ' : ''}{zone.name}
+            </div>
+          </Marker>
+        )
+      })}
+
+      {/* Live freehand sketch while drawing a zone */}
+      {sketch.length >= 2 && (
+        <Source
+          id="zone-sketch"
+          type="geojson"
+          data={{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: sketch } }}
+        >
+          <Layer
+            id="zone-sketch-line"
+            type="line"
+            paint={{ 'line-color': '#f59e0b', 'line-width': 2.5, 'line-opacity': 0.9, 'line-dasharray': [2, 1.5] }}
+          />
+        </Source>
       )}
 
       {/* Track layers */}

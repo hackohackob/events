@@ -77,6 +77,9 @@ const config: ExpoConfig = {
       // (android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) to appear.
       // Dropped silently when a prebuild regenerated the manifest from config.
       "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+      // Lists the app in the system "Do Not Disturb access" screen so the
+      // incident-alarm channel's bypassDnd flag can actually be honored.
+      "ACCESS_NOTIFICATION_POLICY",
     ],
     adaptiveIcon: {
       foregroundImage: "./assets/icon-android.png",

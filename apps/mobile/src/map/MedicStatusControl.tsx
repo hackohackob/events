@@ -7,12 +7,14 @@ import { useMapStore } from "./map-store";
 import { assignDestination, setMyStatus } from "../ui/event-actions";
 import { debugLog } from "../debug/debug-log";
 
-type Status = "available" | "stationary" | "rest" | "going_to";
+type Status = "available" | "stationary" | "rest" | "going_to" | "sweeper";
 
 const STATUS_META: Record<Status, { label: string; color: string; bg: string; icon: keyof typeof Feather.glyphMap }> = {
   available:  { label: "Available",  color: "#34d399", bg: "rgba(6, 24, 20, 0.95)", icon: "check-circle" },
   // Stationary = on station / holding a post. Green like available, but anchored.
   stationary: { label: "Stationary", color: "#34d399", bg: "rgba(6, 24, 20, 0.95)", icon: "anchor" },
+  // Sweeper = riding the tail of the field, sweeping the course behind the last runners.
+  sweeper:    { label: "Sweeper",    color: "#38bdf8", bg: "rgba(6, 19, 30, 0.95)", icon: "wind" },
   going_to:   { label: "Going to",   color: "#fbbf24", bg: "rgba(31, 22, 6, 0.95)", icon: "navigation" },
   rest:       { label: "Rest",       color: "#a78bfa", bg: "rgba(22, 16, 38, 0.95)", icon: "moon" },
 };
@@ -40,7 +42,7 @@ export function MedicStatusControl() {
     setMarkers(current.map((m) => (m.id === myId && m.type === "paramedic" ? { ...m, ...patch } : m)));
   };
 
-  const choose = async (next: "available" | "stationary" | "rest") => {
+  const choose = async (next: "available" | "stationary" | "rest" | "sweeper") => {
     setOpen(false);
     if (busy || status === next) return;
     setBusy(true);
@@ -101,7 +103,7 @@ export function MedicStatusControl() {
             </View>
           ) : null}
 
-          {(["available", "stationary", "rest"] as const).map((opt) => {
+          {(["available", "stationary", "sweeper", "rest"] as const).map((opt) => {
             const m = STATUS_META[opt];
             const active = status === opt;
             return (

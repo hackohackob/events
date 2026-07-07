@@ -48,6 +48,7 @@ export function ParticipantsScreen({
   onClose,
   onLocate,
   highlight,
+  variant = "screen",
 }: {
   onClose: () => void;
   /** Center the map on a participant's last known location. */
@@ -55,6 +56,9 @@ export function ParticipantsScreen({
   /** Expand + scroll to + flash a participant (their map dot was tapped).
    *  Matched by userId, falling back to BIB. */
   highlight?: { userId?: string; bib?: string; nonce: number } | null;
+  /** "sheet" = hosted in the map's bottom drawer: transparent bg, compact
+   *  header (no status-bar inset), close chevron points down. */
+  variant?: "screen" | "sheet";
 }) {
   const [rows, setRows] = useState<ParticipantLastLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,12 +180,14 @@ export function ParticipantsScreen({
     );
   };
 
+  const inSheet = variant === "sheet";
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, inSheet && styles.rootSheet]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, inSheet && styles.headerSheet]}>
         <Pressable style={styles.backBtn} onPress={onClose} hitSlop={8}>
-          <Feather name="arrow-left" size={20} color="#e8eef7" />
+          <Feather name={inSheet ? "chevron-down" : "arrow-left"} size={20} color="#e8eef7" />
         </Pressable>
         <View style={styles.headerText}>
           <Text style={styles.title}>Participants</Text>
@@ -358,6 +364,9 @@ function Row({ p, open, flash, onLayoutY, onToggle, onLocate }: {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#070d17" },
+  // Hosted in the map bottom drawer — the sheet supplies its own background.
+  rootSheet: { backgroundColor: "transparent" },
+  headerSheet: { paddingTop: 2 },
   header: {
     flexDirection: "row",
     alignItems: "center",

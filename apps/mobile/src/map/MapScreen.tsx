@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   AppState,
   BackHandler,
@@ -64,6 +65,14 @@ import { setNavModeTracking } from "../location/location-tracker";
 import { archivePoi, assignDestination, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
 import { OfflineControlButton } from "./OfflineControlButton";
+import type { EventZone } from "@events/contracts";
+import { useZonesStore } from "./zones/zones-store";
+import { useZoneDrawStore } from "./zones/zone-draw-store";
+import { ZonesLayer } from "./zones/ZonesLayer";
+import { ZoneSketchLayer } from "./zones/ZoneSketchLayer";
+import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
+import { useZoneEntryAlarm } from "./zones/zone-alarm";
+import { deleteZone, updateZone } from "./zones/zone-api";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
@@ -103,6 +112,7 @@ const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
 const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
 const MARKER_SHEET_SNAP_POINTS = ["42%", "88%"];
 const TRACK_SHEET_SNAP_POINTS = ["46%", "84%"];
+const PARTICIPANTS_SHEET_SNAP_POINTS = ["48%", "88%"];
 const USE_MAPY_TILES = process.env.EXPO_PUBLIC_USE_MAPY_TILES === "true";
 const TRACK_STUDIO_CAMERA_PADDING = {
   top: 92,
@@ -1458,6 +1468,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const loadRoster = useRosterStore((state) => state.load);
   const trackingHealth = useTrackingHealth();
 
+  // Team zones — medic-only regions. Runners never load or render them.
+  const sessionRole = useSessionStore((state) => state.role);
+  const isTeamRole = sessionRole !== "runner" && sessionRole !== "spectator";
+  const zones = useZonesStore((state) => state.zones);
+  const zoneDrawPhase = useZoneDrawStore((state) => state.phase);
+  useZoneEntryAlarm(isTeamRole);
+
   const mapRef = useRef<MapRef | null>(null);
   const cameraRef = useRef<CameraRef | null>(null);
   const didInitialEventFitRef = useRef(false);
@@ -1486,7 +1503,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Unread-comment tracking for the incident pin indicator.
   const incidentLastReadAt = useIncidentReadsStore((s) => s.lastReadAt);
   const incidentLatestMessageAt = useIncidentReadsStore((s) => s.latestMessageAt);
-  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "chat" | "location" | "debug" | "settings" | "profile" | "guide" | "participants">("map");
+  const [activeTab, setActiveTab] = useState<"map" | "tracks" | "chat" | "location" | "debug" | "settings" | "profile" | "guide">("map");
+  // Participants roster lives in a bottom drawer over the map (opened from the
+  // menu or by tapping a participant dot), not a full-screen tab.
+  const participantsSheetRef = useRef<BottomSheet | null>(null);
+  const [participantsOpen, setParticipantsOpen] = useState(false);
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1673,14 +1694,16 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     void refreshActiveMedics();
     void refreshIncidents();
     void loadRoster();
+    if (isTeamRole) void useZonesStore.getState().load();
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "active") {
         void refreshActiveMedics();
         void refreshIncidents();
+        if (isTeamRole) void useZonesStore.getState().load();
       }
     });
     return () => sub.remove();
-  }, [refreshActiveMedics, refreshIncidents, loadRoster]);
+  }, [refreshActiveMedics, refreshIncidents, loadRoster, isTeamRole]);
 
   useEffect(() => {
     let mounted = true;
@@ -1941,6 +1964,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
     });
 
+    // Team zones drawn/toggled elsewhere (dashboard or another medic). These
+    // arrive on the medic-only :incidents room, so runners never receive them.
+    socket.on("zone.created", (zone: EventZone) => useZonesStore.getState().upsert(zone));
+    socket.on("zone.updated", (zone: EventZone) => useZonesStore.getState().upsert(zone));
+    socket.on("zone.removed", (payload: { id: string }) => useZonesStore.getState().remove(payload.id));
+
     return () => {
       socket.off("location.updated");
       socket.off("medic_location");
@@ -1952,6 +1981,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       socket.off("poi.created");
       socket.off("poi.removed");
       socket.off("poi.updated");
+      socket.off("zone.created");
+      socket.off("zone.updated");
+      socket.off("zone.removed");
     };
     // Re-subscribe when the session token changes: getSocket() reconnects with
     // the new identity, so we must re-attach listeners to the fresh socket.
@@ -3136,6 +3168,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             );
           })}
 
+        {/* Team zones (medic-only) + the live freehand sketch while drawing. */}
+        {isTeamRole ? <ZonesLayer zones={zones} /> : null}
+        {isTeamRole ? <ZoneSketchLayer /> : null}
+
         {selectedMarker && selectedMarker.type === "paramedic" && selectedMarker.accuracy != null && selectedMarker.accuracy > 0 ? (
           <GeoJSONSource
             id="accuracy-circle-source"
@@ -3159,12 +3195,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             key={marker.id}
             lngLat={[marker.lng, marker.lat]}
             onPress={() => {
-              // A participant dot → jump to the People list and highlight them
-              // (rather than opening a marker sheet).
+              // A participant dot → highlight it, open the People drawer and
+              // flash them there (rather than opening a marker sheet).
               if (marker.type === "runner") {
                 setParticipantHighlight({ userId: marker.id, bib: marker.bibNumber, nonce: Date.now() });
                 setSelectedMarkerId(null);
-                setActiveTab("participants");
+                setParticipantsOpen(true);
+                participantsSheetRef.current?.snapToIndex(0);
+                // Keep the tapped dot visible above the drawer.
+                cameraRef.current?.easeTo({
+                  center: [marker.lng, marker.lat],
+                  zoom: Math.max(mapZoom, 13.5),
+                  padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.46), left: 0, right: 0 },
+                  duration: 480,
+                });
                 return;
               }
               setSelectedMarkerId(marker.id);
@@ -3209,6 +3253,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 const isGrey = freshnessBucket(ageMs) === "stale";
                 const isResting = marker.status === "rest";
                 const isStationary = marker.status === "stationary";
+                const isSweeper = marker.status === "sweeper";
                 // Responding to an incident → whole dot flashes red/blue for everyone.
                 // The route-tagged check is gated on the incident still being open
                 // so the flash stops once it's closed/archived.
@@ -3226,6 +3271,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                       isGrey={isGrey}
                       isResponding={isResponding}
                       isStationary={isStationary}
+                      isSweeper={isSweeper}
                       isGoingToPoint={isGoingToPoint}
                       selected={false}
                       // I'm on an incident → fade everyone but me so my own path
@@ -3236,7 +3282,16 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 );
               })() : null}
 
-              {marker.type === "runner" ? <View style={styles.runnerDot} /> : null}
+              {marker.type === "runner" ? (
+                // Highlighted (tapped → drawer open): pulse ring + enlarged dot.
+                participantHighlight?.userId === marker.id ? (
+                  <SelectionPulse active size={15} color="#3b82f6">
+                    <View style={[styles.runnerDot, styles.runnerDotHighlighted]} />
+                  </SelectionPulse>
+                ) : (
+                  <View style={styles.runnerDot} />
+                )
+              ) : null}
 
               {marker.type === "infrastructure" ? (() => {
                 const cfg = poiConfig(marker.poiType);
@@ -3389,13 +3444,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </View>
         </Pressable>
 
-        {/* Map scale bar (мащаб) — hidden while an incident/marker sheet is open. */}
-        {!selectedMarker && !trackModeActive ? (
-          <View style={styles.scaleBar} pointerEvents="none">
-            <ScaleBar zoom={mapZoom} latitude={mapCenterLat} />
-          </View>
-        ) : null}
-
         {!selectedMarker && !trackModeActive ? (
           <View style={styles.headerActions} pointerEvents="box-none">
             <Pressable
@@ -3461,14 +3509,27 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         ) : null}
       </View>
 
+      {/* Map scale bar (мащаб) — bottom-left, outside the top header so its
+          absolute `bottom` offset is relative to the screen, not the header.
+          Hidden while an incident/marker sheet is open. */}
+      {!selectedMarker && !trackModeActive ? (
+        <View style={styles.scaleBar} pointerEvents="none">
+          <ScaleBar zoom={mapZoom} latitude={mapCenterLat} />
+        </View>
+      ) : null}
+
+      {/* Freehand zone drawing (touch catcher + naming card). */}
+      {isTeamRole && zoneDrawPhase !== "idle" ? <ZoneDrawOverlay mapRef={mapRef} /> : null}
+
       {menuOpen ? (
         <View style={styles.menuPopup}>
           <Text style={styles.menuPopupTitle}>Menu</Text>
           <Pressable
             style={styles.menuPageRow}
             onPress={() => {
-              setActiveTab("participants");
               setMenuOpen(false);
+              setParticipantsOpen(true);
+              participantsSheetRef.current?.snapToIndex(0);
             }}
           >
             <Feather name="users" size={18} color="#34d399" style={styles.menuPageIcon} />
@@ -3627,6 +3688,76 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               })}
             </View>
           </View>
+
+          {/* Team zones — visibility/alarm per zone + freehand drawing. */}
+          {isTeamRole ? (
+            <>
+              <Text style={styles.layerSectionLabel}>ZONES</Text>
+              {zones.map((zone) => (
+                <View key={zone.id} style={styles.zoneRow}>
+                  <View style={[styles.trackColorDot, { backgroundColor: zone.color }]} />
+                  <Text style={styles.zoneName} numberOfLines={1}>{zone.name}</Text>
+                  <Pressable
+                    hitSlop={6}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      useZonesStore.getState().upsert({ ...zone, alarm: !zone.alarm });
+                      void updateZone(zone.id, { alarm: !zone.alarm }).catch((err) =>
+                        debugLog("api", "error", "zone alarm toggle failed", String(err)),
+                      );
+                    }}
+                  >
+                    <Feather name={zone.alarm ? "bell" : "bell-off"} size={15} color={zone.alarm ? "#f59e0b" : "#475569"} />
+                  </Pressable>
+                  <Pressable
+                    hitSlop={6}
+                    onPress={() => {
+                      Alert.alert("Delete zone", `Delete “${zone.name}” for the whole team?`, [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Delete",
+                          style: "destructive",
+                          onPress: () => {
+                            useZonesStore.getState().remove(zone.id);
+                            void deleteZone(zone.id).catch((err) =>
+                              debugLog("api", "error", "zone delete failed", String(err)),
+                            );
+                          },
+                        },
+                      ]);
+                    }}
+                  >
+                    <Feather name="trash-2" size={15} color="#64748b" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      useZonesStore.getState().upsert({ ...zone, visible: !zone.visible });
+                      void updateZone(zone.id, { visible: !zone.visible }).catch((err) =>
+                        debugLog("api", "error", "zone visibility toggle failed", String(err)),
+                      );
+                    }}
+                  >
+                    <View style={[styles.switchTrack, zone.visible ? styles.switchTrackOn : null]}>
+                      <View style={[styles.switchKnob, zone.visible ? styles.switchKnobOn : null]} />
+                    </View>
+                  </Pressable>
+                </View>
+              ))}
+              <Pressable
+                style={styles.drawZoneButton}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setLayersOpen(false);
+                  setMenuOpen(false);
+                  useZoneDrawStore.getState().start();
+                }}
+              >
+                <Feather name="edit-3" size={14} color="#f59e0b" />
+                <Text style={styles.drawZoneButtonText}>Draw zone</Text>
+              </Pressable>
+            </>
+          ) : null}
 
           <View style={styles.tracksHeaderRow}>
             <Text style={styles.tracksHeaderText}>Tracks</Text>
@@ -4217,29 +4348,48 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <FieldGuideScreen onClose={() => setActiveTab("map")} />
         </View>
       ) : null}
-      {activeTab === "participants" ? (
-        <View style={styles.tabOverlay}>
-          <ParticipantsScreen
-            onClose={() => setActiveTab("map")}
-            highlight={participantHighlight}
-            onLocate={(p) => {
-              if (p.lat == null || p.lng == null) return;
-              // Make sure the participant dots layer is on so the focused runner
-              // is actually visible among the rest of the field.
-              setParticipantsMode("individual");
-              setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber, accuracy: p.accuracy });
-              setSelectedMarkerId(null);
-              setActiveTab("map");
-              cameraRef.current?.easeTo({
-                center: [p.lng, p.lat],
-                zoom: 15.5,
-                padding: { top: 0, bottom: 0, left: 0, right: 0 },
-                duration: 600,
-              });
-            }}
-          />
-        </View>
-      ) : null}
+      {/* Participants roster — bottom drawer over the map. Content mounts only
+          while open so the roster is re-fetched fresh each time. */}
+      <BottomSheet
+        ref={participantsSheetRef}
+        index={-1}
+        snapPoints={PARTICIPANTS_SHEET_SNAP_POINTS}
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        // Only the handle drags the sheet, so the roster list scrolls freely.
+        enableContentPanningGesture={false}
+        onChange={(i) => {
+          setParticipantsOpen(i >= 0);
+          if (i < 0) setParticipantHighlight(null);
+        }}
+        backgroundStyle={styles.markerSheetBg}
+        handleIndicatorStyle={styles.sheetHandle}
+      >
+        <BottomSheetView style={styles.markerSheetContent}>
+          {participantsOpen ? (
+            <ParticipantsScreen
+              variant="sheet"
+              onClose={() => participantsSheetRef.current?.close()}
+              highlight={participantHighlight}
+              onLocate={(p) => {
+                if (p.lat == null || p.lng == null) return;
+                // Make sure the participant dots layer is on so the focused runner
+                // is actually visible among the rest of the field.
+                setParticipantsMode("individual");
+                setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber, accuracy: p.accuracy });
+                setSelectedMarkerId(null);
+                participantsSheetRef.current?.close();
+                cameraRef.current?.easeTo({
+                  center: [p.lng, p.lat],
+                  zoom: 15.5,
+                  padding: { top: 0, bottom: 0, left: 0, right: 0 },
+                  duration: 600,
+                });
+              }}
+            />
+          ) : null}
+        </BottomSheetView>
+      </BottomSheet>
       {activeTab === "chat" ? (
         <View style={styles.tabOverlay}>
           <EventChatScreen onClose={() => setActiveTab("map")} bottomInset={BOTTOM_BAR_HEIGHT} />
@@ -4402,6 +4552,7 @@ const styles = StyleSheet.create({
     left: 14,
     // Sit above the offline-download button (bottom-left) so they don't overlap.
     bottom: BOTTOM_BAR_HEIGHT + 64,
+    zIndex: 20,
   },
   clearDestBtn: {
     flexDirection: "row",
@@ -4918,6 +5069,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ffffff",
   },
+  runnerDotHighlighted: {
+    width: 15,
+    height: 15,
+    borderWidth: 2,
+  },
+  zoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingVertical: 4,
+  },
+  zoneName: { color: "#cfe0f4", fontSize: 13, fontWeight: "600", flex: 1 },
+  drawZoneButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 9,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.35)",
+    backgroundColor: "rgba(245,158,11,0.08)",
+  },
+  drawZoneButtonText: { color: "#fcd34d", fontSize: 13, fontWeight: "800" },
   responseArrow: {
     width: 22,
     height: 22,

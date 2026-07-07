@@ -104,14 +104,24 @@ export class HospitalsService implements OnModuleInit {
     const { rows } = await this.db.query<{ count: string }>(`SELECT count(*) AS count FROM hospitals`);
     if (Number(rows[0]?.count ?? 0) > 0) return;
 
-    let seed: SeedHospital[];
-    try {
-      // Same data/ convention as events.json — survives the tsc build (no
-      // asset copying) and works in the deployed container.
-      const raw = await readFile(join(process.cwd(), "data", "hospitals.bg.json"), "utf8");
-      seed = JSON.parse(raw) as SeedHospital[];
-    } catch (err) {
-      this.logger.warn(`Hospitals seed not loaded: ${String(err)}`);
+    // data/ first (same convention as events.json — but in prod that dir is a
+    // volume mount which shadows anything baked into the image), then the
+    // image-bundled copy under example-data/ (see apps/backend/Dockerfile).
+    const candidates = [
+      join(process.cwd(), "data", "hospitals.bg.json"),
+      join(process.cwd(), "..", "..", "example-data", "hospitals.bg.json"),
+    ];
+    let seed: SeedHospital[] | null = null;
+    for (const path of candidates) {
+      try {
+        seed = JSON.parse(await readFile(path, "utf8")) as SeedHospital[];
+        break;
+      } catch {
+        // try the next location
+      }
+    }
+    if (!seed) {
+      this.logger.warn(`Hospitals seed not loaded (tried: ${candidates.join(", ")})`);
       return;
     }
 

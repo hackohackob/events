@@ -359,11 +359,11 @@ export class MedicsService implements OnModuleInit {
     return updated;
   }
 
-  /** Manually set a medic's status (Available / Stationary / Rest). "going_to" is set via assignDestination. */
+  /** Manually set a medic's status (Available / Stationary / Rest / Sweeper). "going_to" is set via assignDestination. */
   async updateStatus(
     eventId: string,
     medicId: string,
-    status: Extract<MedicStatus, "available" | "stationary" | "rest">,
+    status: Extract<MedicStatus, "available" | "stationary" | "rest" | "sweeper">,
   ): Promise<MedicState> {
     const existing = await this.getMedicLastLocation(eventId, medicId);
     if (!existing) {

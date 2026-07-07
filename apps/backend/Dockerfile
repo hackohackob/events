@@ -31,6 +31,9 @@ COPY --from=builder /app/packages/contracts/dist ./packages/contracts/dist
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/infra/migrations ./infra/migrations
 COPY example-data ./example-data
+# Hospitals seed lives outside /app/apps/backend/data because that dir is a
+# volume mount in prod (events_data) and would shadow an image-baked copy.
+COPY apps/backend/data/hospitals.bg.json ./example-data/hospitals.bg.json
 
 RUN addgroup -S app && adduser -S app -G app && \
     mkdir -p /app/apps/backend/uploads/incidents \

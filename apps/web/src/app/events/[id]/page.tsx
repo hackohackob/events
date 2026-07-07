@@ -20,6 +20,8 @@ import ChatDrawer from '@/components/ChatDrawer'
 import ParticipantsPanel from '@/components/ParticipantsPanel'
 import { useEventChat } from '@/hooks/useEventChat'
 import { useParticipants } from '@/hooks/useParticipants'
+import { useZones } from '@/hooks/useZones'
+import ZonesPanel from '@/components/map/ZonesPanel'
 import { POI_CONFIGS } from '@/lib/constants'
 import { fetchGpxCoordinates } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
@@ -165,6 +167,7 @@ function MedicRow({ medic, rosterEntry, onAssign, onRemove }: {
   const online = isOnline(medic.lastSeenAt)
   const going = medic.status === 'going_to'
   const resting = medic.status === 'rest'
+  const sweeping = medic.status === 'sweeper'
   const offlineMs = Date.now() - new Date(medic.lastSeenAt).getTime()
   const offlineLong = !online && offlineMs > 5 * 60_000
   const isCoordinator = rosterEntry?.type === 'coordinator'
@@ -221,10 +224,16 @@ function MedicRow({ medic, rosterEntry, onAssign, onRemove }: {
               <Moon className="w-2.5 h-2.5" /> Rest
             </span>
           )}
+          {online && sweeping && (
+            <span className="text-xs px-1.5 py-0.5 rounded-full flex items-center gap-1"
+              style={{ background: 'rgba(56,189,248,0.12)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.2)' }}>
+              🧹 Sweeper
+            </span>
+          )}
         </div>
         <div className="text-xs mt-0.5" style={{ color: '#64748b' }}>
           {online
-            ? going ? 'Going to ' + (medic.destination?.label ?? '…') : resting ? 'On rest' : 'Available'
+            ? going ? 'Going to ' + (medic.destination?.label ?? '…') : resting ? 'On rest' : sweeping ? 'Sweeping the course' : 'Available'
             : `Last seen ${msToLabel(Date.now() - new Date(medic.lastSeenAt).getTime())}`
           }
         </div>
@@ -298,6 +307,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [editingPoiId, setEditingPoiId] = useState<string | null>(null)
   const [poiDescDraft, setPoiDescDraft] = useState('')
   const [poiDescOverrides, setPoiDescOverrides] = useState<Record<string, string>>({})
+
+  // Team zones (medic-only regions): freehand drawing + list management.
+  const { zones, createZone, updateZone: patchZone, removeZone } = useZones(id)
+  const [zoneDraw, setZoneDraw] = useState(false)
+  const [pendingZonePolygon, setPendingZonePolygon] = useState<[number, number][] | null>(null)
 
   async function savePoiDescription(poiId: string) {
     const description = poiDescDraft.trim()
@@ -1099,6 +1113,19 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             onAddPoi={setAddPoiCoords}
             onIncidentClick={(id) => { setSelectedMedicId(null); setSelectedIncidentId(id) }}
             onMedicClick={(id) => { setSelectedIncidentId(null); setSelectedMedicId(id) }}
+            zones={[
+              ...zones.filter(z => z.visible),
+              // Preview of the just-drawn (smoothed) region while naming it.
+              ...(pendingZonePolygon ? [{
+                id: '__pending__', eventId: id, name: 'New zone', color: '#f59e0b',
+                polygon: pendingZonePolygon, visible: true, alarm: false, createdAt: '', updatedAt: '',
+              }] : []),
+            ]}
+            zoneDrawActive={zoneDraw}
+            onZoneDrawn={(polygon) => {
+              setZoneDraw(false)
+              setPendingZonePolygon(polygon)
+            }}
           />
 
           {/* Layer toggles — top right */}
@@ -1211,6 +1238,25 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               </>
               )}
             </div>
+
+            {/* Team zones — drawing, visibility & alarm management */}
+            <ZonesPanel
+              zones={zones}
+              drawActive={zoneDraw}
+              onToggleDraw={() => { setPendingZonePolygon(null); setZoneDraw(v => !v) }}
+              pendingPolygon={pendingZonePolygon}
+              onSavePending={({ name, color, alarm }) => {
+                const polygon = pendingZonePolygon
+                setPendingZonePolygon(null)
+                if (!polygon) return
+                // Zones start hidden (server default) — toggle the eye to show.
+                void createZone({ name, color, alarm, polygon })
+              }}
+              onCancelPending={() => setPendingZonePolygon(null)}
+              onToggleVisible={(zone) => void patchZone(zone.id, { visible: !zone.visible })}
+              onToggleAlarm={(zone) => void patchZone(zone.id, { alarm: !zone.alarm })}
+              onDelete={(zone) => void removeZone(zone.id)}
+            />
           </div>
 
           {/* Live participant stats — shown when heatmap is active */}

@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { AppState, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LOCATION_INTERVAL_OPTIONS, useSettingsStore } from "./settings-store";
 import { startLocationLoop } from "../location/location-tracker";
+import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
 
 export function SettingsScreen({ onClose }: { onClose: () => void }) {
   const locationIntervalMs = useSettingsStore((s) => s.locationIntervalMs);
@@ -21,6 +22,21 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
     // Restart the background updates so the new cadence takes effect immediately.
     void startLocationLoop();
   };
+
+  // Whether the incident alarm may ring through Do Not Disturb (Android DND
+  // access). Re-probed whenever the app returns from the system settings.
+  const [dndBypass, setDndBypass] = useState<boolean | null>(null);
+  const refreshDndBypass = useCallback(() => {
+    if (Platform.OS !== "android") return;
+    void isDndBypassGranted().then(setDndBypass);
+  }, []);
+  useEffect(() => {
+    refreshDndBypass();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshDndBypass();
+    });
+    return () => sub.remove();
+  }, [refreshDndBypass]);
 
   return (
     <View style={styles.container}>
@@ -116,6 +132,42 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
             Lower frequencies save battery. A persistent notification keeps tracking alive in the background.
           </Text>
         </View>
+
+        {/* ── Alerts ──────────────────────────────────────────── */}
+        {Platform.OS === "android" ? (
+          <>
+            <Text style={styles.sectionLabel}>ALERTS</Text>
+            <View style={styles.card}>
+              <View style={styles.row}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>Alarm in Do Not Disturb</Text>
+                  <Text style={styles.rowSub}>
+                    {dndBypass
+                      ? "Incident alarms will ring through Do Not Disturb."
+                      : "Grant the app Do Not Disturb access so incident alarms ring even in DND."}
+                  </Text>
+                </View>
+                {dndBypass ? (
+                  <Feather name="check-circle" size={20} color="#34d399" />
+                ) : (
+                  <Pressable
+                    style={styles.grantBtn}
+                    onPress={() => {
+                      void Haptics.selectionAsync();
+                      void openDndAccessSettings();
+                    }}
+                  >
+                    <Text style={styles.grantBtnText}>Allow</Text>
+                  </Pressable>
+                )}
+              </View>
+              <Text style={styles.note}>
+                Alarms play on the alarm volume, so they stay audible when the ring volume is down. Keep the
+                alarm volume up.
+              </Text>
+            </View>
+          </>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -209,4 +261,13 @@ const styles = StyleSheet.create({
   dropdownItemText: { color: "#cbd5e1", fontSize: 14, fontWeight: "700" },
   dropdownItemTextActive: { color: "#34d399" },
   note: { color: "#475569", fontSize: 11.5, fontWeight: "500", lineHeight: 16, marginTop: 12 },
+  grantBtn: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: "rgba(52,211,153,0.5)",
+    backgroundColor: "rgba(34,197,94,0.16)",
+  },
+  grantBtnText: { color: "#34d399", fontSize: 13, fontWeight: "800" },
 });

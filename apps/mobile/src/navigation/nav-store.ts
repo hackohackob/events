@@ -1,5 +1,7 @@
 import { create } from "zustand";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { debugLog } from "../debug/debug-log";
+import { createAnnouncer } from "../tracknav/announcer";
 import { requestRoute } from "./routing-api";
 import {
   bearingDegrees,
@@ -80,6 +82,8 @@ interface NavState {
   lastRerouteAt: number;
   /** True while an off-route auto-reroute request is in flight. */
   rerouting: boolean;
+  /** Voice turn announcements muted for this session. */
+  voiceMuted: boolean;
 
   openTransport: (destination: LatLng & { label: string }, incidentId?: string | null) => void;
   cancel: () => void;
@@ -99,6 +103,7 @@ interface NavState {
   toggleNavCamera: () => void;
   setNavZoomOverride: (zoom: number | null) => void;
   setAvoidIncomingTraffic: (value: boolean) => void;
+  toggleVoiceMuted: () => void;
   stop: () => void;
 }
 
@@ -109,6 +114,13 @@ const OFF_ROUTE_THRESHOLD_M = 30;
 // user's actual position, and the minimum gap between auto-reroutes.
 const REROUTE_AFTER_MS = 12_000;
 const REROUTE_COOLDOWN_MS = 15_000;
+
+const KEEP_AWAKE_TAG = "point-navigation";
+
+// Voice turn announcements for point-to-point navigation — same engine as
+// track-following (tracknav starts cancel this store and vice versa, so the
+// two announcers can never talk over each other).
+const announcer = createAnnouncer();
 
 export const useNavStore = create<NavState>((set, get) => ({
   phase: "idle",
@@ -131,6 +143,7 @@ export const useNavStore = create<NavState>((set, get) => ({
   offRouteSince: null,
   lastRerouteAt: 0,
   rerouting: false,
+  voiceMuted: false,
   destinationIncidentId: null,
 
   openTransport: (destination, incidentId = null) =>
@@ -148,7 +161,11 @@ export const useNavStore = create<NavState>((set, get) => ({
       pendingInsertIndex: null,
     }),
 
-  cancel: () =>
+  cancel: () => {
+    if (get().phase === "active") {
+      announcer.reset();
+      deactivateKeepAwake(KEEP_AWAKE_TAG);
+    }
     set({
       phase: "idle",
       destination: null,
@@ -166,7 +183,8 @@ export const useNavStore = create<NavState>((set, get) => ({
       navZoomOverride: null,
       offRouteSince: null,
       rerouting: false,
-    }),
+    });
+  },
 
   selectProfile: async (profile, origin) => {
     set({ profile, origin, phase: "variants" });
@@ -244,6 +262,7 @@ export const useNavStore = create<NavState>((set, get) => ({
     set({ origin: from, vias: [], offRouteSince: null, rerouting: true });
     try {
       await get().recalculate();
+      if (get().phase === "active" && !get().error) announcer.rerouted();
     } finally {
       set({ rerouting: false });
     }
@@ -253,6 +272,16 @@ export const useNavStore = create<NavState>((set, get) => ({
     if (!get().selectedRouteId && get().routes[0]) {
       set({ selectedRouteId: get().routes[0].id });
     }
+    // Keep the screen lit for the whole navigation session.
+    void activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => undefined);
+    const route = get().routes.find((r) => r.id === get().selectedRouteId);
+    announcer.reset();
+    announcer.setMuted(get().voiceMuted);
+    announcer.start(
+      get().destination?.label ?? "destination",
+      route?.distanceMeters ?? 0,
+      "Navigating to",
+    );
     set({
       phase: "active",
       pendingInsertIndex: null,
@@ -282,6 +311,12 @@ export const useNavStore = create<NavState>((set, get) => ({
     set({ avoidIncomingTraffic: value });
     // Re-run the current route with/without corridor avoidance if we have one.
     if (get().origin && get().destination && get().profile) void get().recalculate();
+  },
+
+  toggleVoiceMuted: () => {
+    const voiceMuted = !get().voiceMuted;
+    announcer.setMuted(voiceMuted);
+    set({ voiceMuted });
   },
 
   updateProgress: (fix) => {
@@ -329,6 +364,23 @@ export const useNavStore = create<NavState>((set, get) => ({
     const offRoute = snap.distanceMeters > OFF_ROUTE_THRESHOLD_M;
     // Track how long we've been off-route so we can recompute a fresh path.
     const offRouteSince = offRoute ? (state.offRouteSince ?? now) : null;
+
+    // Spoken turn guidance (only while actually navigating).
+    if (state.phase === "active") {
+      if (offRoute) {
+        announcer.offTrack(snap.distanceMeters);
+      } else {
+        announcer.backOnTrack();
+        announcer.onProgress({
+          toManeuverMeters,
+          instructionIndex: index,
+          instructions: route.instructions,
+          remainingMeters,
+          speedMps,
+          atMs: now,
+        });
+      }
+    }
 
     set({
       lastFix: { lat: fix.lat, lng: fix.lng, at: now },

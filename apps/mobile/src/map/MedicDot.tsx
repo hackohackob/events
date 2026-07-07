@@ -10,6 +10,8 @@ interface Props {
   isResponding: boolean;
   /** On station / holding → green dot with an anchor badge. */
   isStationary: boolean;
+  /** Sweeping the tail of the field → a sweeper badge. */
+  isSweeper: boolean;
   /** Heading to a plain point → a "moving" badge. */
   isGoingToPoint: boolean;
   /** Faded out — the viewer is focused on their own incident. */
@@ -25,7 +27,7 @@ const FLASH_MS = 460;
  * red and blue (emergency lights). The flash runs on this component's own timer
  * so it stays smooth without re-rendering the whole map.
  */
-export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationary, isGoingToPoint, dimmed = false, selected = false }: Props) {
+export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationary, isSweeper, isGoingToPoint, dimmed = false, selected = false }: Props) {
   const [flashBlue, setFlashBlue] = useState(false);
 
   useEffect(() => {
@@ -54,12 +56,17 @@ export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationar
       </View>
       {isStationary && !isGrey ? (
         <View style={[styles.badge, styles.stationaryBadge]}>
-          <Feather name="anchor" size={9} color="#04121f" />
+          <Feather name="anchor" size={13} color="#04121f" />
+        </View>
+      ) : null}
+      {isSweeper && !isGrey ? (
+        <View style={[styles.badge, styles.sweeperBadge]}>
+          <Feather name="wind" size={13} color="#04121f" />
         </View>
       ) : null}
       {isGoingToPoint && !isGrey ? (
         <View style={[styles.badge, styles.movingBadge]}>
-          <Feather name="navigation" size={9} color="#04121f" />
+          <Feather name="navigation" size={13} color="#04121f" />
         </View>
       ) : null}
     </View>
@@ -96,11 +103,11 @@ const styles = StyleSheet.create({
   textStale: { color: "rgba(255,255,255,0.7)" },
   badge: {
     position: "absolute",
-    bottom: -3,
-    right: -3,
-    width: 15,
-    height: 15,
-    borderRadius: 8,
+    bottom: -6,
+    right: -6,
+    width: 21,
+    height: 21,
+    borderRadius: 11,
     borderWidth: 1.5,
     borderColor: "#04121f",
     alignItems: "center",
@@ -108,5 +115,6 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   stationaryBadge: { backgroundColor: "#34d399" },
+  sweeperBadge: { backgroundColor: "#38bdf8" },
   movingBadge: { backgroundColor: "#fbbf24" },
 });

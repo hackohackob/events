@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -77,6 +78,45 @@ export class EventsController {
     @Body() body: { name?: string; description?: string; lat?: number; lng?: number },
   ) {
     return this.eventsService.updatePoi(id, poiId, body);
+  }
+
+  // ─── Zones — medic/coordinator only; participants must never see them ───────
+
+  private assertZoneAccess(user: RequestUser): void {
+    if (user.role === "runner" || user.role === "spectator") {
+      throw new ForbiddenException("Zones are not available to participants");
+    }
+  }
+
+  @Get("zones")
+  zones(@CurrentUser() user: RequestUser) {
+    this.assertZoneAccess(user);
+    return this.eventsService.listZonesForEvent(user.eventId);
+  }
+
+  @Post("zones")
+  createZone(
+    @CurrentUser() user: RequestUser,
+    @Body() body: { name: string; color?: string; polygon: [number, number][]; visible?: boolean; alarm?: boolean },
+  ) {
+    this.assertZoneAccess(user);
+    return this.eventsService.createZone(user.eventId, body);
+  }
+
+  @Patch("zones/:zoneId")
+  updateZone(
+    @CurrentUser() user: RequestUser,
+    @Param("zoneId") zoneId: string,
+    @Body() body: { name?: string; color?: string; polygon?: [number, number][]; visible?: boolean; alarm?: boolean },
+  ) {
+    this.assertZoneAccess(user);
+    return this.eventsService.updateZone(user.eventId, zoneId, body);
+  }
+
+  @Delete("zones/:zoneId")
+  removeZone(@CurrentUser() user: RequestUser, @Param("zoneId") zoneId: string) {
+    this.assertZoneAccess(user);
+    return this.eventsService.removeZone(user.eventId, zoneId);
   }
 
   @Put(":id")

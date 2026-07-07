@@ -4,7 +4,7 @@ import Constants from "expo-constants";
 import { apiFetch } from "../ui/api-client";
 import { useNotificationFocus } from "./notification-focus";
 import { registerBackgroundPushTask } from "./background-push";
-import { INCIDENT_ALARM_CHANNEL_ID } from "./broadcast-notification";
+import { ensureIncidentAlarmChannel } from "./broadcast-notification";
 import { debugLog } from "../debug/debug-log";
 
 /**
@@ -58,9 +58,11 @@ export async function registerPushToken(): Promise<void> {
   }
   debugLog("app", "info", "expo push token obtained", token.slice(0, 24));
 
-  // Configure Android channels. "incident-alarm-v1" matches the channel the
-  // backend targets for incident pushes, so closed-app deliveries ring and
-  // vibrate (and bypass DND once the user allows it) like local alarms.
+  // Configure Android channels. The alarm channel matches the id the backend
+  // targets for incident pushes, so closed-app deliveries ring and vibrate
+  // (and bypass DND once the user allows it) like local alarms. Created via
+  // the single shared helper so the channel always gets ALARM-stream audio
+  // attributes (channel audio config is immutable after first creation).
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
       name: "default",
@@ -68,15 +70,7 @@ export async function registerPushToken(): Promise<void> {
       vibrationPattern: [0, 250, 250, 250],
       lightColor: "#22c55e",
     });
-    await Notifications.setNotificationChannelAsync(INCIDENT_ALARM_CHANNEL_ID, {
-      name: "Incident alarms",
-      importance: Notifications.AndroidImportance.MAX,
-      sound: "incident_alarm.wav",
-      vibrationPattern: [0, 300, 600, 300, 600, 300, 600],
-      bypassDnd: true,
-      lightColor: "#ef4444",
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    });
+    await ensureIncidentAlarmChannel();
   }
 
   // Data-only incident alarms are rendered by our background task (looping
