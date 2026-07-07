@@ -250,6 +250,12 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
             </p>
           </div>
 
+          {/* Active hours */}
+          <ActiveHoursField
+            value={data.activeHours}
+            onChange={activeHours => update({ activeHours })}
+          />
+
           {/* Summary stats */}
           <div
             className="grid grid-cols-5 gap-2 pt-4 mt-4"
@@ -405,6 +411,137 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+const DEFAULT_ACTIVE_HOURS = { start: '07:00', end: '19:00' }
+
+/** Minutes since midnight for a "HH:mm" string. */
+function toMinutes(hm: string): number {
+  const [h, m] = hm.split(':').map(Number)
+  return (h || 0) * 60 + (m || 0)
+}
+
+/**
+ * Toggle + dual time inputs + a 24h strip visualizing the daily window during
+ * which medic locations are visible to everyone (coordinators always see them).
+ */
+function ActiveHoursField({
+  value,
+  onChange,
+}: {
+  value: { start: string; end: string } | null
+  onChange: (v: { start: string; end: string } | null) => void
+}) {
+  const enabled = value !== null
+  const hours = value ?? DEFAULT_ACTIVE_HOURS
+  const startMin = toMinutes(hours.start)
+  const endMin = toMinutes(hours.end)
+  const overnight = endMin < startMin
+
+  // Highlighted portions of the 24h strip, as percentages
+  const bands = overnight
+    ? [
+        { left: 0, width: (endMin / 1440) * 100 },
+        { left: (startMin / 1440) * 100, width: ((1440 - startMin) / 1440) * 100 },
+      ]
+    : [{ left: (startMin / 1440) * 100, width: (Math.max(endMin - startMin, 10) / 1440) * 100 }]
+
+  const timeInputStyle = {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(148,163,184,0.12)',
+    colorScheme: 'dark',
+  } as const
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="block text-xs font-semibold text-slate-400">Active Hours</label>
+        {/* Toggle */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          onClick={() => onChange(enabled ? null : DEFAULT_ACTIVE_HOURS)}
+          className="relative w-9 h-5 rounded-full transition-all flex-shrink-0"
+          style={{
+            background: enabled ? 'linear-gradient(135deg, #22c55e, #16a34a)' : 'rgba(148,163,184,0.2)',
+            boxShadow: enabled ? '0 0 12px rgba(34,197,94,0.35)' : 'none',
+          }}
+        >
+          <span
+            className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+            style={{ left: enabled ? '18px' : '2px' }}
+          />
+        </button>
+      </div>
+
+      {enabled ? (
+        <div
+          className="rounded-xl p-3.5 space-y-3"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.12)' }}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="time"
+              value={hours.start}
+              onChange={e => e.target.value && onChange({ ...hours, start: e.target.value })}
+              className="flex-1 px-3 py-2 rounded-lg text-sm text-slate-100 outline-none transition-all text-center"
+              style={timeInputStyle}
+              onFocus={e => (e.currentTarget.style.borderColor = 'rgba(34,197,94,0.5)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'rgba(148,163,184,0.12)')}
+            />
+            <span className="text-xs" style={{ color: '#64748b' }}>to</span>
+            <input
+              type="time"
+              value={hours.end}
+              onChange={e => e.target.value && onChange({ ...hours, end: e.target.value })}
+              className="flex-1 px-3 py-2 rounded-lg text-sm text-slate-100 outline-none transition-all text-center"
+              style={timeInputStyle}
+              onFocus={e => (e.currentTarget.style.borderColor = 'rgba(34,197,94,0.5)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'rgba(148,163,184,0.12)')}
+            />
+          </div>
+
+          {/* 24h strip */}
+          <div>
+            <div
+              className="relative h-2 rounded-full overflow-hidden"
+              style={{ background: 'rgba(148,163,184,0.12)' }}
+            >
+              {bands.map((b, i) => (
+                <div
+                  key={i}
+                  className="absolute top-0 h-full rounded-full"
+                  style={{
+                    left: `${b.left}%`,
+                    width: `${b.width}%`,
+                    background: 'linear-gradient(90deg, #22c55e, #4ade80)',
+                    boxShadow: '0 0 8px rgba(34,197,94,0.4)',
+                  }}
+                />
+              ))}
+            </div>
+            <div className="flex justify-between mt-1 text-[9px]" style={{ color: '#475569' }}>
+              <span>00:00</span>
+              <span>06:00</span>
+              <span>12:00</span>
+              <span>18:00</span>
+              <span>24:00</span>
+            </div>
+          </div>
+
+          <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
+            Outside {hours.start}–{hours.end}{overnight ? ' (overnight)' : ''} medic locations are visible
+            only to coordinators — runners and other medics won&apos;t see them. Europe/Sofia time.
+          </p>
+        </div>
+      ) : (
+        <p className="text-[10px] leading-relaxed" style={{ color: '#475569' }}>
+          Off — medic locations are visible to the team and runners at all times.
+        </p>
+      )}
     </div>
   )
 }

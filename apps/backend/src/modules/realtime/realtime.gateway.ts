@@ -45,6 +45,11 @@ export class RealtimeGateway implements OnGatewayConnection {
     if (role === "paramedic" || role === "coordinator" || role === "medic") {
       client.join(`event:${eventId}:incidents`);
     }
+    // Outside an event's active hours medic locations are published to this
+    // coordinator-only room instead of the shared :map room.
+    if (role === "coordinator") {
+      client.join(`event:${eventId}:map:coordinators`);
+    }
   }
 
   @SubscribeMessage("join_room")
@@ -52,6 +57,11 @@ export class RealtimeGateway implements OnGatewayConnection {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { eventId: string; channel: "map" | "incidents" | "ops" },
   ) {
+    // Only the three public channels can be joined here; the coordinator-only
+    // map room is assigned at connect based on the session role.
+    if (!["map", "incidents", "ops"].includes(data.channel)) {
+      return { ok: false };
+    }
     client.join(`event:${data.eventId}:${data.channel}`);
     return { ok: true };
   }

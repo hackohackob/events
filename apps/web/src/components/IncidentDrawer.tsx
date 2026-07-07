@@ -464,6 +464,8 @@ export default function IncidentDrawer({
                     </div>
                     <div className="flex-1 h-px" style={{ background: 'rgba(148,163,184,0.14)' }} />
                   </div>
+                ) : m.kind === 'first_aid' || m.kind === 'cpr' ? (
+                  <FirstAidChip key={m.id} message={m} />
                 ) : (
                   <div key={m.id} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.07)' }}>
                     <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -509,6 +511,48 @@ export default function IncidentDrawer({
             </button>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/** Compact timeline chip for structured guided-care entries (triage answers,
+ *  CPR start/stop) logged by the runner app — scannable at a glance, distinct
+ *  from chat bubbles. */
+function FirstAidChip({ message: m }: { message: IncidentMessage }) {
+  const isCpr = m.kind === 'cpr'
+  const meta = (m.meta ?? {}) as { question?: string; answer?: string; action?: string; durationMs?: number; cycles?: number; restart?: boolean }
+  const accent = isCpr ? '#f87171' : '#34d399'
+  const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  let primary: string
+  let secondary: string | null = null
+  if (isCpr) {
+    primary = m.text
+  } else if (meta.question && meta.answer) {
+    primary = meta.answer
+    secondary = meta.question
+  } else {
+    primary = m.text.replace(/^First aid:\s*/i, '')
+  }
+
+  return (
+    <div className="flex justify-center py-0.5">
+      <div
+        className="rounded-xl px-3 py-2 text-center"
+        style={{
+          maxWidth: '86%',
+          background: isCpr ? 'rgba(248,113,113,0.08)' : 'rgba(52,211,153,0.07)',
+          border: `1px solid ${isCpr ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.22)'}`,
+        }}
+      >
+        <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold tracking-wide" style={{ color: accent }}>
+          {isCpr ? <HeartPulse className="w-3 h-3" /> : <ClipboardList className="w-3 h-3" />}
+          {isCpr ? 'CPR' : 'FIRST AID'}
+          <span className="font-medium" style={{ color: '#48586c' }}>· {m.authorName} · {time}</span>
+        </div>
+        {secondary && <div className="text-[11px] mt-1" style={{ color: '#7d8ea4' }}>{secondary}</div>}
+        <div className="text-sm font-bold text-slate-100 mt-0.5">{primary}</div>
       </div>
     </div>
   )

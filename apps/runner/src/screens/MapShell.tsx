@@ -65,10 +65,10 @@ export function MapShell({
   children?: React.ReactNode;
   renderSheet?: (ctx: ShellCtx) => React.ReactNode;
 }) {
-  const { eventId, profile, fix, gpsDenied, queued } = useApp();
+  const { eventId, eventInfo, profile, fix, gpsDenied, queued } = useApp();
   const { t } = useT();
   const navigate = useNavigate();
-  const medics = useLiveMedics(eventId);
+  const medics = useLiveMedics(eventId, eventInfo?.activeHours);
   const track = useTrackGeoJson(eventId, profile?.selectedTrackId ?? null);
   const [pois, setPois] = useState<PoiLike[]>([]);
   const [recenter, setRecenter] = useState(0);

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import type { PublicMedicState } from "../api/contracts-shim";
+import type { EventActiveHours, PublicMedicState } from "../api/contracts-shim";
 import { fetchPublicMedics } from "../api";
+import { isWithinActiveHours } from "../lib/active-hours";
 import { getToken } from "../lib/storage";
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string) || "/realtime";
@@ -22,7 +23,7 @@ interface MedicMsg {
  * Live medic positions for the runner map. Seeds from the trimmed HTTP snapshot,
  * then keeps current via the realtime `medic_location` broadcasts on the map room.
  */
-export function useLiveMedics(eventId: string) {
+export function useLiveMedics(eventId: string, activeHours?: EventActiveHours) {
   const [medics, setMedics] = useState<PublicMedicState[]>([]);
   // Re-evaluates the staleness filter even without new data, so a medic that
   // goes quiet disappears on its own.
@@ -75,13 +76,16 @@ export function useLiveMedics(eventId: string) {
     };
   }, [eventId]);
 
-  // Drop stale medics (position older than STALE_AFTER_MS).
+  // Drop stale medics (position older than STALE_AFTER_MS). Outside the
+  // event's active hours hide all of them — the server already stops sending;
+  // this also clears existing dots on the next minute tick.
   return useMemo(() => {
     const cutoff = Date.now() - STALE_AFTER_MS;
     void staleTick; // re-run on the minute tick
+    if (!isWithinActiveHours(activeHours)) return [];
     return medics.filter((m) => {
       const t = Date.parse(m.recordedAt);
       return !Number.isFinite(t) || t >= cutoff;
     });
-  }, [medics, staleTick]);
+  }, [medics, staleTick, activeHours]);
 }

@@ -122,6 +122,16 @@ export class CreateEventAssignmentDto {
   description?: string;
 }
 
+export class EventActiveHoursDto {
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "start must be HH:mm" })
+  start!: string;
+
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "end must be HH:mm" })
+  end!: string;
+}
+
 export class CreateEventDto {
   @IsString()
   @IsOptional()
@@ -151,6 +161,13 @@ export class CreateEventDto {
   @IsArray()
   @IsISO8601({}, { each: true })
   dates!: string[];
+
+  /** Daily window (Europe/Sofia) outside which medic locations are visible
+   *  only to coordinators. Unset = no restriction. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EventActiveHoursDto)
+  activeHours?: EventActiveHoursDto;
 
   @IsOptional()
   @ValidateNested()

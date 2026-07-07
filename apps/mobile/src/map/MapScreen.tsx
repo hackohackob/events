@@ -80,6 +80,11 @@ import { TransportSheet } from "../navigation/TransportSheet";
 import { RouteVariantsOverlay } from "../navigation/RouteVariantsOverlay";
 import { RouteEditingSheet, RouteEditHelperBanner } from "../navigation/RouteEditingSheet";
 import { ActiveNavOverlay } from "../navigation/ActiveNavOverlay";
+import { HospitalsSheet } from "../hospitals/HospitalsSheet";
+import { useTrackNavStore } from "../tracknav/track-nav-store";
+import { useTrackNavCamera } from "../tracknav/useTrackNavCamera";
+import { TrackNavLayers } from "../tracknav/TrackNavLayers";
+import { TrackNavOverlay } from "../tracknav/TrackNavOverlay";
 import { startIncidentReport } from "../incidents/start-report";
 
 const CURRENT_USER_ID = "mobile-user";
@@ -1458,6 +1463,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const didInitialEventFitRef = useRef(false);
   const markerSheetRef = useRef<BottomSheet | null>(null);
   const trackSheetRef = useRef<BottomSheet | null>(null);
+  const hospitalsSheetRef = useRef<BottomSheet | null>(null);
   const [trackSheetIndex, setTrackSheetIndex] = useState(0);
   const myLocationFix = useLocationStatus((s) => s.lastFix);
 
@@ -1496,6 +1502,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const navCameraMode = useNavStore((s) => s.navCameraMode);
   const navPendingInsert = useNavStore((s) => s.pendingInsertIndex);
   useNavigationCamera(cameraRef);
+  const trackNavPhase = useTrackNavStore((s) => s.phase);
+  useTrackNavCamera(cameraRef);
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
   const [trackPickerOpen, setTrackPickerOpen] = useState(false);
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
@@ -2085,9 +2093,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           return layerVisibility.participants;
         }
         if (marker.type === "paramedic") {
-          // While navigating, the nav puck stands in for the user's own position —
-          // hide the server-echoed marker of themselves.
-          if (navPhase === "active" && marker.id === sessionUserId) return false;
+          // While navigating (point-to-point or track-following), the nav puck
+          // stands in for the user's own position — hide the server echo.
+          if ((navPhase === "active" || trackNavPhase !== "idle") && marker.id === sessionUserId) return false;
           return layerVisibility.paramedics;
         }
         if (marker.type === "incident") {
@@ -2096,7 +2104,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         // infrastructure (POIs)
         return layerVisibility.pois;
       }),
-    [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, layerVisibility.pois, nonCurrentMarkers, navPhase, sessionUserId],
+    [layerVisibility.incidents, layerVisibility.paramedics, layerVisibility.participants, layerVisibility.pois, nonCurrentMarkers, navPhase, trackNavPhase, sessionUserId],
   );
   const orderedVisibleMarkers = useMemo(
     () =>
@@ -2787,11 +2795,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             center: [FALLBACK_LNG, FALLBACK_LAT],
             zoom: FALLBACK_ZOOM,
           }}
-          trackUserLocation={navPhase === "active" ? undefined : "default"}
+          trackUserLocation={navPhase === "active" || trackNavPhase !== "idle" ? undefined : "default"}
         />
-        {navPhase !== "active" ? <UserLocation /> : null}
+        {navPhase !== "active" && trackNavPhase === "idle" ? <UserLocation /> : null}
 
         <NavigationMapLayers />
+        <TrackNavLayers />
         <MedicRoutesLayer zoom={mapZoom} dimmed={assignedToIncident} />
 
         <RasterSource
@@ -3420,6 +3429,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 if (navPhase === "active") {
                   void Haptics.selectionAsync();
                   useNavStore.getState().toggleNavCamera();
+                } else if (trackNavPhase !== "idle") {
+                  void Haptics.selectionAsync();
+                  useTrackNavStore.getState().toggleCamera();
                 } else {
                   void resetMapNorth();
                 }
@@ -3433,6 +3445,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   // Follow (look-ahead): show the heading arrow.
                   <Feather name="navigation" size={19} color="#ecf4ff" />
                 )
+              ) : trackNavPhase !== "idle" ? (
+                <Feather name="navigation" size={19} color="#34d399" />
               ) : (
                 <Feather name="compass" size={20} color="#ecf4ff" />
               )}
@@ -3475,6 +3489,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             <View style={styles.menuPageTextWrap}>
               <Text style={styles.menuPageTitle}>Field Guide</Text>
               <Text style={styles.menuPageSubtitle}>Symptom search & action reminders</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color="#475569" />
+          </Pressable>
+          <Pressable
+            style={styles.menuPageRow}
+            onPress={() => {
+              setMenuOpen(false);
+              hospitalsSheetRef.current?.snapToIndex(0);
+            }}
+          >
+            <Feather name="plus-square" size={18} color="#f87171" style={styles.menuPageIcon} />
+            <View style={styles.menuPageTextWrap}>
+              <Text style={styles.menuPageTitle}>Hospitals</Text>
+              <Text style={styles.menuPageSubtitle}>Nearby ERs, phones & equipment</Text>
             </View>
             <Feather name="chevron-right" size={16} color="#475569" />
           </Pressable>
@@ -3679,6 +3707,33 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 );
               })}
             </ScrollView>
+          ) : null}
+
+          {/* Follow track — voice-guided track navigation along the raw GPX
+              (works even where the routing graph has no matching ways). */}
+          {focusedTrack && focusedTrack.points.length >= 2 ? (
+            <Pressable
+              style={({ pressed }) => [styles.followTrackButton, pressed && styles.followTrackButtonPressed]}
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                trackSheetRef.current?.close();
+                setActiveTab("map");
+                useTrackNavStore.getState().start({
+                  id: focusedTrack.id,
+                  label: focusedTrack.label,
+                  color: focusedTrack.color ?? trackColor(focusedTrack.id),
+                  points: focusedTrack.points,
+                });
+              }}
+            >
+              <Feather name="navigation" size={17} color="#04140E" />
+              <Text style={styles.followTrackButtonText}>Follow track</Text>
+              {focusedTrackProfile ? (
+                <Text style={styles.followTrackButtonMeta}>
+                  {(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km · voice guidance
+                </Text>
+              ) : null}
+            </Pressable>
           ) : null}
 
           {focusedTrackProfile && focusedTrackSample ? (
@@ -4069,9 +4124,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
-      {activeTab === "map" && !selectedMarker && navPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
-      {!selectedMarker && navPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
+      {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
+      {!selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
       <ReportIncidentSheet />
+
+      {/* Hospitals directory drawer (opened from the Menu). "Navigate" hands the
+          hospital off to the regular transport → route-variants flow. */}
+      <HospitalsSheet
+        sheetRef={hospitalsSheetRef}
+        currentFix={myLocationFix ? { lat: myLocationFix.lat, lng: myLocationFix.lng } : null}
+        onNavigate={(hospital) => {
+          hospitalsSheetRef.current?.close();
+          useNavStore.getState().openTransport({ lat: hospital.lat, lng: hospital.lng, label: hospital.name });
+        }}
+      />
 
       {/* Navigation feature: radial menu + transport/variants/editing/active overlays. */}
       <NavRadialMenu
@@ -4102,6 +4168,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       <RouteEditHelperBanner />
       <RouteEditingSheet />
       <ActiveNavOverlay />
+      <TrackNavOverlay />
 
       <NewPoiSheet
         pending={pendingPoi}
@@ -4184,7 +4251,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Bottom navigation bar — hidden during active navigation, and while a
           marker detail sheet is open (the sheet covers it and Tracks isn't a
           useful destination from there). */}
-      {navPhase !== "active" && !selectedMarker ? (
+      {navPhase !== "active" && trackNavPhase === "idle" && !selectedMarker ? (
         <View style={styles.bottomMenu}>
           {([
             { tab: "map", label: "Map", icon: "map" },
@@ -5367,6 +5434,24 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginLeft: 10,
   },
+  followTrackButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    marginTop: 10,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: "#34d399",
+    shadowColor: "#34d399",
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  followTrackButtonPressed: { backgroundColor: "#2bbd87", transform: [{ scale: 0.98 }] },
+  followTrackButtonText: { color: "#04140E", fontSize: 15, fontWeight: "900", letterSpacing: 0.3 },
+  followTrackButtonMeta: { color: "rgba(4,20,14,0.65)", fontSize: 11.5, fontWeight: "800" },
   trackPickerScroll: {
     maxHeight: 44,
   },

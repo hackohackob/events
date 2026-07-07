@@ -34,6 +34,8 @@ export interface EventInfo {
   /** Command Center phone number, set per event by the organizer. When unset,
    *  the "Call Race Command" button and SOS SMS fallback are hidden. */
   commandPhone?: string;
+  /** Daily window (Europe/Sofia) outside which medics are hidden from the map. */
+  activeHours?: { start: string; end: string };
 }
 
 /** Optional medical / ICE profile, kept on-device and attached to any SOS.

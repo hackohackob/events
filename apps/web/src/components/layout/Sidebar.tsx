@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Calendar, Users, Settings, LogOut, BookOpen,
+  LayoutDashboard, Calendar, Users, Settings, LogOut, BookOpen, Cross,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -12,6 +12,7 @@ const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/events', icon: Calendar, label: 'Events' },
   { href: '/users', icon: Users, label: 'Users' },
+  { href: '/hospitals', icon: Cross, label: 'Hospitals' },
   { href: '/field-guide', icon: BookOpen, label: 'Field Guide' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ]

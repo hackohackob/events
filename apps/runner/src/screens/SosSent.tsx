@@ -143,7 +143,7 @@ export function SosSent() {
             </button>
           </a>
         )}
-        <button className="btn-primary" onClick={() => navigate("/guided")}>{t("sent.guided")}</button>
+        <button className="btn-primary" onClick={() => navigate("/guided", { state: { incidentId } })}>{t("sent.guided")}</button>
         <button onClick={() => navigate("/map")} style={{ width: "100%", marginTop: 12, padding: 14, borderRadius: 16, border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontWeight: 700 }}>
           {t("sent.backToMap")}
         </button>

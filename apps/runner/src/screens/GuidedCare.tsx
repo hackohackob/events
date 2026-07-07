@@ -1,17 +1,40 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useT } from "../i18n";
 import { useApp } from "../state/AppContext";
 import { TRIAGE, TRIAGE_START, type OptionTone } from "../lib/triage";
 import { CprMode } from "../components/CprMode";
+import { fetchMyIncidents } from "../api";
+import { logFirstAid, setFirstAidIncident } from "../lib/first-aid-log";
 
 export function GuidedCare() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t, lang } = useT();
   const { eventInfo } = useApp();
   const commandPhone = eventInfo?.commandPhone;
   const [nodeId, setNodeId] = useState(TRIAGE_START);
   const [showCpr, setShowCpr] = useState(false);
+
+  // Attach this guided session to the incident it followed from (router state),
+  // falling back to the runner's newest open incident on a direct open. Guided
+  // care keeps working with no incident at all — logging just no-ops.
+  const stateIncidentId = (location.state as { incidentId?: string } | null)?.incidentId;
+  useEffect(() => {
+    if (stateIncidentId) {
+      setFirstAidIncident(stateIncidentId);
+    } else {
+      fetchMyIncidents()
+        .then((incidents) => {
+          const open = incidents
+            .filter((i) => i.status !== "resolved" && i.status !== "closed")
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+          setFirstAidIncident(open?.id ?? null);
+        })
+        .catch(() => setFirstAidIncident(null));
+    }
+    return () => setFirstAidIncident(null);
+  }, [stateIncidentId]);
 
   const node = TRIAGE[nodeId] ?? TRIAGE[TRIAGE_START];
   // The triage copy is authored in bg/en; for any other UI language fall back
@@ -76,7 +99,19 @@ export function GuidedCare() {
       {/* Big answer buttons */}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
         {node.options.map((opt, i) => (
-          <button key={i} onClick={() => setNodeId(opt.next)} style={bigBtnStyle(opt.tone)}>
+          <button
+            key={i}
+            onClick={() => {
+              // English copy is the canonical log line (medics/dashboard read it).
+              logFirstAid({
+                kind: "first_aid",
+                text: `First aid: ${node.title.en} → ${opt.label.en}`,
+                meta: { nodeId, nextId: opt.next, question: node.title.en, answer: opt.label.en, lang },
+              });
+              setNodeId(opt.next);
+            }}
+            style={bigBtnStyle(opt.tone)}
+          >
             {tr(opt.label)}
           </button>
         ))}
@@ -86,7 +121,14 @@ export function GuidedCare() {
 
       {nodeId !== TRIAGE_START && (
         <button
-          onClick={() => setNodeId(TRIAGE_START)}
+          onClick={() => {
+            logFirstAid({
+              kind: "first_aid",
+              text: "First aid: guidance restarted from the beginning",
+              meta: { nodeId, restart: true },
+            });
+            setNodeId(TRIAGE_START);
+          }}
           style={{ marginTop: 16, padding: 14, borderRadius: 14, border: "1px solid var(--border-mid)", color: "var(--text-secondary)", fontWeight: 700, fontSize: 14 }}
         >
           {t("guided.restart")}

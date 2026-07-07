@@ -56,6 +56,10 @@ export interface IncidentMessageDto {
   authorId: string;
   authorName: string;
   text: string;
+  /** "text" | "voice" | "first_aid" | "cpr" | "system" — structured kinds carry `meta`. */
+  kind?: string;
+  /** Structured context for first_aid/cpr entries (question, answer, action, durationMs …). */
+  meta?: Record<string, unknown>;
   /** Photo attachment (server-relative URL) — e.g. a photo added from the PWA. */
   photoUrl?: string;
   /** Voice note attachment (server-relative URL) and its length. */

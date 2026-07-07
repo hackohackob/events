@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
+import { logFirstAid } from "../lib/first-aid-log";
 
 const BPM = 110;
 const BEAT_MS = 60_000 / BPM;
@@ -22,6 +23,22 @@ export function CprMode({ onClose }: { onClose: () => void }) {
   const timerRef = useRef<number | null>(null);
   const circleRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(0);
+  const startedAtRef = useRef<number | null>(null);
+  const cycleRef = useRef(1);
+
+  // Logged to the incident chat so responders see CPR was performed and for
+  // how long. Best-effort — no-ops when the session has no incident.
+  const logStop = () => {
+    if (startedAtRef.current === null) return;
+    const durationMs = Date.now() - startedAtRef.current;
+    startedAtRef.current = null;
+    const minutes = Math.round(durationMs / 6000) / 10;
+    logFirstAid({
+      kind: "cpr",
+      text: `CPR stopped after ${minutes} min (${cycleRef.current} ${cycleRef.current === 1 ? "cycle" : "cycles"})`,
+      meta: { action: "stop", durationMs, cycles: cycleRef.current },
+    });
+  };
 
   const beep = (freq: number, dur = 0.08, vol = 0.6) => {
     const ctx = ctxRef.current;
@@ -78,7 +95,8 @@ export function CprMode({ onClose }: { onClose: () => void }) {
     navigator.vibrate?.([120, 80, 120]);
     clearTimer();
     timerRef.current = window.setTimeout(() => {
-      setCycle((n) => n + 1);
+      cycleRef.current += 1;
+      setCycle(cycleRef.current);
       startCompressions();
     }, BREATHS_MS);
   };
@@ -89,11 +107,26 @@ export function CprMode({ onClose }: { onClose: () => void }) {
       ctxRef.current = new AC();
     }
     void ctxRef.current?.resume();
+    cycleRef.current = 1;
     setCycle(1);
+    startedAtRef.current = Date.now();
+    logFirstAid({
+      kind: "cpr",
+      text: `CPR started (metronome ${BPM} BPM, 30:2)`,
+      meta: { action: "start", bpm: BPM },
+    });
     startCompressions();
   };
 
-  useEffect(() => () => clearTimer(), []);
+  // Closing the coach mid-session counts as stopping CPR.
+  useEffect(
+    () => () => {
+      clearTimer();
+      logStop();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const active = phase !== "idle";
   const isBreaths = phase === "breaths";
@@ -165,6 +198,7 @@ export function CprMode({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => {
               clearTimer();
+              logStop();
               setPhase("idle");
               setCount(0);
             }}

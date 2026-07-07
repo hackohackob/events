@@ -32,6 +32,7 @@ function makeInitialData(): EventFormData {
     commandPhone: '',
     dates: [today],
     location: null,
+    activeHours: null,
     days: [{ id: 'day-1', date: today, disciplines: [], pois: [], assignments: [] }],
   }
 }
@@ -75,6 +76,7 @@ export default function CreateEventWizard({
             ? event.dates.map(d => { const dt = new Date(d); dt.setHours(0, 0, 0, 0); return dt })
             : [today],
           location: null,
+          activeHours: event.activeHours ?? null,
           days: await Promise.all((event.days ?? []).map(async (day, dayIdx) => ({
             id: `day-${dayIdx + 1}`,
             date: (() => { const d = new Date(day.date); d.setHours(0, 0, 0, 0); return d })(),

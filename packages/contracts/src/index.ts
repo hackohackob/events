@@ -371,6 +371,13 @@ export interface CloseIncidentRequest {
   transport?: string;
 }
 
+/**
+ * Incident chat message kinds. `first_aid` and `cpr` are structured entries
+ * logged automatically by the runner app during guided care; `text` always
+ * carries a human-readable fallback line for old clients.
+ */
+export type IncidentMessageKind = "text" | "voice" | "first_aid" | "cpr" | "system";
+
 export interface IncidentMessage {
   id: string;
   incidentId: string;
@@ -378,6 +385,9 @@ export interface IncidentMessage {
   authorId: string;
   authorName: string;
   text: string;
+  kind?: IncidentMessageKind;
+  /** Structured context for first_aid/cpr entries (question, answer, action, durationMs …). */
+  meta?: Record<string, unknown>;
   photoUrl?: string;
   /** Voice note attachment (server-relative URL) and its length. */
   audioUrl?: string;
@@ -390,6 +400,8 @@ export interface IncidentMessage {
 export interface SendIncidentMessageRequest {
   text: string;
   photoUrl?: string;
+  kind?: IncidentMessageKind;
+  meta?: Record<string, unknown>;
 }
 
 /** Event-wide team chat. `system` messages are the live feed (incident / response / POI). */
@@ -436,4 +448,86 @@ export interface RealtimeEnvelope<TPayload> {
   eventId: string;
   type: string;
   payload: TPayload;
+}
+
+/**
+ * Daily active-hours window for an event ("HH:mm", Europe/Sofia local time).
+ * Outside this window medic locations are visible only to coordinators.
+ * Overnight windows (end < start, e.g. 20:00–06:00) are supported.
+ */
+export interface EventActiveHours {
+  start: string;
+  end: string;
+}
+
+/** Diagnostic/treatment capabilities a hospital can be badged with. */
+export type HospitalCapability =
+  | "er"
+  | "trauma"
+  | "icu"
+  | "ct"
+  | "mri"
+  | "xray"
+  | "cardiology"
+  | "pediatric"
+  | "burn"
+  | "neurology"
+  | "orthopedics"
+  | "surgery";
+
+export const HOSPITAL_CAPABILITIES: HospitalCapability[] = [
+  "er",
+  "trauma",
+  "icu",
+  "ct",
+  "mri",
+  "xray",
+  "cardiology",
+  "pediatric",
+  "burn",
+  "neurology",
+  "orthopedics",
+  "surgery",
+];
+
+/** Structured working-hours rule. `days`: 0=Sunday … 6=Saturday; "HH:mm" local time. */
+export interface HospitalHoursRule {
+  days: number[];
+  open: string;
+  close: string;
+}
+
+export interface Hospital {
+  id: string;
+  name: string;
+  nameBg?: string;
+  address?: string;
+  city?: string;
+  lat: number;
+  lng: number;
+  phones: string[];
+  emergency24h: boolean;
+  /** Structured rules when known; `hoursText` is the raw OSM opening_hours fallback. */
+  hours?: HospitalHoursRule[];
+  hoursText?: string;
+  capabilities: HospitalCapability[];
+  notes?: string;
+  source: "osm" | "manual";
+  osmId?: string;
+  updatedAt: string;
+}
+
+export interface UpsertHospitalRequest {
+  name: string;
+  nameBg?: string;
+  address?: string;
+  city?: string;
+  lat: number;
+  lng: number;
+  phones?: string[];
+  emergency24h?: boolean;
+  hours?: HospitalHoursRule[];
+  hoursText?: string;
+  capabilities?: HospitalCapability[];
+  notes?: string;
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
-import type { TrackGeoJson } from "@events/contracts";
+import type { EventActiveHours, TrackGeoJson } from "@events/contracts";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { DbService } from "../infra/db.service";
@@ -64,6 +64,8 @@ export interface EventRecord {
   commandPhone?: string;
   dates: string[];
   location?: StoredLocation;
+  /** Daily window (Europe/Sofia) outside which medic locations are coordinator-only. */
+  activeHours?: EventActiveHours;
   days: StoredDay[];
 }
 
@@ -75,6 +77,7 @@ export interface EventSummary {
   commandPhone?: string;
   dates: string[];
   location?: string;
+  activeHours?: EventActiveHours;
   disciplineCount: number;
   medicCount: number;
   days: StoredDay[];
@@ -138,6 +141,24 @@ function parseGpxPoints(content: string): Array<{ lat: number; lng: number; ele?
   return points;
 }
 
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Formats any instant as "HH:mm" in the event's local timezone, regardless of server TZ. */
+const SOFIA_HHMM = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Sofia",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function normalizeActiveHours(
+  input?: { start?: string; end?: string } | null,
+): EventActiveHours | undefined {
+  if (!input?.start || !input?.end) return undefined;
+  if (!HHMM_RE.test(input.start) || !HHMM_RE.test(input.end)) return undefined;
+  return { start: input.start, end: input.end };
+}
+
 function toSummary(event: EventRecord): EventSummary {
   const disciplineCount = event.days.reduce((sum, d) => sum + d.disciplines.length, 0);
   const medicCount = event.days.reduce((sum, d) => sum + d.assignments.length, 0);
@@ -149,6 +170,7 @@ function toSummary(event: EventRecord): EventSummary {
     commandPhone: event.commandPhone,
     dates: event.dates,
     location: event.location?.name,
+    activeHours: event.activeHours,
     disciplineCount,
     medicCount,
     days: event.days,
@@ -221,6 +243,7 @@ export class EventsService implements OnModuleInit {
       commandPhone: payload.commandPhone,
       dates: sortedDates,
       location: payload.location,
+      activeHours: normalizeActiveHours(payload.activeHours),
       days: payload.days.map((d) => ({
         date: d.date,
         disciplines: d.disciplines.map((disc) => ({
@@ -259,6 +282,7 @@ export class EventsService implements OnModuleInit {
       commandPhone: payload.commandPhone,
       dates: sortedDates,
       location: payload.location,
+      activeHours: normalizeActiveHours(payload.activeHours),
       days: payload.days.map((d) => ({
         date: d.date,
         disciplines: d.disciplines.map((disc) => ({
@@ -284,6 +308,20 @@ export class EventsService implements OnModuleInit {
   findById(id: string): EventSummary | null {
     const event = this.events.find((e) => e.id === id);
     return event ? toSummary(event) : null;
+  }
+
+  /**
+   * True when `now` falls inside the event's daily active-hours window
+   * (Europe/Sofia). Events without a window are always active. Overnight
+   * windows (end < start) span midnight.
+   */
+  isWithinActiveHours(eventId: string, now: Date = new Date()): boolean {
+    const ah = this.events.find((e) => e.id === eventId)?.activeHours;
+    if (!ah) return true;
+    const hm = SOFIA_HHMM.format(now);
+    return ah.start <= ah.end
+      ? hm >= ah.start && hm <= ah.end
+      : hm >= ah.start || hm <= ah.end;
   }
 
   async remove(id: string): Promise<boolean> {

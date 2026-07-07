@@ -84,6 +84,9 @@ export interface EventFormData {
   commandPhone: string
   dates: Date[]
   location: { name: string; coordinates: [number, number] } | null
+  /** Daily window ("HH:mm", Europe/Sofia) outside which medic locations are
+   *  visible only to coordinators. Null = always visible. */
+  activeHours: { start: string; end: string } | null
   days: EventDay[]
 }
 

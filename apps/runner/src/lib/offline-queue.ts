@@ -1,10 +1,11 @@
-import type { CreateIncidentRequest } from "../api/contracts-shim";
-import { createIncident, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
+import type { CreateIncidentRequest, IncidentMessageKind } from "../api/contracts-shim";
+import { createIncident, sendIncidentMessage, uploadIncidentPhoto, uploadIncidentVoice } from "../api";
 
 const DB_NAME = "pe-runner";
 const STORE = "incident-queue";
 const ATTACHMENT_STORE = "attachment-queue";
-const DB_VERSION = 2;
+const MESSAGE_STORE = "message-queue";
+const DB_VERSION = 3;
 
 interface QueuedIncident {
   id: string;
@@ -26,6 +27,18 @@ interface QueuedAttachment {
   queuedAt: string;
 }
 
+/** An incident-chat message (e.g. a first-aid / CPR log entry from guided care)
+ *  that failed to send. Order matters for the care timeline, so the flush
+ *  replays them oldest-first and stops on the first failure. */
+interface QueuedMessage {
+  id: string;
+  incidentId: string;
+  text: string;
+  kind?: IncidentMessageKind;
+  meta?: Record<string, unknown>;
+  queuedAt: string;
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -35,6 +48,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!req.result.objectStoreNames.contains(ATTACHMENT_STORE)) {
         req.result.createObjectStore(ATTACHMENT_STORE, { keyPath: "id" });
+      }
+      if (!req.result.objectStoreNames.contains(MESSAGE_STORE)) {
+        req.result.createObjectStore(MESSAGE_STORE, { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -102,6 +118,33 @@ export async function enqueueAttachment(
 
 export async function queuedAttachmentCount(): Promise<number> {
   return tx<number>(ATTACHMENT_STORE, "readonly", (s) => s.count());
+}
+
+export async function enqueueMessage(item: Omit<QueuedMessage, "id" | "queuedAt">): Promise<void> {
+  const record: QueuedMessage = {
+    ...item,
+    id: `m_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    queuedAt: new Date().toISOString(),
+  };
+  await tx(MESSAGE_STORE, "readwrite", (s) => s.put(record));
+}
+
+/** Best-effort: replay queued incident-chat messages oldest-first; a failure
+ *  stops the flush so the care timeline keeps its original order. */
+export async function flushMessageQueue(): Promise<number> {
+  const items = await tx<QueuedMessage[]>(MESSAGE_STORE, "readonly", (s) => s.getAll());
+  items.sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
+  let sent = 0;
+  for (const item of items) {
+    try {
+      await sendIncidentMessage(item.incidentId, item.text, { kind: item.kind, meta: item.meta });
+      await tx(MESSAGE_STORE, "readwrite", (s) => s.delete(item.id));
+      sent++;
+    } catch {
+      break; // still offline / server unreachable — retry on the next flush
+    }
+  }
+  return sent;
 }
 
 /** Best-effort: retry every queued photo/voice attachment; remove on success.

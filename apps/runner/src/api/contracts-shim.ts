@@ -5,15 +5,18 @@
 export type {
   AbcStep,
   CreateIncidentRequest,
+  EventActiveHours,
   GuidanceRequest,
   GuidanceResponse,
   IncidentCategory,
+  IncidentMessageKind,
   IncidentSeverity,
   IncidentStatus,
   JoinEventRequest,
   ParticipantLocationRequest,
   PublicMedicState,
   RegisterParticipantRequest,
+  SendIncidentMessageRequest,
   SessionPayload,
   TrackGeoJson,
 } from "@events/contracts";

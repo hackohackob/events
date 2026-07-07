@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   ChevronRight, Calendar, MapPin, Users, Activity,
   Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
-  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check, MessageCircle, ChevronDown
+  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check, MessageCircle, ChevronDown, Clock
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
@@ -54,6 +54,45 @@ function msToLabel(ms: number): string {
 
 function isOnline(lastSeenAt: string) {
   return Date.now() - new Date(lastSeenAt).getTime() < 120_000 // 2 min — 4× the 30s send interval
+}
+
+// ─── Active hours badge ───────────────────────────────────────────────────────
+
+const SOFIA_HHMM = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Sofia', hour: '2-digit', minute: '2-digit', hour12: false,
+})
+
+/** Header chip showing the visibility window; amber when currently outside it
+ *  (medics are hidden from non-coordinators right now — the dashboard still sees all). */
+function ActiveHoursBadge({ hours }: { hours: { start: string; end: string } }) {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick(n => n + 1), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  void tick // re-render each minute so the badge flips at the boundary
+  const hm = SOFIA_HHMM.format(new Date())
+  const inside = hours.start <= hours.end
+    ? hm >= hours.start && hm <= hours.end
+    : hm >= hours.start || hm <= hours.end
+  const color = inside ? '#94a3b8' : '#f59e0b'
+  return (
+    <span
+      className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+      style={{
+        color,
+        background: inside ? 'rgba(148,163,184,0.08)' : 'rgba(245,158,11,0.12)',
+        border: `1px solid ${inside ? 'rgba(148,163,184,0.2)' : 'rgba(245,158,11,0.25)'}`,
+      }}
+      title={inside
+        ? `Medic locations visible to everyone ${hours.start}–${hours.end}`
+        : 'Outside active hours — medic locations visible only to coordinators'}
+    >
+      <Clock className="w-3 h-3" />
+      {hours.start}–{hours.end}
+      {!inside && ' · team hidden'}
+    </span>
+  )
 }
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
@@ -481,6 +520,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: status.color }} />
             {status.label}
           </span>
+          {event.activeHours && <ActiveHoursBadge hours={event.activeHours} />}
         </div>
         <div className="flex items-center gap-3">
           {/* WS connection badge (active events only) */}

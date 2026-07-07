@@ -11,6 +11,7 @@ import {
 import { fetchEvent, fetchTracks, postParticipantLocation } from "../api";
 import {
   flushAttachmentQueue,
+  flushMessageQueue,
   flushQueue,
   queuedAttachmentCount,
   queuedCount,
@@ -78,6 +79,7 @@ async function loadEventInfo(id: string): Promise<EventInfo> {
     title: event.title,
     tracks: tracks.map((t, i) => ({ id: t.id, label: t.label, color: trackColor(i, t.color) })),
     commandPhone: event.commandPhone?.trim() || undefined,
+    activeHours: event.activeHours,
   };
 }
 
@@ -169,7 +171,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const flush = () => void flushQueue().then(() => flushAttachmentQueue()).then(() => refreshQueued());
+    const flush = () =>
+      void flushQueue()
+        .then(() => flushAttachmentQueue())
+        .then(() => flushMessageQueue())
+        .then(() => refreshQueued());
     // Flush on boot too (not just on a live "online" transition) — if the tab
     // was closed while items were queued in IndexedDB, they'd otherwise sit
     // untouched until the browser fires a fresh online event, which may never

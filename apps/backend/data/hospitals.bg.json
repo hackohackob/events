@@ -1,0 +1,5097 @@
+[
+  {
+    "osmId": "node/5145063321",
+    "name": "\"Биомед - 99\"",
+    "lat": 43.987313,
+    "lng": 22.8764666,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205619004",
+    "name": "\"ЗДРАВНА СЛУЖБА - с. Герман\"",
+    "address": "Патриарх Герман 69",
+    "lat": 42.6139656,
+    "lng": 23.4148145,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/258623176",
+    "name": "\"МБАЛ-Дулово\" ЕООД (Болница)",
+    "address": "Розова долина 37",
+    "city": "Дулово",
+    "lat": 43.8211425,
+    "lng": 27.1468917,
+    "phones": [
+      "+359 855 30 29",
+      "+359 855 32 00",
+      "+359 86 423 200"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/359184726",
+    "name": "￼Комплексен онкологичен център - Шумен",
+    "address": "Васил Априлов 611",
+    "city": "Шумен",
+    "lat": 43.2766066,
+    "lng": 26.9181424,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/1848659",
+    "name": "1 ДКЦ",
+    "lat": 43.5711388,
+    "lng": 27.8314131,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5925984741",
+    "name": "1-ви ДКЦ филиал",
+    "lat": 43.2115592,
+    "lng": 23.5581283,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/204621858",
+    "name": "16 ДКЦ",
+    "lat": 42.7381259,
+    "lng": 23.507933,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/254336465",
+    "name": "17-ти ДКЦ",
+    "address": "бул. Евлоги и Христо Георгиеви 108",
+    "city": "София",
+    "lat": 42.6971274,
+    "lng": 23.3476634,
+    "phones": [
+      "+359 2 944 4149"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/140265412",
+    "name": "2 ДКЦ",
+    "address": "бул. 25-ти Септември 68",
+    "city": "Добрич",
+    "lat": 43.5776538,
+    "lng": 27.8287638,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336328",
+    "name": "2-ри ДКЦ",
+    "address": "Хан Крум 1",
+    "city": "София",
+    "lat": 42.6913656,
+    "lng": 23.3240667,
+    "phones": [
+      "+359 2 988 2868",
+      "+359 2 987 3402",
+      "+359 2 987 3403"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1487707888",
+    "name": "2-ро ДКЦ",
+    "lat": 42.1478223,
+    "lng": 24.7328545,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/45669743",
+    "name": "23-ти ДКЦ",
+    "address": "Клисура 20",
+    "lat": 42.7071563,
+    "lng": 23.3531387,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/166111297",
+    "name": "25-ти ДКЦ",
+    "address": "Свето Преображение 20",
+    "city": "София",
+    "lat": 42.640502,
+    "lng": 23.3825329,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/6898782",
+    "name": "28-ми ДКЦ",
+    "lat": 42.6652969,
+    "lng": 23.4056141,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/12615524086",
+    "name": "2ра поликлиника",
+    "lat": 42.4302126,
+    "lng": 25.6265909,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/131620510",
+    "name": "3 ДКЦ",
+    "lat": 42.1685472,
+    "lng": 24.7465751,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1800513100",
+    "name": "3-то ДКЦ",
+    "lat": 42.6995877,
+    "lng": 23.3284419,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1708836742",
+    "name": "31 ДКЦ",
+    "lat": 42.8024514,
+    "lng": 23.341984,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/94417409",
+    "name": "4 ДКЦ",
+    "city": "Пловдив",
+    "lat": 42.1303897,
+    "lng": 24.7147963,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3357347872",
+    "name": "4D Medical Д-р Троянчев Фетална морфология",
+    "lat": 42.1490659,
+    "lng": 24.7501551,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "relation/1022959",
+    "name": "5-ти ДКЦ - студентска поликлиника",
+    "lat": 42.6526237,
+    "lng": 23.34655,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/87407534",
+    "name": "5-то ДКЦ",
+    "lat": 42.132311,
+    "lng": 24.7938387,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/13854648",
+    "name": "7-ми ДКЦ",
+    "address": "бул. Княгиня Мария Луиза 191",
+    "lat": 42.7123056,
+    "lng": 23.3158552,
+    "phones": [],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 07:30-19:30",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/257534018",
+    "name": "Acibadem City Clinic Orthopaedic",
+    "nameBg": "Аджибадем Сити Клиник УМБАЛ Ортопедия",
+    "address": "Околовръстен път 127",
+    "lat": 42.6400443,
+    "lng": 23.3181043,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/331131950",
+    "name": "Acibadem City Clinic Tokuda Hospital",
+    "nameBg": "Аджибадем Сити Клиник УМБАЛ Токуда",
+    "address": "бул. Никола Й. Вапцаров 51Б",
+    "lat": 42.6647698,
+    "lng": 23.3251494,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/1390044765",
+    "name": "Acibadem City Clinic Vitosha",
+    "nameBg": "Аджибадем Сити Клиник УМБАЛ Витоша",
+    "lat": 42.6385359,
+    "lng": 23.3174425,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/723262702",
+    "name": "Acıbadem City Clinic",
+    "nameBg": "Аджибадем Сити Клиник",
+    "address": "Брегалница 1",
+    "city": "Варна",
+    "lat": 43.2173783,
+    "lng": 27.9160266,
+    "phones": [
+      "+359 89 220 2080"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/422945157",
+    "name": "Atanas Dafovski",
+    "nameBg": "Атанас Дафовски",
+    "city": "Кърджали",
+    "lat": 41.6461291,
+    "lng": 25.3751199,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/987680771",
+    "name": "Avis Medica",
+    "nameBg": "Авис Медика",
+    "lat": 43.3856474,
+    "lng": 24.6330777,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/12048900634",
+    "name": "Beta clinic",
+    "lat": 42.676086,
+    "lng": 23.3213051,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/552183246",
+    "name": "Burgasmed",
+    "nameBg": "МБАЛ Бургасмед",
+    "lat": 42.4633517,
+    "lng": 27.420723,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/406273516",
+    "name": "Children's Specialized Hospital for Pulmonary Diseases Tsaritsa Ioanna",
+    "nameBg": "Детска специализирана болница за белодробни заболявания Царица Йоана",
+    "lat": 42.8669232,
+    "lng": 25.4771603,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/13462540539",
+    "name": "DCC Sofiamed - Lylin",
+    "nameBg": "ДКЦ Софиямед - Люлин",
+    "lat": 42.7143185,
+    "lng": 23.2570838,
+    "phones": [
+      "+359 2 465 0003"
+    ],
+    "emergency24h": true,
+    "hoursText": "24/7",
+    "capabilities": [
+      "cardiology",
+      "pediatric",
+      "neurology",
+      "orthopedics",
+      "surgery"
+    ]
+  },
+  {
+    "osmId": "way/275265611",
+    "name": "Dr Georgi Nichev",
+    "address": "Георги Кьосеиванов 6a",
+    "city": "Пещера",
+    "lat": 42.0321794,
+    "lng": 24.3040286,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/7743628171",
+    "name": "Dr. Rumiana Anastasova",
+    "nameBg": "Д-р Румяна Анастасова",
+    "address": "Ялта 123",
+    "city": "София",
+    "lat": 42.717954,
+    "lng": 23.2707313,
+    "phones": [
+      "+359 88 636 4593"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo, We, Fr 14:00-20:00; Tu, Th 09:00-14:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/478836542",
+    "name": "Emergency Medical Center",
+    "nameBg": "Спешен медицински център",
+    "address": "Васил Левски 10А",
+    "city": "Болярово",
+    "lat": 42.1499773,
+    "lng": 26.8122517,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/4195286157",
+    "name": "Eurohospital",
+    "lat": 43.2408082,
+    "lng": 27.9812487,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/567521593",
+    "name": "Exacta Medica - medical center",
+    "nameBg": "МЦ \"Екзакта Медика\"",
+    "address": "Христо Ясенов 13",
+    "lat": 43.410207,
+    "lng": 24.6309903,
+    "phones": [
+      "+359 64 986 666"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10219177017",
+    "name": "Eyecare hospital “Zora”",
+    "nameBg": "Очна Болница “Зора”",
+    "lat": 42.6624822,
+    "lng": 23.3803513,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2392507501",
+    "name": "Health Service Kutovo",
+    "nameBg": "Здравна служба Кутово",
+    "lat": 44.0284149,
+    "lng": 22.9527191,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1115747518",
+    "name": "Hospice Blocks & Dragalevtsi Village",
+    "nameBg": "Хоспис Блокс и Драгалевци вилидж",
+    "address": "Константин Помянов 3",
+    "city": "София",
+    "lat": 42.6377452,
+    "lng": 23.316971,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/82217896",
+    "name": "Hospital \"Trakia\" - Center",
+    "nameBg": "МБАЛ \"Тракия\" - Център",
+    "lat": 42.4233965,
+    "lng": 25.635543,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/665030002",
+    "name": "Hospital Blagoevgrad",
+    "nameBg": "МБАЛ-Благоевград",
+    "address": "Славянска 60",
+    "city": "Благоевград",
+    "lat": 42.0233917,
+    "lng": 23.0903681,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/665030004",
+    "name": "Hospital Pulse",
+    "nameBg": "Болница ПУЛС",
+    "lat": 42.0234246,
+    "lng": 23.0895848,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/166217042",
+    "name": "Hospital Saint Lazar",
+    "nameBg": "САГБАЛ Св. Лазар",
+    "lat": 42.6594085,
+    "lng": 23.3363618,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1424602120",
+    "name": "Hospital Trakia",
+    "nameBg": "Болница \"Тракия\"",
+    "lat": 42.4361466,
+    "lng": 25.6128439,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/666113972",
+    "name": "I ДКЦ",
+    "lat": 42.6968638,
+    "lng": 27.248811,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1219125647",
+    "name": "II ДКЦ",
+    "lat": 42.6788339,
+    "lng": 26.3112838,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9612261575",
+    "name": "II ДКЦ Св. Иван Рилски",
+    "lat": 43.1813295,
+    "lng": 27.8956754,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9499870767",
+    "name": "IV ДКЦ",
+    "lat": 43.2278309,
+    "lng": 27.9344775,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336452",
+    "name": "IV МБАЛ",
+    "address": "бул. Македония 38",
+    "lat": 42.6931112,
+    "lng": 23.311373,
+    "phones": [
+      "+359 2 953 2485"
+    ],
+    "emergency24h": false,
+    "capabilities": [
+      "cardiology",
+      "xray"
+    ]
+  },
+  {
+    "osmId": "node/254336433",
+    "name": "IV Работническа болница",
+    "lat": 42.660728,
+    "lng": 23.417155,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/330687480",
+    "name": "Life Hospital",
+    "nameBg": "Лайф Хоспитал",
+    "lat": 42.5275291,
+    "lng": 27.4680125,
+    "phones": [
+      "+359 56 875 050",
+      "+359 89 467 9964"
+    ],
+    "emergency24h": true,
+    "hoursText": "24/7",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/788261487",
+    "name": "Life Hospital",
+    "nameBg": "Лайф хоспитал",
+    "lat": 42.7157294,
+    "lng": 27.7597403,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/8865999217",
+    "name": "Lina",
+    "nameBg": "Лина",
+    "address": "Княз Борис I",
+    "lat": 42.4966128,
+    "lng": 27.4648548,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/16476740",
+    "name": "Lozenets University Hospital",
+    "nameBg": "Университетска болница „Лозенец“",
+    "address": "Козяк 1",
+    "city": "София",
+    "lat": 42.6637697,
+    "lng": 23.3110717,
+    "phones": [
+      "+35970070085",
+      "+35929607682"
+    ],
+    "emergency24h": true,
+    "hoursText": "24/7",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/186639000",
+    "name": "Lungs treating Dispensary",
+    "nameBg": "Диспансер за белодробни заболявания",
+    "address": "Mануш Войвода 11A",
+    "city": "Варна",
+    "lat": 43.2097436,
+    "lng": 27.8907878,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/273577218",
+    "name": "Lyulin Hospital",
+    "nameBg": "Болница \"Люлин\"",
+    "address": "бул. Д-р Петър Дертлиев 81",
+    "lat": 42.7083563,
+    "lng": 23.2492511,
+    "phones": [
+      "+35928927400"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1699496559",
+    "name": "Malinov Clinic",
+    "nameBg": "СБАЛГАР - д-р Малинов ООД",
+    "lat": 42.675219,
+    "lng": 23.2894374,
+    "phones": [
+      "+359 2 965 5711"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/469440743",
+    "name": "MBAL \"D-r Tota Venkova\"",
+    "nameBg": "МБАЛ \"Д-р Тота Венкова\"",
+    "lat": 42.8712531,
+    "lng": 25.3072341,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/550712774",
+    "name": "MBAL Hristo Botev",
+    "nameBg": "МБАЛ „Христо Ботев\"",
+    "address": "бул. Втори юни 66",
+    "city": "Враца",
+    "lat": 43.1962521,
+    "lng": 23.5586046,
+    "phones": [
+      "+359 92 923 039"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/12400103768",
+    "name": "Medical Center Salvebis",
+    "nameBg": "Медицински Център Салвебис",
+    "lat": 42.6770682,
+    "lng": 23.3325593,
+    "phones": [],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 08:00-20:00",
+    "capabilities": [
+      "surgery"
+    ]
+  },
+  {
+    "osmId": "way/234940012",
+    "name": "Medical complex \"Maychin dom\" - Varna",
+    "nameBg": "Медицински комплекс \"Майчин дом\" - Варна",
+    "lat": 43.2200954,
+    "lng": 27.9265264,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/94410805",
+    "name": "Medical University Plovdiv",
+    "nameBg": "Медицински университ Пловдив",
+    "lat": 42.1383914,
+    "lng": 24.7361796,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/162698434",
+    "name": "Medline",
+    "address": "Филип Македонски 37",
+    "lat": 42.1384119,
+    "lng": 24.7399756,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/305866533",
+    "name": "MHATNP \"St. Naum\"",
+    "nameBg": "MБАЛНП “Св. Наум”",
+    "address": "Д-р Любен Русев 1",
+    "lat": 42.6671731,
+    "lng": 23.3622021,
+    "phones": [
+      "+359 2 970 2300"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/2325104",
+    "name": "Military Medical Academy",
+    "nameBg": "Военномедицинска академия",
+    "address": "Св. Георги Софийски 3",
+    "city": "София",
+    "lat": 42.6841192,
+    "lng": 23.3044396,
+    "phones": [
+      "+359 2 922 6000"
+    ],
+    "emergency24h": true,
+    "hoursText": "24/7",
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/5935752122",
+    "name": "Multiprofile Hospital for Active Treatment",
+    "nameBg": "Многопрофилна Болница за Активно Лечение",
+    "lat": 43.7473846,
+    "lng": 27.4165683,
+    "phones": [
+      "+359 575 12 063"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/315473055",
+    "name": "National Oncology Hospital",
+    "nameBg": "Национална специализирана болница за активно лечение по онкология",
+    "address": "Пловдивско поле 6",
+    "lat": 42.6601017,
+    "lng": 23.3605727,
+    "phones": [
+      "+359 2 807 6299"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/40954409",
+    "name": "Private Surgical Hospital",
+    "nameBg": "МБАЛ Д-р Маджуров",
+    "lat": 42.5184461,
+    "lng": 27.4654598,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/339144625",
+    "name": "Regional Hospital Dr. Teodosi Vitanov",
+    "nameBg": "Районна болница Д-р Теодоси Витанов",
+    "lat": 42.8682263,
+    "lng": 25.4870494,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/258837058",
+    "name": "Second MBAL Sofia",
+    "nameBg": "Втора многопрофилна болница за активно лечение – София ЕАД",
+    "address": "бул. Христо Ботев 120",
+    "city": "София",
+    "lat": 42.7061114,
+    "lng": 23.3185894,
+    "phones": [
+      "+359 2 931 4024"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962797645",
+    "name": "Silistra Hospital",
+    "nameBg": "МБАЛ Силистра",
+    "lat": 44.1105098,
+    "lng": 27.2636093,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/469440742",
+    "name": "Specialized Hospital for Active Treatment of Pulmonary Diseases - Gabrovo",
+    "nameBg": "СБАЛ по Белодробни Болести- Габрово-ПАРАХОДА",
+    "address": "Д-р Кирил Въгленов 1",
+    "city": "Габрово",
+    "lat": 42.8438637,
+    "lng": 25.314653,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/40932602",
+    "name": "Specialized Hospital for treatment of pneumo-physical diseases",
+    "nameBg": "Специализирана болница за лечение на пневмо-фтизиатрични заболявания",
+    "lat": 42.5007069,
+    "lng": 27.4771321,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/781363836",
+    "name": "Specialized private eye clinic for active treatment Ralchovski EOOD",
+    "address": "Вежен 2A",
+    "city": "Враца",
+    "lat": 43.1955237,
+    "lng": 23.5621729,
+    "phones": [
+      "+359 92 623 204"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/6637633",
+    "name": "St. Anna Hospital",
+    "nameBg": "МБАЛ Света Анна",
+    "lat": 43.2139272,
+    "lng": 27.9177215,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1224505197",
+    "name": "Stomatology",
+    "nameBg": "Стоматология",
+    "lat": 41.5766087,
+    "lng": 24.7071675,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/337159490",
+    "name": "Sunny Beach Hospital",
+    "nameBg": "Болница Слънчев Бряг",
+    "lat": 42.6677569,
+    "lng": 27.7065961,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/329160048",
+    "name": "Sv. Pantaleymon",
+    "nameBg": "СБАЛ Св. Панталеймон",
+    "address": "Трите Бора 19-24",
+    "city": "Плевен",
+    "lat": 43.4022222,
+    "lng": 24.6428453,
+    "phones": [
+      "+359 87 847 1334"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/27017959",
+    "name": "Sveta Petka",
+    "nameBg": "МБАЛ „Света Петка“",
+    "address": "Цар Симеон Велики 119",
+    "city": "Видин",
+    "lat": 43.9972553,
+    "lng": 22.8769537,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/6404105350",
+    "name": "Therapeutic community \"Phoenix\"",
+    "address": "Рилски Езера 16",
+    "city": "Бракьовци",
+    "lat": 43.0602668,
+    "lng": 23.1567585,
+    "phones": [
+      "+359 89 820 9175"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5648238478",
+    "name": "Thraumatology Hospital \"Prof. Dr. Dimitar Shoilev\"",
+    "nameBg": "СБАЛТОСМ - проф. д-р Димитър Шойлев",
+    "address": "Никола Габровски 1",
+    "city": "София",
+    "lat": 42.6644386,
+    "lng": 23.344287,
+    "phones": [
+      "+359 2 962 0453"
+    ],
+    "emergency24h": false,
+    "capabilities": [
+      "orthopedics"
+    ]
+  },
+  {
+    "osmId": "node/9952667332",
+    "name": "UMBAL “Sartse i Mozak”",
+    "address": "Пиер Кюри 2",
+    "city": "Плевен",
+    "lat": 43.4099923,
+    "lng": 24.607888,
+    "phones": [
+      "+359 64 678 400"
+    ],
+    "emergency24h": false,
+    "capabilities": [
+      "trauma",
+      "icu",
+      "cardiology",
+      "neurology",
+      "orthopedics",
+      "surgery",
+      "xray"
+    ]
+  },
+  {
+    "osmId": "way/313886020",
+    "name": "UMBAL „Sv. Anna“",
+    "nameBg": "УМБАЛ „Св. Анна“",
+    "address": "Димитър Моллов 1",
+    "city": "София",
+    "lat": 42.6603077,
+    "lng": 23.3719287,
+    "phones": [
+      "+359 2 975 9329"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/40820723",
+    "name": "UMBAL Burgas",
+    "nameBg": "УМБАЛ Бургас",
+    "lat": 42.5135674,
+    "lng": 27.4659001,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/406078581",
+    "name": "UniHospital",
+    "nameBg": "МЦ “УниХоспитал”",
+    "address": "Околовръстен път 27",
+    "city": "София",
+    "lat": 42.6522829,
+    "lng": 23.2878759,
+    "phones": [
+      "+359 88 464 8711"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 08:00-20:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/791110653",
+    "name": "University Hospital \"Pulmed\"",
+    "nameBg": "УМБАЛ Пълмед",
+    "address": "Перущица 1",
+    "city": "Пловдив",
+    "lat": 42.1384001,
+    "lng": 24.7174627,
+    "phones": [
+      "+359 32 607 300"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/17815559",
+    "name": "University Hospital \"St George\"",
+    "nameBg": "УМБАЛ Свети Георги",
+    "address": "бул. Пещерско шосе 66",
+    "city": "Пловдив",
+    "lat": 42.1383199,
+    "lng": 24.7130769,
+    "phones": [
+      "+359 32 602 211"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/9664206416",
+    "name": "V ДКЦ \"Св. Екатерина\"",
+    "lat": 43.2088376,
+    "lng": 27.8953338,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336554",
+    "name": "Vita hospital",
+    "nameBg": "МБАЛ \"Вита\" ЕООД",
+    "address": "Драговица 9",
+    "lat": 42.6960164,
+    "lng": 23.3543932,
+    "phones": [
+      "+359 2 960 4950"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/563285121",
+    "name": "Vita Hospital",
+    "nameBg": "Болница Вита",
+    "address": "Филип Кутев 10",
+    "city": "София",
+    "lat": 42.6562873,
+    "lng": 23.3205444,
+    "phones": [
+      "+359 2 452 2000"
+    ],
+    "emergency24h": false,
+    "capabilities": [
+      "orthopedics",
+      "surgery",
+      "xray"
+    ]
+  },
+  {
+    "osmId": "way/162941613",
+    "name": "Viva Clinic",
+    "nameBg": "Вива Клиник",
+    "lat": 42.697088,
+    "lng": 27.7048884,
+    "phones": [
+      "+359 55 495 095"
+    ],
+    "emergency24h": false,
+    "hoursText": "May-Sep: 24/7; Oct-Apr: Mo-Fr 09:00-17:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4063679090",
+    "name": "Zdraveto",
+    "nameBg": "Здравето",
+    "address": "Маестро Кънев 7",
+    "lat": 42.681331,
+    "lng": 23.27076,
+    "phones": [
+      "+35924911719",
+      "+359888906811"
+    ],
+    "emergency24h": true,
+    "hoursText": "24/7",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/329253703",
+    "name": "Авис Медика",
+    "address": "Коста Хаджипакев 9",
+    "lat": 43.4114128,
+    "lng": 24.6167878,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/377461179",
+    "name": "АГ \"Весела\"",
+    "lat": 42.1540276,
+    "lng": 24.756002,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/546985068",
+    "name": "АГ ЕВА",
+    "lat": 42.6923014,
+    "lng": 26.3433267,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3955468959",
+    "name": "АГ Комплекс-Русе",
+    "lat": 43.8581627,
+    "lng": 25.9620768,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/11267196505",
+    "name": "АГ Център Стима",
+    "lat": 43.2671533,
+    "lng": 26.9249798,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/103485305",
+    "name": "АГО Хасково",
+    "address": "Единство",
+    "lat": 41.936867,
+    "lng": 25.5659202,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/223530562",
+    "name": "Аджибадем Сити Клиник УМБАЛ Младост",
+    "address": "бул. Цариградско шосе 66А",
+    "city": "София",
+    "lat": 42.65521,
+    "lng": 23.3855704,
+    "phones": [
+      "+359 700 13127"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1362568798",
+    "name": "Акушеро-гинекология",
+    "address": "Генерал Столетов 115",
+    "city": "Стара Загора",
+    "lat": 42.4284861,
+    "lng": 25.6273586,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1390974933",
+    "name": "АПМП",
+    "address": "Освобождение 6",
+    "city": "Езерче",
+    "lat": 43.5615449,
+    "lng": 26.3145885,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/134819176",
+    "name": "Аптека",
+    "lat": 43.2573796,
+    "lng": 27.8162851,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/313170708",
+    "name": "Балнео лечебница",
+    "lat": 42.5050065,
+    "lng": 24.3239331,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/148871000",
+    "name": "Бивш ДКЦ 6",
+    "lat": 42.1399181,
+    "lng": 24.7408311,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/219393670",
+    "name": "Бившa рехабилитационна база \"Драгалевци\"",
+    "lat": 42.6127659,
+    "lng": 23.3150074,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1339193215",
+    "name": "Бивша болница",
+    "lat": 42.6654054,
+    "lng": 22.5820052,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3480871674",
+    "name": "БОДИЛАБ",
+    "lat": 42.6781473,
+    "lng": 26.3176016,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6121148695",
+    "name": "Болница",
+    "lat": 43.3849909,
+    "lng": 22.8746081,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/247289110",
+    "name": "Болница \"Петромар\" АД",
+    "lat": 42.6916173,
+    "lng": 25.3182842,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205494664",
+    "name": "Болница за долекуване, продължително лечение и рехабилитация",
+    "lat": 42.7033637,
+    "lng": 23.1447305,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/161464854",
+    "name": "Болница за репродуктивна медицина София",
+    "address": "Баку 5Б",
+    "city": "София",
+    "lat": 42.6574867,
+    "lng": 23.3528216,
+    "phones": [],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 08:30-17:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "node/13944509649",
+    "name": "Болница за рехабилитация \"Сердика\"",
+    "address": "Франкофония 12A",
+    "lat": 42.680513,
+    "lng": 23.2514808,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/301708383",
+    "name": "Болница Кубрат",
+    "lat": 43.7926169,
+    "lng": 26.5006031,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/509191670",
+    "name": "Болница Рахила Ангелова",
+    "lat": 42.6112317,
+    "lng": 23.0363262,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/1835888300",
+    "name": "Бърза помощ",
+    "address": "Республиканска",
+    "city": "Созопол",
+    "lat": 42.4126772,
+    "lng": 27.6979718,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/5834578166",
+    "name": "Бърза помощ",
+    "lat": 43.016293,
+    "lng": 23.0426577,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/134933656",
+    "name": "Ветеринарна клиника",
+    "lat": 43.2568494,
+    "lng": 27.824902,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/122061936",
+    "name": "Ветеринарна лечебница",
+    "lat": 42.2585186,
+    "lng": 25.3296665,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4712368875",
+    "name": "ВИТА",
+    "lat": 42.0313634,
+    "lng": 23.9848039,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10221045704",
+    "name": "Вита Мед",
+    "lat": 42.6409453,
+    "lng": 24.8047623,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/193500190",
+    "name": "Вита Мед",
+    "lat": 42.6426736,
+    "lng": 24.8047677,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/986643188",
+    "name": "Витоша СБАЛ по ортопедия и травматология",
+    "lat": 42.6423205,
+    "lng": 23.334234,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/87388613",
+    "name": "ВМА МБАЛ Пловдив (Военна болница)",
+    "lat": 42.1369077,
+    "lng": 24.757087,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962793004",
+    "name": "ВМА Сливен",
+    "lat": 42.6762287,
+    "lng": 26.336245,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/460913299",
+    "name": "Военна болница",
+    "lat": 41.9326363,
+    "lng": 25.5640763,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/518564462",
+    "name": "Военна болница",
+    "lat": 43.4154488,
+    "lng": 24.6317302,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/41445052",
+    "name": "Военно-морска болница",
+    "lat": 43.2277466,
+    "lng": 27.9262894,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/254336408",
+    "name": "Втора Акушеро - гинекологична болница Шейново",
+    "address": "Шейново 19",
+    "city": "София",
+    "lat": 42.6926447,
+    "lng": 23.3400561,
+    "phones": [
+      "+359 2 965 9481"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/116760885",
+    "name": "Втора Градска Поликлиника",
+    "lat": 43.4066735,
+    "lng": 24.6207199,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1036687527",
+    "name": "Градска болница",
+    "lat": 43.2063559,
+    "lng": 27.9091317,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/2961771",
+    "name": "Градска Поликлиника",
+    "lat": 43.0785356,
+    "lng": 25.6304583,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9562673943",
+    "name": "Д-р Мария Саздова",
+    "address": "Найден Георгиев 50",
+    "city": "София",
+    "lat": 42.7095726,
+    "lng": 23.351582,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": [
+      "pediatric"
+    ]
+  },
+  {
+    "osmId": "node/13382822234",
+    "name": "Д-р Михаил Иринков УНГ Амбулатория",
+    "address": "бул. Васил Левски 6",
+    "city": "Велико Търново",
+    "lat": 43.0805616,
+    "lng": 25.6300282,
+    "phones": [],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 09:30-13:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6991746245",
+    "name": "Д-р Тотка Чукалова",
+    "address": "Стара планина 12",
+    "city": "Казанлък",
+    "lat": 42.6215535,
+    "lng": 25.3875371,
+    "phones": [
+      "+359 89 474 9348"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6615742030",
+    "name": "Д-р Юрий Асенов - Пластичен Хирург",
+    "address": "Димитър Цончев 5",
+    "city": "Пловдив",
+    "lat": 42.150767,
+    "lng": 24.7432498,
+    "phones": [
+      "+359 88 820 4506"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3314878870",
+    "name": "Д-р. Жечкова",
+    "address": "Чайковски 9",
+    "city": "Сливен",
+    "lat": 42.6847004,
+    "lng": 26.316727,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5918705717",
+    "name": "Дежурен кабинет | Д-р Митко Желязков",
+    "lat": 42.4301721,
+    "lng": 25.6266084,
+    "phones": [
+      "+359 88 895 2486"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/506724185",
+    "name": "Детско-юношеска психиатрична клиника",
+    "lat": 42.659875,
+    "lng": 23.255011,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336489",
+    "name": "Диагностичен център Пансанус",
+    "lat": 42.7024947,
+    "lng": 23.3048305,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/260830006",
+    "name": "Диспансер за психични заболявания със стационар",
+    "address": "Хаджи Христо Попгеоргиев 12",
+    "lat": 41.5721173,
+    "lng": 24.7859778,
+    "phones": [
+      "+359 301 64 366"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5987137400",
+    "name": "ДКЦ",
+    "lat": 43.1608385,
+    "lng": 25.7378349,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/398617174",
+    "name": "ДКЦ",
+    "address": "Генерал Скобелев 34",
+    "lat": 42.6216541,
+    "lng": 25.388393,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6669995690",
+    "name": "ДКЦ “Д-р Грийнберг”",
+    "address": "бул. Копенхаген 23-А",
+    "lat": 42.6511328,
+    "lng": 23.4049477,
+    "phones": [
+      "+359 89 877 6812"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/105318130",
+    "name": "ДКЦ \"Д-р Николай Тошев\"",
+    "lat": 42.2003005,
+    "lng": 25.3278759,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/498672805",
+    "name": "ДКЦ 1",
+    "lat": 41.9301849,
+    "lng": 25.5575052,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1173968434",
+    "name": "ДКЦ 1",
+    "address": "Панега 28",
+    "city": "Плевен",
+    "lat": 43.4167173,
+    "lng": 24.609329,
+    "phones": [
+      "+359 87 960 6036"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 06:00-19:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/7284028",
+    "name": "ДКЦ 1",
+    "lat": 42.1450698,
+    "lng": 24.7533721,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/5739125",
+    "name": "ДКЦ 1 Св. Клементина",
+    "lat": 43.206293,
+    "lng": 27.9091598,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2455680329",
+    "name": "ДКЦ 2",
+    "lat": 41.9364518,
+    "lng": 25.5540285,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/42134323",
+    "name": "ДКЦ 2",
+    "lat": 42.479957,
+    "lng": 26.500137,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/148564150",
+    "name": "ДКЦ 3",
+    "nameBg": "ДКЦ III",
+    "lat": 43.2481131,
+    "lng": 27.8468956,
+    "phones": [
+      "+359 52 510 310"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/166929971",
+    "name": "ДКЦ 30",
+    "lat": 42.7438737,
+    "lng": 23.2766065,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/13598177",
+    "name": "ДКЦ 4 - Варна",
+    "lat": 43.2149034,
+    "lng": 27.9175765,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4026403357",
+    "name": "ДКЦ Ел Масри",
+    "lat": 42.509493,
+    "lng": 27.469508,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10967317133",
+    "name": "ДКЦ Каспичан",
+    "lat": 43.3127543,
+    "lng": 27.1578043,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10981468791",
+    "name": "ДКЦ Нови Пазар",
+    "lat": 43.3471193,
+    "lng": 27.2022268,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9699611822",
+    "name": "ДКЦ Провадия",
+    "lat": 43.1752898,
+    "lng": 27.4371594,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1619368584",
+    "name": "ДКЦ Свети Георги",
+    "lat": 42.1394325,
+    "lng": 24.736981,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9671557386",
+    "name": "ДКЦ Чайка – Курортна поликлиника",
+    "lat": 43.2129364,
+    "lng": 27.9353152,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/12064319125",
+    "name": "ДКЦ-II",
+    "lat": 43.4065827,
+    "lng": 24.6199447,
+    "phones": [],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 08:30-17:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/332277412",
+    "name": "ДМСГД-Благоевград",
+    "lat": 42.0259097,
+    "lng": 23.0918582,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/332277890",
+    "name": "ДМСГД-Благоевград",
+    "lat": 42.025982,
+    "lng": 23.0921978,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/466901229",
+    "name": "ДМСГД-Благоевград",
+    "address": "Славянска 60",
+    "lat": 42.0258794,
+    "lng": 23.0928458,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/570513957",
+    "name": "Дом за възрастни с умствена изостаналост",
+    "lat": 42.8147228,
+    "lng": 23.4091476,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/838996498",
+    "name": "Дом за възрастни хора с психични разтройства",
+    "lat": 43.0968292,
+    "lng": 23.4216315,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/119389385",
+    "name": "Дом за медико-социални грижи за деца",
+    "lat": 43.4024239,
+    "lng": 24.6298307,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/493673876",
+    "name": "Държавна психиатрична болница",
+    "city": "Карвуна",
+    "lat": 43.4726206,
+    "lng": 28.0203992,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/4794897129",
+    "name": "Държавна психиатрична болница - Ловеч",
+    "nameBg": "Държавна психиатрична болница - Ловеч",
+    "address": "ул. Княз Александър I Батемберг",
+    "lat": 43.1315213,
+    "lng": 24.7101242,
+    "phones": [
+      "+359 68 651 736"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/244863624",
+    "name": "Държавна психиатрична болница \"Д-р Георги Кисьов\"",
+    "lat": 42.2861088,
+    "lng": 25.9228991,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/425745458",
+    "name": "Държавна психиатрична болница \"Св. Иван Рилски\"",
+    "address": "ул. Христо Ботев 140",
+    "lat": 42.8274528,
+    "lng": 23.3688372,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/335394232",
+    "name": "Държавна психиатрична болница за лечение на наркомании и алкохолизъм",
+    "lat": 42.6730292,
+    "lng": 23.185876,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/291147785",
+    "name": "Ева",
+    "lat": 42.6923247,
+    "lng": 26.343427,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10140179208",
+    "name": "Еврохоспитал",
+    "lat": 42.111024,
+    "lng": 24.7094697,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/2145530",
+    "name": "Здраве",
+    "lat": 42.1907951,
+    "lng": 24.3233345,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3745051739",
+    "name": "Здравен дом",
+    "lat": 42.4797533,
+    "lng": 26.3970127,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1406557293",
+    "name": "Здравен пункт",
+    "lat": 42.5667051,
+    "lng": 23.1809862,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2503345175",
+    "name": "Здравен пункт",
+    "lat": 42.6372161,
+    "lng": 23.9452527,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/284021834",
+    "name": "Здравен център \"ОЛИМП\"",
+    "lat": 42.9614402,
+    "lng": 23.345082,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336323",
+    "name": "Здравен център Лечител",
+    "lat": 42.700216,
+    "lng": 23.331046,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/992575601",
+    "name": "Здравен цетнър",
+    "city": "Марикостиново",
+    "lat": 41.4309556,
+    "lng": 23.3384261,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/232411465",
+    "name": "здравна служба",
+    "address": "Васил Левски 1",
+    "city": "Тлачене",
+    "lat": 43.3424337,
+    "lng": 23.8472046,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1364800272",
+    "name": "Здравна служба",
+    "lat": 42.2619299,
+    "lng": 25.3225668,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3359215756",
+    "name": "Здравна служба",
+    "lat": 42.1471228,
+    "lng": 25.2025686,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/7071962732",
+    "name": "Здравна служба",
+    "lat": 42.0592126,
+    "lng": 25.263757,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9790751549",
+    "name": "Здравна служба",
+    "lat": 42.0166327,
+    "lng": 25.2955209,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/180210232",
+    "name": "Здравна служба",
+    "lat": 43.2531257,
+    "lng": 27.7083484,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/188745742",
+    "name": "Здравна служба",
+    "lat": 43.2163148,
+    "lng": 27.8183073,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6944973784",
+    "name": "ЗФ Свети Георги - ОХХ Груп АД",
+    "address": "Капитан Димитър Списаревски 3",
+    "city": "София",
+    "lat": 42.6714627,
+    "lng": 23.3869332,
+    "phones": [
+      "+359 88 655 5373"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1533918234",
+    "name": "Зъболекарски кабинет",
+    "lat": 42.4238643,
+    "lng": 25.627654,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/377891647",
+    "name": "Изоставена болница (Бивша туберкулозна болница)",
+    "lat": 42.6805334,
+    "lng": 26.3316408,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1699496558",
+    "name": "Институтска СБАЛ по белодробни болести Св. София",
+    "lat": 42.68158,
+    "lng": 23.306037,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336447",
+    "name": "Институтска СБАЛ по ортопедия Проф. Бойчо Бойчев",
+    "lat": 42.6744574,
+    "lng": 23.2473008,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/977166513",
+    "name": "Калолечебница",
+    "lat": 41.4377269,
+    "lng": 23.315815,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": [
+      "orthopedics"
+    ]
+  },
+  {
+    "osmId": "way/249956291",
+    "name": "Комплексен онкологичен център-Бургас ЕООД",
+    "lat": 42.5013792,
+    "lng": 27.4753518,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/11483497828",
+    "name": "Мама и аз",
+    "address": "Пиер Кюри 2",
+    "city": "Плевен",
+    "lat": 43.4105791,
+    "lng": 24.6079134,
+    "phones": [
+      "+359 64 678 400"
+    ],
+    "emergency24h": false,
+    "capabilities": [
+      "pediatric"
+    ]
+  },
+  {
+    "osmId": "way/155023140",
+    "name": "МБАЛ",
+    "lat": 43.4104909,
+    "lng": 28.1594621,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/244989751",
+    "name": "МБАЛ",
+    "lat": 42.1409032,
+    "lng": 25.8582778,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/244989752",
+    "name": "МБАЛ",
+    "lat": 42.1411157,
+    "lng": 25.858711,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/492143774",
+    "name": "МБАЛ",
+    "lat": 41.5799353,
+    "lng": 25.1347589,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/530960006",
+    "name": "МБАЛ",
+    "lat": 42.543791,
+    "lng": 22.9602157,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/791548271",
+    "name": "МБАЛ",
+    "lat": 41.8909165,
+    "lng": 23.4690419,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1462496845",
+    "name": "МБАЛ",
+    "lat": 43.1655838,
+    "lng": 26.8134353,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/3491091",
+    "name": "МБАЛ",
+    "address": "Божко Божилов 1",
+    "city": "Ботевград",
+    "lat": 42.9079535,
+    "lng": 23.8012576,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/309193540",
+    "name": "МБАЛ - Троян ЕООД",
+    "lat": 42.8911046,
+    "lng": 24.7075473,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/105318110",
+    "name": "МБАЛ - Чирпан",
+    "lat": 42.2037089,
+    "lng": 25.3445115,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/6376785",
+    "name": "МБАЛ – Тетевен – д-р Ангел Пешев",
+    "lat": 42.9195912,
+    "lng": 24.2555311,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/443101576",
+    "name": "МБАЛ \"Doverie\"",
+    "nameBg": "МБАЛ „Доверие“",
+    "lat": 42.6848375,
+    "lng": 23.2461155,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/460915693",
+    "name": "МБАЛ \"Д-р Братан Шукеров\"",
+    "address": "бул. България 2",
+    "city": "Смолян",
+    "lat": 41.573571,
+    "lng": 24.7188143,
+    "phones": [
+      "+359 301 62 666"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/799161575",
+    "name": "МБАЛ \"Д-р Добри Беров\"",
+    "lat": 43.3468905,
+    "lng": 27.2026874,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/291136280",
+    "name": "МБАЛ \"Д-р Иван Селимински\"",
+    "address": "Гео Милев",
+    "city": "Сливен",
+    "lat": 42.6755201,
+    "lng": 26.3253792,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1218572930",
+    "name": "МБАЛ \"Д-р Иван Селимински\"",
+    "lat": 42.6817637,
+    "lng": 26.3315915,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/169640967",
+    "name": "МБАЛ „Д-р Киро Попов“",
+    "nameBg": "МБАЛ „Д-р Киро Попов“",
+    "lat": 42.6451704,
+    "lng": 24.7988519,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/715322907",
+    "name": "МБАЛ \"Д-р Сергей Ростовцев\"",
+    "address": "Стефан Караджа 1",
+    "city": "Момчилград",
+    "lat": 41.5306383,
+    "lng": 25.4123614,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962792524",
+    "name": "МБАЛ ”Д-р Христо Стамболски”",
+    "address": "Старозагорска 16",
+    "city": "Казанлък",
+    "lat": 42.6207892,
+    "lng": 25.4033324,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1305263040",
+    "name": "МБАЛ \"Живот плюс\"",
+    "lat": 41.4654734,
+    "lng": 25.6467517,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962798836",
+    "name": "МБАЛ \"Здраве\"",
+    "lat": 42.0195068,
+    "lng": 23.9882081,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1020385387",
+    "name": "МБАЛ „Княгиня Клементина“ - София ЕАД",
+    "nameBg": "МБАЛ „Княгиня Клементина“",
+    "address": "бул. Ген. Столетов 67А",
+    "city": "София",
+    "lat": 42.7131429,
+    "lng": 23.3120971,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/791111274",
+    "name": "МБАЛ \"Пловдив\"",
+    "lat": 42.1583871,
+    "lng": 24.7175766,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962783213",
+    "name": "МБАЛ \"Проф. Георги Златарски\"",
+    "address": "Христо Ботев 34",
+    "city": "Белоградчик",
+    "lat": 43.6262217,
+    "lng": 22.6921042,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/444615887",
+    "name": "МБАЛ „Проф.д-р Ал.Герчев” Етрополе",
+    "lat": 42.8392417,
+    "lng": 23.9997538,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/183548128",
+    "name": "МБАЛ \"Проф.д-р Цончев\"",
+    "lat": 42.8830859,
+    "lng": 26.4490062,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962781588",
+    "name": "МБАЛ \"Св. Иван Рилски 2003\", Дупница",
+    "lat": 42.2674449,
+    "lng": 23.1146569,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10001989738",
+    "name": "МБАЛ \"Св. Иван Рилски\"",
+    "lat": 42.2687569,
+    "lng": 22.6763687,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/442731822",
+    "name": "МБАЛ \"Св. Иван Рилски\"",
+    "city": "Разград",
+    "lat": 43.5310432,
+    "lng": 26.5347824,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/962782355",
+    "name": "МБАЛ \"Св. Иван Рилски\"",
+    "lat": 43.7719995,
+    "lng": 23.7262867,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962781587",
+    "name": "МБАЛ \"Св. Иван Рилски\", Дупница",
+    "lat": 42.2618612,
+    "lng": 23.1139548,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/610546139",
+    "name": "МБАЛ \"Св. Николай Чудотворец\"",
+    "lat": 43.8275015,
+    "lng": 23.232748,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962793341",
+    "name": "МБАЛ \"Св. Петка Българска\"",
+    "lat": 42.4946527,
+    "lng": 26.0208961,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/160447927",
+    "name": "МБАЛ \"Света Екатерина\"",
+    "nameBg": "МБАЛ \"Света Екатерина\"",
+    "lat": 42.2014835,
+    "lng": 24.338083,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/531324180",
+    "name": "МБАЛ \"Света Екатерина\"",
+    "lat": 42.0514457,
+    "lng": 25.5888467,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/166217432",
+    "name": "МБАЛ \"Света София\"",
+    "address": "бул. България 104",
+    "city": "София",
+    "lat": 42.6599164,
+    "lng": 23.2847076,
+    "phones": [
+      "+359 2 818 4600"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/865286654",
+    "name": "МБАЛ \"Света София\"",
+    "address": "бул. България 104",
+    "city": "София",
+    "lat": 42.6594472,
+    "lng": 23.2842456,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/316858216",
+    "name": "МБАЛ \"Свети Иван Рилски\"",
+    "lat": 42.1764208,
+    "lng": 26.5816929,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1044576314",
+    "name": "МБАЛ \"Свети Иван Рилски\" – Габрово",
+    "address": "бул. 3-ти Март 9",
+    "city": "Габрово",
+    "lat": 42.8514349,
+    "lng": 25.3226848,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/686184307",
+    "name": "МБАЛ \"Сити Клиник Св. Георги\"",
+    "lat": 43.4017724,
+    "lng": 23.2388202,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1011270393",
+    "name": "МБАЛ \"Сърце и мозък\"",
+    "address": "Здраве 29",
+    "city": "Бургас",
+    "lat": 42.5276865,
+    "lng": 27.445044,
+    "phones": [
+      "+359 56 703 003"
+    ],
+    "emergency24h": false,
+    "capabilities": [
+      "trauma",
+      "icu",
+      "cardiology",
+      "neurology",
+      "orthopedics",
+      "surgery",
+      "xray"
+    ]
+  },
+  {
+    "osmId": "way/275123280",
+    "name": "МБАЛ \"Уни Хоспитал\"",
+    "address": "Георги Бенковски 100",
+    "city": "Панагюрище",
+    "lat": 42.4934623,
+    "lng": 24.185424,
+    "phones": [
+      "+359 357 88 581"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/340847842",
+    "name": "МБАЛ \"Хаджи Димитър\"",
+    "lat": 42.6805149,
+    "lng": 26.3114107,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/291428230",
+    "name": "МБАЛ \"Царица Йоанна\"",
+    "address": "Булаир",
+    "city": "Сливен",
+    "lat": 42.6836073,
+    "lng": 26.3067978,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1056329291",
+    "name": "МБАЛ \"Царица Йоанна\"",
+    "lat": 43.1743415,
+    "lng": 27.4366382,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336354",
+    "name": "МБАЛ \"Царица Йоанна\" - обслужване на дипломати и чужденци",
+    "lat": 42.700561,
+    "lng": 23.338996,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962780086",
+    "name": "МБАЛ „Югозападна болница“",
+    "lat": 41.5706979,
+    "lng": 23.2852427,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962793818",
+    "name": "МБАЛ \"Юлия Вревска\"",
+    "lat": 43.4585478,
+    "lng": 25.7481574,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/162698412",
+    "name": "МБАЛ Central",
+    "lat": 42.1381555,
+    "lng": 24.7397616,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/397541574",
+    "name": "МБАЛ Асеновград",
+    "lat": 42.016018,
+    "lng": 24.8803741,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/445345439",
+    "name": "МБАЛ Белене",
+    "lat": 43.6454524,
+    "lng": 25.1138769,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/235306817",
+    "name": "МБАЛ Бяла Слатина",
+    "lat": 43.4780887,
+    "lng": 23.9290705,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/1257746767",
+    "name": "МБАЛ Бялата лястовица",
+    "lat": 43.7033852,
+    "lng": 28.0403558,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/184546438",
+    "name": "МБАЛ Варна",
+    "lat": 43.1977675,
+    "lng": 27.9134196,
+    "phones": [
+      "+359 52 609 682"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo-Su 08:00-17:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962798835",
+    "name": "МБАЛ Велинград",
+    "lat": 42.0190069,
+    "lng": 23.9873806,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1430673579",
+    "name": "МБАЛ Гулянци",
+    "address": "В. Левски 34",
+    "city": "Гулянци",
+    "lat": 43.6395871,
+    "lng": 24.6957041,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2343485517",
+    "name": "МБАЛ Д-р \"Иван Селимински\" - инфекциозно отделение",
+    "lat": 42.6818376,
+    "lng": 26.3310085,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/235179984",
+    "name": "МБАЛ Д-р Димитър Моллов",
+    "lat": 42.9334492,
+    "lng": 25.8761252,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/101036264",
+    "name": "МБАЛ д-р Димитър Чакмаков",
+    "lat": 42.2917167,
+    "lng": 25.9448093,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/298842129",
+    "name": "МБАЛ Д-р Стойчо Христов",
+    "lat": 43.0288479,
+    "lng": 25.0894146,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/335163646",
+    "name": "МБАЛ Дева Мария",
+    "lat": 42.6059159,
+    "lng": 27.3857904,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/408033079",
+    "name": "МБАЛ Доктор Никола Василиев",
+    "city": "Кюстендил",
+    "lat": 42.2789476,
+    "lng": 22.7011555,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/397105360",
+    "name": "МБАЛ Елин Пелин",
+    "address": "Здравец 15",
+    "city": "Елин Пелин",
+    "lat": 42.6640802,
+    "lng": 23.600622,
+    "phones": [
+      "+359 725 60 153",
+      "+359 725 60 154",
+      "+359 725 60 156"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/464285252",
+    "name": "МБАЛ Исперих",
+    "lat": 43.7141997,
+    "lng": 26.8381531,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962799840",
+    "name": "МБАЛ Ихтиман",
+    "address": "Шипка 30",
+    "lat": 42.4336109,
+    "lng": 23.8249565,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er",
+      "cardiology",
+      "pediatric",
+      "neurology",
+      "surgery"
+    ]
+  },
+  {
+    "osmId": "way/255322186",
+    "name": "МБАЛ Каварна",
+    "address": "Васил Левски 36",
+    "city": "Каварна",
+    "lat": 43.4250279,
+    "lng": 28.339391,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/665789263",
+    "name": "МБАЛ Карнобат",
+    "lat": 42.6499379,
+    "lng": 26.9960266,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/595022159",
+    "name": "МБАЛ Кнежа",
+    "lat": 43.4858345,
+    "lng": 24.0792869,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/603680092",
+    "name": "МБАЛ Левски",
+    "address": "Никола Вапцаров 80",
+    "lat": 43.3659162,
+    "lng": 25.1342516,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/589494247",
+    "name": "МБАЛ Луковит",
+    "lat": 43.2127275,
+    "lng": 24.1612709,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/609925532",
+    "name": "МБАЛ Мездра",
+    "lat": 43.1479598,
+    "lng": 23.7089036,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/312947519",
+    "name": "МБАЛ Надежда",
+    "address": "Блага вест 3",
+    "lat": 42.688802,
+    "lng": 23.2744877,
+    "phones": [
+      "+359882193970",
+      "+35924417970"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962789858",
+    "name": "МБАЛ Омуртаг",
+    "lat": 43.1002064,
+    "lng": 26.4162047,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/613573208",
+    "name": "МБАЛ Оряхово",
+    "lat": 43.7297764,
+    "lng": 23.9473924,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/161183740",
+    "name": "МБАЛ Пазарджик",
+    "city": "Пазарджик",
+    "lat": 42.184028,
+    "lng": 24.3419635,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/587897301",
+    "name": "МБАЛ Пирдоп",
+    "address": "Георги Бенковски 24",
+    "lat": 42.7015862,
+    "lng": 24.1691587,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/426246858",
+    "name": "МБАЛ Поморие",
+    "lat": 42.5644011,
+    "lng": 27.6374424,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962790645",
+    "name": "МБАЛ Попово",
+    "lat": 43.3415966,
+    "lng": 26.216586,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/101925554",
+    "name": "МБАЛ проф. д-р. Асен Шопов",
+    "lat": 41.3781307,
+    "lng": 25.0961341,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/275303594",
+    "name": "МБАЛ проф.Димитър Ранев",
+    "lat": 42.038547,
+    "lng": 24.3108451,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/467285182",
+    "name": "МБАЛ Рокфелер",
+    "lat": 41.397662,
+    "lng": 23.2045602,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/206805281",
+    "name": "МБАЛ Самоков",
+    "address": "Македония 49",
+    "lat": 42.3357895,
+    "lng": 23.5520509,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2839488560",
+    "name": "МБАЛ Св. Иван Рилски",
+    "lat": 43.1163975,
+    "lng": 25.6987786,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/3563692651",
+    "name": "МБАЛ Св. Каридад",
+    "lat": 42.122214,
+    "lng": 24.7466939,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/442118559",
+    "name": "МБАЛ Св. Пантелеймон",
+    "address": "Панйот Хитов 30",
+    "city": "Ямбол",
+    "lat": 42.4878547,
+    "lng": 26.5165768,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/11733513638",
+    "name": "МБАЛ Св. Св. Козма и Дамян",
+    "lat": 42.130324,
+    "lng": 24.7790945,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/16089237",
+    "name": "МБАЛ Света Марина",
+    "lat": 43.2272388,
+    "lng": 27.9365417,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": [
+      "er",
+      "icu",
+      "surgery"
+    ]
+  },
+  {
+    "osmId": "way/97602962",
+    "name": "МБАЛ Свети Мина",
+    "lat": 42.1363792,
+    "lng": 24.7430579,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/806381207",
+    "name": "МБАЛ Свиленград",
+    "lat": 41.7789469,
+    "lng": 26.2043895,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/451469556",
+    "name": "МБАЛ Своге",
+    "address": "Староселска 4",
+    "lat": 42.9641814,
+    "lng": 23.3401603,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6576018347",
+    "name": "МБАЛ Сердика",
+    "address": "бул. Президент Линкълн 128",
+    "city": "София",
+    "lat": 42.6818754,
+    "lng": 23.2453939,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/460912728",
+    "name": "МБАЛ Хасково",
+    "lat": 41.9332325,
+    "lng": 25.5664758,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/477114164",
+    "name": "МБАЛ Червен бряг",
+    "lat": 43.2733267,
+    "lng": 24.0862792,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/394725095",
+    "name": "МБАЛ-Монтана „Д-р Стамен Илиев\"",
+    "lat": 43.4034468,
+    "lng": 23.2355119,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962785274",
+    "name": "МБАЛ-Първомай",
+    "address": "ул. Княз Борис І 51",
+    "lat": 42.0916692,
+    "lng": 25.2145708,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962785785",
+    "name": "МБАЛ-Харманли",
+    "lat": 41.9230748,
+    "lng": 25.9004005,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/313106011",
+    "name": "МБАЛ-Шумен",
+    "address": "Васил Априлов 63",
+    "city": "Шумен",
+    "lat": 43.2755702,
+    "lng": 26.9165915,
+    "phones": [
+      "+359 54 855 755"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/10748727998",
+    "name": "МБАЛ”Д-р Ат.Дафовски”АД",
+    "address": "бул.”Беломорски” 53",
+    "city": "Кърджали",
+    "lat": 41.6457495,
+    "lng": 25.3753297,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/4291306289",
+    "name": "Медик Дент ЕООД",
+    "address": "бул. Владислав Варненчик 130",
+    "city": "Варна",
+    "lat": 43.2141077,
+    "lng": 27.900347,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/7273802785",
+    "name": "медика кор3 ет.",
+    "lat": 43.8498708,
+    "lng": 25.9911548,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/176364823",
+    "name": "Медико-социален комплекс \"Св. Лука\"",
+    "lat": 43.31406,
+    "lng": 27.6658769,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2683402244",
+    "name": "Медикус",
+    "lat": 43.84991,
+    "lng": 25.959127,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336566",
+    "name": "Медицинска лаборатория Сана",
+    "lat": 42.7013021,
+    "lng": 23.3064428,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/305129848",
+    "name": "Медицински институт на МВР",
+    "address": "бул. Ген. Скобелев 79",
+    "city": "София",
+    "lat": 42.6935871,
+    "lng": 23.3086154,
+    "phones": [
+      "+359 2 982 1300"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/12124080242",
+    "name": "Медицински комплекс Зорница",
+    "lat": 42.5151547,
+    "lng": 27.4653266,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336343",
+    "name": "Медицински център",
+    "lat": 42.694409,
+    "lng": 23.28312,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1263924816",
+    "name": "Медицински център",
+    "lat": 43.6731042,
+    "lng": 24.0023416,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2165121314",
+    "name": "Медицински център",
+    "lat": 42.5994245,
+    "lng": 23.1698437,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2165262638",
+    "name": "Медицински център",
+    "lat": 42.5430675,
+    "lng": 23.4941658,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5790382704",
+    "name": "Медицински център",
+    "lat": 43.6380103,
+    "lng": 24.6930677,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/13713464203",
+    "name": "Медицински център",
+    "city": "гр. Белово",
+    "lat": 42.2169668,
+    "lng": 24.0083162,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/134684649",
+    "name": "Медицински център",
+    "lat": 43.2576051,
+    "lng": 27.8165995,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/148870981",
+    "name": "Медицински център",
+    "address": "бул. Любен Каравелов 9",
+    "lat": 42.1392853,
+    "lng": 24.739722,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/193245191",
+    "name": "Медицински център",
+    "address": "Заводска 17",
+    "lat": 42.6988056,
+    "lng": 25.8951146,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205601061",
+    "name": "Медицински център",
+    "lat": 42.6560098,
+    "lng": 23.4644959,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205622560",
+    "name": "Медицински център",
+    "lat": 42.7842911,
+    "lng": 23.2747615,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/206264036",
+    "name": "Медицински център",
+    "lat": 42.6279385,
+    "lng": 23.1990361,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/313170710",
+    "name": "Медицински център",
+    "lat": 42.5052031,
+    "lng": 24.3229119,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/315504385",
+    "name": "Медицински център",
+    "nameBg": "Медицински център",
+    "lat": 42.1665922,
+    "lng": 27.8448022,
+    "phones": [
+      "+359 590 52 023"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/505250624",
+    "name": "Медицински център",
+    "address": "Христо Ботев 19",
+    "lat": 42.9179386,
+    "lng": 22.9280355,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1047588302",
+    "name": "Медицински център",
+    "lat": 42.762959,
+    "lng": 23.2029105,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4610049618",
+    "name": "Медицински център „Адара”",
+    "lat": 43.8528725,
+    "lng": 25.9916363,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/141531519",
+    "name": "Медицински център \"Берое\"",
+    "lat": 42.4137459,
+    "lng": 25.6248547,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/142265243",
+    "name": "Медицински център \"Здраве - 2000\"",
+    "lat": 42.4371137,
+    "lng": 25.6284035,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1498410149",
+    "name": "Медицински център \"МедикаРьо\"",
+    "lat": 42.9906201,
+    "lng": 27.7195837,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/161904614",
+    "name": "Медицински център \"Св. Иван Рилски\"",
+    "address": "Трансмариска 69",
+    "city": "Тутракан",
+    "lat": 44.0456533,
+    "lng": 26.6000636,
+    "phones": [
+      "+359 86 660 560"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2472207092",
+    "name": "Медицински Център за Репродуктивна Медицина",
+    "lat": 43.4027861,
+    "lng": 24.615323,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205207328",
+    "name": "Медицински център и Община",
+    "address": "Стара планина 47",
+    "lat": 42.7866115,
+    "lng": 23.5193866,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/7079417534",
+    "name": "Медицински Център Хармония",
+    "address": "бул. Цариградско шосе 125",
+    "city": "София",
+    "lat": 42.6630225,
+    "lng": 23.3753112,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": [
+      "cardiology",
+      "orthopedics"
+    ]
+  },
+  {
+    "osmId": "way/105317983",
+    "name": "Медицински център Чирпан",
+    "lat": 42.1982739,
+    "lng": 25.3289353,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/206109022",
+    "name": "МИ на МВР - Филиал",
+    "lat": 42.7101112,
+    "lng": 23.1527555,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/158723880",
+    "name": "Многопрофилна болница за активно лечение (МБАЛ)",
+    "address": "Трансмариска 81",
+    "city": "Тутракан",
+    "lat": 44.0441319,
+    "lng": 26.5950673,
+    "phones": [
+      "+359 86 660 078"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4800621262",
+    "name": "Многопрофилна болница за активно лечение Проф. Д-р. Параскев Стоянов - Ловеч",
+    "address": "Съйко Съев 27",
+    "city": "Ловеч",
+    "lat": 43.1326475,
+    "lng": 24.7063141,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/239005073",
+    "name": "Многопрофилна болница за активно лечение Търговище АД",
+    "lat": 43.2423723,
+    "lng": 26.5621432,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/250732444",
+    "name": "Многопрофилна болница за АЛ",
+    "lat": 42.2878638,
+    "lng": 24.954076,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/969223019",
+    "name": "Многопрофилна болница за долекуване, продължително лечение и рехабилитация - \"Профилакториум\"",
+    "address": "Протожерица 102",
+    "city": "Перник",
+    "lat": 42.5915628,
+    "lng": 23.030284,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/686184308",
+    "name": "Многопрофилна болница по нервни болести \"Свети Георги\"",
+    "lat": 43.4017814,
+    "lng": 23.239308,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/222851471",
+    "name": "МОБАЛ \"д-р Стефан Черкезов\" (база №1)",
+    "lat": 43.0757511,
+    "lng": 25.6129893,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/1331068548",
+    "name": "МТБ Пловдив",
+    "nameBg": "МТБ Пловдив",
+    "lat": 42.1267822,
+    "lng": 24.7170344,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/469444422",
+    "name": "МЦ „Апогей“",
+    "address": "Ивайло 1",
+    "city": "Габрово",
+    "lat": 42.8827183,
+    "lng": 25.3206407,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6402592091",
+    "name": "МЦ \"Димед\"",
+    "lat": 42.1343719,
+    "lng": 24.7925109,
+    "phones": [
+      "+359 32 294 936"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205494274",
+    "name": "МЦ 1",
+    "lat": 42.7066869,
+    "lng": 23.1413844,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10904407212",
+    "name": "МЦ Афродита",
+    "lat": 42.6589914,
+    "lng": 23.315418,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4991018979",
+    "name": "МЦ Нова",
+    "lat": 43.2347498,
+    "lng": 27.8904111,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9609028081",
+    "name": "МЦ Оксигена",
+    "lat": 43.1808798,
+    "lng": 27.8960498,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9653212995",
+    "name": "МЦ Пирогов",
+    "lat": 42.689556,
+    "lng": 23.3074711,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9689041381",
+    "name": "МЦ ПроваМед",
+    "lat": 43.1779564,
+    "lng": 27.4439326,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2178166704",
+    "name": "МЦ Св. Богородица - Възвестителка",
+    "lat": 42.6328989,
+    "lng": 23.3118535,
+    "phones": [
+      "+359 2 967 3161"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo-Th 08:00-18:00; Fr 08:00-15:00",
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205017290",
+    "name": "МЦ-1",
+    "lat": 42.8125137,
+    "lng": 23.2149251,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4320875795",
+    "name": "НАМЛИЕВ - ДЕНТАЛ ЕООД",
+    "address": "Братя Свещарови 4",
+    "city": "Пловдив",
+    "lat": 42.1453188,
+    "lng": 24.7657531,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/254336347",
+    "name": "Национален център по физикално лечение и рехабилитация",
+    "address": "бул. Овча купел 2В",
+    "lat": 42.676759,
+    "lng": 23.2699979,
+    "phones": [
+      "+359 2 955 5273"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/316654560",
+    "name": "Национален център по хематология и трансфузиология",
+    "address": "Братя Миладинови 112",
+    "lat": 42.7086016,
+    "lng": 23.3199953,
+    "phones": [
+      "+359 2 921 0417"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/316519210",
+    "name": "Национална кардиологична болница",
+    "address": "Коньовица 65",
+    "city": "София",
+    "lat": 42.7058959,
+    "lng": 23.2877307,
+    "phones": [
+      "+359 2 921 1211"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/96493834",
+    "name": "Национална многопрофилна транспортна болница Цар Борис III",
+    "address": "бул. Княгиня Мария Луиза 106",
+    "lat": 42.7129578,
+    "lng": 23.3173971,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1329696252",
+    "name": "Национална онкологична болница \"Дева Мария\"",
+    "lat": 42.606146,
+    "lng": 27.3855524,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205615751",
+    "name": "НКБ - отделение по кардиологична рехабилитация",
+    "lat": 42.7080719,
+    "lng": 23.1490061,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/96493823",
+    "name": "НМТБ-клинична лаборатория, имунология и хормони",
+    "address": "бул. Княгиня Мария Луиза 106",
+    "lat": 42.7130443,
+    "lng": 23.3176502,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/96493789",
+    "name": "НМТБ-микробиологична лаборатория",
+    "address": "бул. Княгиня Мария Луиза 104",
+    "lat": 42.712848,
+    "lng": 23.3180246,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/374679234",
+    "name": "Областен диспансер за кожно-венерически заболявания",
+    "lat": 42.1307964,
+    "lng": 24.7467157,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336502",
+    "name": "Областен диспансер за онкологични заболявания със стационар - София област ЕООД",
+    "lat": 42.7129763,
+    "lng": 23.3127421,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/40140461",
+    "name": "Областен диспансер за психични заболявания Проф. д-р Иван Темков",
+    "nameBg": "Областен диспансер за психични заболявания Проф. д-р Иван Темков",
+    "lat": 42.5141787,
+    "lng": 27.4740786,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/30361186",
+    "name": "Общинска болница Др. Стамен Григоров",
+    "lat": 42.8347151,
+    "lng": 22.6548696,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5041468222",
+    "name": "Общинска поликлиника Шабла",
+    "lat": 43.5367369,
+    "lng": 28.5324981,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/75547774",
+    "name": "Окръжна болница \"Проф. Стоян Киркович\"",
+    "lat": 42.4239321,
+    "lng": 25.6116942,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/2115928332",
+    "name": "Олимед",
+    "lat": 43.2109335,
+    "lng": 27.9070714,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1135397111",
+    "name": "Онкологична болница-Марко Антонов",
+    "lat": 43.1760942,
+    "lng": 27.9010985,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5881565230",
+    "name": "Ортодонт Д-р Стоянка Ангелова",
+    "address": "бул. България 60",
+    "city": "Пазарджик",
+    "lat": 42.1867177,
+    "lng": 24.3242836,
+    "phones": [
+      "+359 88 990 9748"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/323399216",
+    "name": "Отделение УМБАЛ \"Света Марина\"",
+    "lat": 42.9615785,
+    "lng": 27.881907,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6077113601",
+    "name": "Очна клиника \"Св. Петка\"",
+    "address": "Проф. д-р Георги Георгиев 4",
+    "lat": 43.2262847,
+    "lng": 27.9333361,
+    "phones": [
+      "+359 52 611 130"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1621916737",
+    "name": "Очна клиника \"Св.Николай Чудотворец\"",
+    "address": "Никулицел 12",
+    "lat": 43.217871,
+    "lng": 27.9233938,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4424914193",
+    "name": "партизанска мед. землянка-М.Палаузов",
+    "nameBg": "партизанска мед. землянка-М.Палаузов",
+    "lat": 42.8309332,
+    "lng": 25.1690285,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6011835066",
+    "name": "Педиатър - Златинка Радева",
+    "address": "Св. Пантелеймон Лечител 6",
+    "city": "Бургас",
+    "lat": 42.5151863,
+    "lng": 27.4654395,
+    "phones": [
+      "+359 88 794 8445"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/484617129",
+    "name": "Поликлиника",
+    "lat": 42.2675883,
+    "lng": 27.7535503,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4710433572",
+    "name": "Поликлиника",
+    "address": "Георги Георгиев 5",
+    "lat": 41.9885907,
+    "lng": 24.0922715,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5728624882",
+    "name": "Поликлиника",
+    "lat": 43.3054263,
+    "lng": 25.0557697,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5834578167",
+    "name": "Поликлиника",
+    "lat": 43.016087,
+    "lng": 23.0429554,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/219516472",
+    "name": "Поликлиника",
+    "lat": 42.8767299,
+    "lng": 27.8863855,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/273908881",
+    "name": "Поликлиника",
+    "lat": 41.8351431,
+    "lng": 23.4915288,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/611623829",
+    "name": "Поликлиника",
+    "lat": 43.6964221,
+    "lng": 23.4379273,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/331079900",
+    "name": "Правителствен санаториум",
+    "lat": 42.6366532,
+    "lng": 23.1801744,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4055525630",
+    "name": "Профилакториум БМБ",
+    "lat": 42.610103,
+    "lng": 27.3898414,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/589653536",
+    "name": "Психиатрична болница Карлуково",
+    "lat": 43.180666,
+    "lng": 24.066914,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/551660902",
+    "name": "Психиатрична клиника",
+    "address": "Огражден 2",
+    "city": "Плевен",
+    "lat": 43.4165103,
+    "lng": 24.5979797,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9499870771",
+    "name": "Психиатрична клиника и стационар към УМБАЛ \"Св. Марина\"",
+    "lat": 43.228995,
+    "lng": 27.9341345,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5940102946",
+    "name": "Психолог Даниела Кръстева",
+    "address": "Странджа 67",
+    "city": "Плевен",
+    "lat": 43.4006568,
+    "lng": 24.6088739,
+    "phones": [
+      "+359 87 651 3956"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/312351030",
+    "name": "Първа САГБАЛ \"Света София\"",
+    "address": "Манолаки Ташев 2",
+    "lat": 42.6991107,
+    "lng": 23.2890954,
+    "phones": [
+      "+359 2 447 0200"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/962784623",
+    "name": "Първа УМБАЛ \"Св. Йоан Кръстител\"",
+    "address": "бул. Патриарх Евтимий 37",
+    "city": "София",
+    "lat": 42.6882934,
+    "lng": 23.3225577,
+    "phones": [
+      "+359 2 805 9205"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6945916659",
+    "name": "Първа частна МБАЛ - Враца",
+    "address": "бул. Втори юни 96А",
+    "city": "Враца",
+    "lat": 43.1937141,
+    "lng": 23.5700619,
+    "phones": [
+      "+359 89 680 4779"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er",
+      "orthopedics"
+    ]
+  },
+  {
+    "osmId": "way/1473928422",
+    "name": "Първа Частна МБАЛ-Враца",
+    "address": "Скакля 6",
+    "lat": 43.1967383,
+    "lng": 23.5627318,
+    "phones": [
+      "+359 92 663 434"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 07:00-17:00",
+    "capabilities": [
+      "trauma",
+      "orthopedics"
+    ]
+  },
+  {
+    "osmId": "way/147277525",
+    "name": "Първичен здравен център Балик",
+    "lat": 43.5763652,
+    "lng": 27.8498492,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10159552939",
+    "name": "Работническа поликлиника",
+    "lat": 41.8331847,
+    "lng": 24.8261605,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/848664444",
+    "name": "Районна болница Иван Башев",
+    "lat": 41.977231,
+    "lng": 27.5219631,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6293188370",
+    "name": "Раредис",
+    "lat": 42.1299421,
+    "lng": 24.7811222,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/550944499",
+    "name": "Регионален психодиспансер",
+    "lat": 43.8650929,
+    "lng": 25.9880241,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/460985157",
+    "name": "Регионална ветиранаро медицинска служба",
+    "lat": 41.570429,
+    "lng": 24.7569291,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336473",
+    "name": "Републикански център по протезиране и възстановителна хирургия",
+    "lat": 42.6763014,
+    "lng": 23.2486397,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/339630998",
+    "name": "Рехабилитационна болница Ясен",
+    "lat": 42.7112258,
+    "lng": 23.1512113,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1018169472",
+    "name": "САГБАЛ Репродуктивно Здраве \"Д-р Щерев\"",
+    "lat": 42.7000688,
+    "lng": 23.2876135,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/429049729",
+    "name": "Санаториум \"Свети Мина\"",
+    "lat": 43.1875616,
+    "lng": 23.2835975,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/280005069",
+    "name": "Санаториум за белодробни заболявания",
+    "lat": 43.1587176,
+    "lng": 23.9234043,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9433272333",
+    "name": "Сапфир Лазер България",
+    "address": "Майор Горталов 5",
+    "city": "София",
+    "lat": 42.6723076,
+    "lng": 23.275207,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/168861886",
+    "name": "СБ",
+    "lat": 42.7092727,
+    "lng": 23.1501128,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9652922191",
+    "name": "СБАГАЛ \"Проф. д-р Д. Стаматов\"",
+    "lat": 43.215582,
+    "lng": 27.914115,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/296426646",
+    "name": "СБАЛ АГ „Селена“",
+    "lat": 42.1346595,
+    "lng": 24.7094693,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1800454401",
+    "name": "СБАЛ Йоан Павел",
+    "address": "бул. Ген. Столетов 67А",
+    "lat": 42.7129631,
+    "lng": 23.3127639,
+    "phones": [
+      "+359 2 832 0044"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/206108399",
+    "name": "СБАЛ на детски болести",
+    "lat": 42.7099923,
+    "lng": 23.1510449,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1800366732",
+    "name": "СБАЛ на деца с онкохематологични заболявания",
+    "lat": 42.7006912,
+    "lng": 23.3391503,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1047076004",
+    "name": "СБАЛ на инфекциозни и паразитни болести \"Проф. Иван Киров\"",
+    "address": "бул. Акад. Иван Евстратиев Гешов 17",
+    "city": "София",
+    "lat": 42.6813018,
+    "lng": 23.3030704,
+    "phones": [
+      "+359 2 90 23 700"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2343485536",
+    "name": "СБАЛ по белодробни болести",
+    "lat": 42.6817981,
+    "lng": 26.3313755,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/157690136",
+    "name": "СБАЛ по белодробни болести \"Св. София\"",
+    "address": "бул. Акад. Иван Евстратиев Гешов 15",
+    "city": "София",
+    "lat": 42.6820654,
+    "lng": 23.3027501,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/157690138",
+    "name": "СБАЛ по детски болести \"проф. Иван Митев\"",
+    "address": "бул. Акад. Иван Евстратиев Гешов 11",
+    "city": "София",
+    "lat": 42.683989,
+    "lng": 23.3020673,
+    "phones": [
+      "+359 2 815 4211"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/305140612",
+    "name": "СБАЛ по ендокринология \"Акад. Ив. Пенчев\"",
+    "address": "Позитано 11",
+    "lat": 42.6966839,
+    "lng": 23.314659,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6043441003",
+    "name": "СБАЛ Св,Анна",
+    "city": "Пловдив",
+    "lat": 42.1201335,
+    "lng": 24.7309866,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/328728670",
+    "name": "СБАЛ Св.Панталеймон",
+    "lat": 43.402009,
+    "lng": 24.6427373,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/12871237170",
+    "name": "СБАЛББ Св. Панталеймон",
+    "lat": 42.5837753,
+    "lng": 23.0208662,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1800471516",
+    "name": "СБАЛДБ Клинико-рехабилитационни отделения",
+    "lat": 42.709269,
+    "lng": 23.1501033,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/788191352",
+    "name": "СБАЛПФЗ Благоевград",
+    "lat": 42.0260806,
+    "lng": 23.0992105,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/422945463",
+    "name": "СБАЛХ-Кърджали",
+    "address": "бул. Тракия 19",
+    "city": "Кърджали",
+    "lat": 41.645498,
+    "lng": 25.3718372,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/400666563",
+    "name": "СБДПЛР Бухово",
+    "lat": 42.7614906,
+    "lng": 23.5592381,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/505643607",
+    "name": "СБДПЛР Сливница",
+    "city": "Сливница",
+    "lat": 42.8532725,
+    "lng": 23.0331522,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/154007705",
+    "name": "СБЗ \"Тузлата\"",
+    "lat": 43.401131,
+    "lng": 28.226135,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/399767427",
+    "name": "СБНАЛ \"Свeти Лазар\"",
+    "address": "Д-р Баев 13",
+    "lat": 42.6207951,
+    "lng": 25.3922224,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9652922202",
+    "name": "СБОБАЛ Варна",
+    "lat": 43.2165897,
+    "lng": 27.9135573,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2949129450",
+    "name": "Св. Анна",
+    "lat": 42.6925078,
+    "lng": 26.343841,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/206391570",
+    "name": "Св. Иван Рилски",
+    "lat": 42.1679555,
+    "lng": 24.7480186,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/131622173",
+    "name": "Св. Пантелеймон",
+    "address": "бул. Никола Вапцаров 9",
+    "lat": 42.1215474,
+    "lng": 24.7502027,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/217540428",
+    "name": "Св. Спас",
+    "lat": 42.7961268,
+    "lng": 23.4512902,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/429572266",
+    "name": "св.Георги",
+    "lat": 42.5589876,
+    "lng": 27.6369921,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/291147565",
+    "name": "Света Анна",
+    "lat": 42.6925406,
+    "lng": 26.3438078,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/987285921",
+    "name": "Света София",
+    "lat": 42.4945255,
+    "lng": 27.4734968,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/267416299",
+    "name": "СДПЛР",
+    "lat": 42.5816064,
+    "lng": 23.425585,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/335402540",
+    "name": "Серумен институт",
+    "lat": 42.6749091,
+    "lng": 23.1939516,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/212735362",
+    "name": "Сити Мед",
+    "address": "бул. Липник",
+    "city": "Русе",
+    "lat": 43.8527187,
+    "lng": 25.9918086,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6230516485",
+    "name": "Служба по трудова медицина - ВАЛЖАН",
+    "address": "бул. Цар Симеон Велики 84",
+    "city": "Стара Загора",
+    "lat": 42.4233933,
+    "lng": 25.6227432,
+    "phones": [
+      "+359 42 602 023"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1800456593",
+    "name": "СОБАЛ Акад. Пашев",
+    "lat": 42.7019048,
+    "lng": 23.3695513,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/8779692927",
+    "name": "Солна къща",
+    "lat": 42.6576512,
+    "lng": 23.2764912,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/305958057",
+    "name": "Софиямед",
+    "address": "бул. Д-р Г. М. Димитров 16",
+    "city": "София",
+    "lat": 42.6671683,
+    "lng": 23.3639234,
+    "phones": [
+      "+359 2 465 0000"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/5256341396",
+    "name": "Специализирана белодробна клинка \"Цар Фердинанд\"",
+    "lat": 42.985286,
+    "lng": 23.275654,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/327834385",
+    "name": "Специализирана болница за активно лечение на белодробни болести - Троян",
+    "address": "Васил Левски 253",
+    "city": "Троян",
+    "lat": 42.8975708,
+    "lng": 24.7114091,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/259066698",
+    "name": "Специализирана болница за активно лечение на онкологични заболявания „Проф. д-р Марин Мушмов“ ЕООД",
+    "nameBg": "Специализирана болница за активно лечение на онкологични заболявания „Проф. д-р Марин Мушмов“ ЕООД",
+    "address": "бул. Андрей Сахаров 22",
+    "city": "София",
+    "lat": 42.6555953,
+    "lng": 23.3714957,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/627559085",
+    "name": "Специализирана болница за активно лечение на пневмо-фтизиатрични заболявания - Враца ЕООД",
+    "lat": 43.1984422,
+    "lng": 23.5626658,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/246365266",
+    "name": "Специализирана болница за белодробни заболявания",
+    "lat": 42.6799632,
+    "lng": 25.593434,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/499621970",
+    "name": "Специализирана болница за пневмо - фтизиатрични заболявания \"Д-р Трейман\"",
+    "lat": 43.0737022,
+    "lng": 25.643025,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/308120110",
+    "name": "Специализирана болница за рехабилитация",
+    "lat": 42.5393462,
+    "lng": 24.8397776,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/543103046",
+    "name": "Специализирана болница за рехабилитация",
+    "lat": 42.892185,
+    "lng": 26.4356338,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/9704319",
+    "name": "Специализирана болница за рехабилитация",
+    "lat": 41.6148209,
+    "lng": 25.007719,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/403162716",
+    "name": "Специализирана Болница за рехабилитация - Бургаски минерални бани",
+    "lat": 42.6108779,
+    "lng": 27.3917468,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/977166511",
+    "name": "Специализирана болница за рехабилитация - Марикостиново",
+    "lat": 41.4387588,
+    "lng": 23.3174847,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1067194325",
+    "name": "Специализирана болница за рехабилитация \"Сандански\"",
+    "lat": 41.5789229,
+    "lng": 23.2847259,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/205630617",
+    "name": "Специализирана болница за рехабилитация Здраве",
+    "lat": 42.7100427,
+    "lng": 23.146704,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/237010981",
+    "name": "Специализирана болница за рехабилитация Мари",
+    "address": "Кипарис",
+    "city": "Несебър",
+    "lat": 42.6532823,
+    "lng": 27.6927367,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/549288802",
+    "name": "Специализирана хирургична болница „Скин Системс”",
+    "address": "1-ва 32",
+    "city": "Доганово",
+    "lat": 42.6321804,
+    "lng": 23.6890482,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": [
+      "trauma",
+      "orthopedics",
+      "surgery",
+      "xray"
+    ]
+  },
+  {
+    "osmId": "node/2383951387",
+    "name": "Спешна медицинска помощ",
+    "city": "Елин Пелин",
+    "lat": 42.6643574,
+    "lng": 23.6008309,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/13713458918",
+    "name": "Спешна медицинска помощ",
+    "city": "гр. Батак",
+    "lat": 41.9436656,
+    "lng": 24.2213842,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10965688634",
+    "name": "Спешна Медицинска Помощ  - Филиал Бенковски",
+    "lat": 41.3766439,
+    "lng": 25.2563635,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/280005125",
+    "name": "Спешна помощ",
+    "lat": 43.1597165,
+    "lng": 23.9220148,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/7092873003",
+    "name": "Спешни кабинети при ОПЛ",
+    "lat": 42.422857,
+    "lng": 25.616354,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/308017215",
+    "name": "Стар АГ Комплекс-Русе",
+    "address": "Николаевска",
+    "city": "Русе",
+    "lat": 43.8356903,
+    "lng": 25.9527321,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1533904936",
+    "name": "Стоматологична поликлиника",
+    "lat": 42.4266658,
+    "lng": 25.6323264,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/137109875",
+    "name": "Стоматологична поликлиника",
+    "lat": 43.5714002,
+    "lng": 27.8320424,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/117951011",
+    "name": "Стоматология",
+    "address": "бул. Русе 1",
+    "city": "Плевен",
+    "lat": 43.4117946,
+    "lng": 24.6223871,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/6833815718",
+    "name": "ТИЙМКОД",
+    "address": "Инж. Георги Белов 17",
+    "city": "София",
+    "lat": 42.6394103,
+    "lng": 23.398605,
+    "phones": [
+      "+359 2 884 8469"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2147630318",
+    "name": "Торакс",
+    "lat": 42.1508178,
+    "lng": 24.7432272,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/96493826",
+    "name": "Транспортен медицински институт",
+    "address": "бул. Княгиня Мария Луиза 108",
+    "lat": 42.7131385,
+    "lng": 23.3167205,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/3013744302",
+    "name": "Трета поликлиника",
+    "address": "Рила 9",
+    "lat": 41.9366201,
+    "lng": 25.5540295,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/553588386",
+    "name": "УБ \"Майчин дом\"",
+    "lat": 42.6834695,
+    "lng": 23.3119898,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1001043638",
+    "name": "УМБАЛ \"Александровска\"",
+    "lat": 42.6841803,
+    "lng": 23.309963,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/500384711",
+    "name": "УМБАЛ \"Георги Странски\"",
+    "lat": 43.4083271,
+    "lng": 24.6051911,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/567535885",
+    "name": "УМБАЛ \"Георги Странски\"",
+    "lat": 43.4166906,
+    "lng": 24.6279722,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/295981772",
+    "name": "УМБАЛ \"Канев\" - Русе",
+    "city": "Русе",
+    "lat": 43.8583507,
+    "lng": 25.9612738,
+    "phones": [],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "way/359223346",
+    "name": "УМБАЛ \"Каспела\"",
+    "lat": 42.1301638,
+    "lng": 24.7159724,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "relation/2841948",
+    "name": "УМБАЛ \"Медика\"",
+    "lat": 43.8500428,
+    "lng": 25.9912799,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/446241295",
+    "name": "УМБАЛ \"Света Марина\"",
+    "lat": 43.4407102,
+    "lng": 24.5911642,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/11528611964",
+    "name": "УМБАЛ \"Свети Иван Рилски\"",
+    "address": "бул. Акад. Иван Евстратиев Гешов 15",
+    "city": "София",
+    "lat": 42.6824181,
+    "lng": 23.302159,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/308144802",
+    "name": "УМБАЛ \"Царица Йоанна\"",
+    "lat": 42.7008855,
+    "lng": 23.3397379,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/1699545166",
+    "name": "УМБАЛ Св. Екатерина",
+    "lat": 42.6848177,
+    "lng": 23.3125857,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/501746860",
+    "name": "Университетска детска клиника по белодробни болести",
+    "lat": 42.6698047,
+    "lng": 23.2533878,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/157689966",
+    "name": "Университетска многопрофилна болница за активно лечение и спешна медицина \"Н. И. Пирогов\"",
+    "address": "бул. Ген. Тотлебен 21",
+    "lat": 42.6903055,
+    "lng": 23.3083961,
+    "phones": [
+      "+359 2 915 4411"
+    ],
+    "emergency24h": true,
+    "capabilities": [
+      "er"
+    ]
+  },
+  {
+    "osmId": "node/4319202832",
+    "name": "ФАМИЛИЯ ДЕНТ ЕООД",
+    "address": "бул. Република 15",
+    "city": "Варна",
+    "lat": 43.230703,
+    "lng": 27.8789696,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/446242025",
+    "name": "Хайфу център",
+    "lat": 43.4414916,
+    "lng": 24.5901084,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/102138822",
+    "name": "Хигия",
+    "lat": 42.1899972,
+    "lng": 24.3331045,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2115928333",
+    "name": "Хирургическа Болница Проф. Темелков",
+    "address": "Алеко Константинов 3-5",
+    "city": "Варна",
+    "lat": 43.2109401,
+    "lng": 27.9070448,
+    "phones": [
+      "+359 52 600 126"
+    ],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/384398105",
+    "name": "Хоспис Филаретова ЕООД",
+    "lat": 43.1684841,
+    "lng": 27.9213105,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336499",
+    "name": "Централна консултативна поликлиника",
+    "lat": 42.700623,
+    "lng": 23.339289,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/254336406",
+    "name": "ЦПЗ \"Проф. Н.Шипковенски\"",
+    "address": "Екзарх Йосиф 59",
+    "city": "София",
+    "lat": 42.7007202,
+    "lng": 23.3272293,
+    "phones": [
+      "+359 2 939 9038",
+      "+359 87 922 0555"
+    ],
+    "emergency24h": false,
+    "hoursText": "Mo-Fr 07:30-19:30",
+    "capabilities": []
+  },
+  {
+    "osmId": "node/2154570357",
+    "name": "ЦСМП",
+    "lat": 42.7066932,
+    "lng": 23.1422068,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/5598834067",
+    "name": "ЦСМП",
+    "lat": 42.2552504,
+    "lng": 22.8535621,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/10981468792",
+    "name": "ЦСМП",
+    "lat": 43.3473749,
+    "lng": 27.2036464,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/11047025045",
+    "name": "ЦСМП Айтос",
+    "lat": 42.696786,
+    "lng": 27.2487125,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/9699611855",
+    "name": "ЦСМП Провадия",
+    "lat": 43.1742052,
+    "lng": 27.4371927,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1362280674",
+    "name": "Частна болница \"Ритъм\"",
+    "address": "Васил Априлов 12",
+    "city": "Стара Загора",
+    "lat": 42.4237192,
+    "lng": 25.628081,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/1362052544",
+    "name": "Частна МБАЛ \"НИА МЕД\"",
+    "address": "Стефан Стамболов 29",
+    "lat": 42.4249268,
+    "lng": 25.6175504,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/166217634",
+    "name": "Частна хирургична болница Света Богородица",
+    "address": "Тракия 46",
+    "city": "София",
+    "lat": 42.698765,
+    "lng": 23.3437901,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "way/312793066",
+    "name": "Шеста обединена районна болница",
+    "lat": 42.6827442,
+    "lng": 23.2545005,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  },
+  {
+    "osmId": "node/4254348232",
+    "name": "Ядрено-магнитен резонанс",
+    "lat": 43.8584463,
+    "lng": 25.9609461,
+    "phones": [],
+    "emergency24h": false,
+    "capabilities": []
+  }
+]

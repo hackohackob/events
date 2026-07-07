@@ -3,6 +3,7 @@ import type {
   EventTrackLike,
   GuidanceRequest,
   GuidanceResponse,
+  IncidentMessageKind,
   IncidentRecordLike,
   JoinEventRequest,
   ParticipantLocationRequest,
@@ -21,6 +22,7 @@ interface EventRecordLike {
   id: string;
   title: string;
   commandPhone?: string;
+  activeHours?: { start: string; end: string };
   days?: Array<{ disciplines?: Array<{ name: string; color?: string; trackId?: string }> }>;
 }
 
@@ -82,11 +84,16 @@ export async function uploadIncidentPhoto(
 }
 
 /** Post a note to the incident chat (event log) — used by the SOS-sent screen
- *  to add after-the-fact details that the response team sees in the timeline. */
-export async function sendIncidentMessage(incidentId: string, text: string) {
+ *  to add after-the-fact details that the response team sees in the timeline.
+ *  `extra.kind`/`extra.meta` mark structured entries (first-aid answers, CPR). */
+export async function sendIncidentMessage(
+  incidentId: string,
+  text: string,
+  extra?: { kind?: IncidentMessageKind; meta?: Record<string, unknown> },
+) {
   return apiPost<{ id: string }>(
     `/incidents/${encodeURIComponent(incidentId)}/messages`,
-    { text },
+    { text, ...extra },
   );
 }
 

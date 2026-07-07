@@ -649,6 +649,35 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                       </View>
                     );
                   }
+                  // Guided-care entries from the runner app (triage answers,
+                  // CPR start/stop) render as centered timeline chips so the
+                  // performed first aid is scannable at a glance.
+                  if (m.kind === "first_aid" || m.kind === "cpr") {
+                    const isCpr = m.kind === "cpr";
+                    const meta = (m.meta ?? {}) as { question?: string; answer?: string };
+                    const primary = isCpr
+                      ? m.text
+                      : meta.answer ?? m.text.replace(/^First aid:\s*/i, "");
+                    return (
+                      <View key={m.id} style={styles.careChipRow}>
+                        <View style={[styles.careChip, isCpr ? styles.careChipCpr : null]}>
+                          <View style={styles.careChipHeader}>
+                            <Feather name={isCpr ? "heart" : "clipboard"} size={11} color={isCpr ? "#f87171" : "#34d399"} />
+                            <Text style={[styles.careChipKind, { color: isCpr ? "#f87171" : "#34d399" }]}>
+                              {isCpr ? "CPR" : "FIRST AID"}
+                            </Text>
+                            <Text style={styles.careChipTime}>
+                              · {m.authorName} · {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </Text>
+                          </View>
+                          {!isCpr && meta.question ? (
+                            <Text style={styles.careChipQuestion} numberOfLines={2}>{meta.question}</Text>
+                          ) : null}
+                          <Text style={styles.careChipAnswer}>{primary}</Text>
+                        </View>
+                      </View>
+                    );
+                  }
                   const mine = m.authorId === myId;
                   const playing = playingMessageId === m.id;
                   return (
@@ -1000,6 +1029,24 @@ const styles = StyleSheet.create({
   logLine: { flex: 1, height: 1, backgroundColor: "rgba(148,163,184,0.14)" },
   logText: { color: "#7d8ea4", fontSize: 11, fontWeight: "700", textAlign: "center", maxWidth: "78%" },
   logTime: { color: "#48586c", fontSize: 10, fontWeight: "700" },
+  // Guided-care chips (first-aid answers / CPR from the runner app)
+  careChipRow: { alignItems: "center", paddingVertical: 2 },
+  careChip: {
+    maxWidth: "88%",
+    borderRadius: 13,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    backgroundColor: "rgba(52,211,153,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(52,211,153,0.22)",
+  },
+  careChipCpr: { backgroundColor: "rgba(248,113,113,0.08)", borderColor: "rgba(248,113,113,0.25)" },
+  careChipHeader: { flexDirection: "row", alignItems: "center", gap: 4 },
+  careChipKind: { fontSize: 10, fontWeight: "900", letterSpacing: 0.4 },
+  careChipTime: { color: "#48586c", fontSize: 10, fontWeight: "700" },
+  careChipQuestion: { color: "#7d8ea4", fontSize: 11, textAlign: "center", marginTop: 3 },
+  careChipAnswer: { color: "#f1f5f9", fontSize: 13.5, fontWeight: "800", textAlign: "center", marginTop: 2 },
   bubble: { maxWidth: "85%", borderRadius: 13, paddingVertical: 7, paddingHorizontal: 11 },
   bubbleMine: { alignSelf: "flex-end", backgroundColor: "rgba(34,197,94,0.16)", borderTopRightRadius: 4 },
   bubbleOther: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.05)", borderTopLeftRadius: 4 },

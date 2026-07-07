@@ -10,6 +10,7 @@ import { FieldGuideModule } from "./field-guide/field-guide.module";
 import { GuidanceModule } from "./guidance/guidance.module";
 import { EventUsersModule } from "./event-users/event-users.module";
 import { HealthModule } from "./health/health.module";
+import { HospitalsModule } from "./hospitals/hospitals.module";
 import { IncidentsModule } from "./incidents/incidents.module";
 import { InfraModule } from "./infra/infra.module";
 import { LocationsModule } from "./locations/locations.module";
@@ -41,6 +42,7 @@ import { WeatherModule } from "./weather/weather.module";
     NotificationsModule,
     IncidentsModule,
     GuidanceModule,
+    HospitalsModule,
     AssignmentsModule,
     RealtimeModule,
     RoutingModule,

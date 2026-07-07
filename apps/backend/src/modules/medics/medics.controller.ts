@@ -39,7 +39,11 @@ export class MedicsController {
   }
 
   @Get("medics/active")
-  getActiveMedics(@Param("eventId") eventId: string) {
+  getActiveMedics(@Param("eventId") eventId: string, @CurrentUser() user: RequestUser) {
+    // Outside the event's active hours only coordinators can see medic positions.
+    if (this.medicsService.isMedicVisibilityRestricted(eventId, user.role)) {
+      return [];
+    }
     return this.medicsService.getActiveMedics(eventId);
   }
 

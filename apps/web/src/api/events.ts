@@ -9,6 +9,7 @@ export interface ApiEventSummary {
   commandPhone?: string;
   dates: string[];
   location?: string;
+  activeHours?: { start: string; end: string };
   disciplineCount: number;
   medicCount: number;
   days?: Array<{
@@ -45,6 +46,7 @@ export async function createEvent(data: EventFormData) {
     imageUrl: data.imageUrl || undefined,
     commandPhone: data.commandPhone.trim() || undefined,
     dates: data.dates.map((d) => d.toISOString().split("T")[0]),
+    activeHours: data.activeHours ?? undefined,
     location: data.location
       ? {
           name: data.location.name,
@@ -101,6 +103,7 @@ export async function updateEvent(id: string, data: EventFormData) {
     imageUrl: data.imageUrl || undefined,
     commandPhone: data.commandPhone.trim() || undefined,
     dates: data.dates.map((d) => d.toISOString().split("T")[0]),
+    activeHours: data.activeHours ?? undefined,
     location: data.location
       ? { name: data.location.name, lng: data.location.coordinates[0], lat: data.location.coordinates[1] }
       : undefined,

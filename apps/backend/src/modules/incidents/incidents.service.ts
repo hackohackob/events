@@ -66,6 +66,10 @@ export interface IncidentMessageRecord {
   authorId: string;
   authorName: string;
   text: string;
+  /** "text" | "voice" | "first_aid" | "cpr" | "system" — structured kinds carry `meta`. */
+  kind?: string;
+  /** Structured context for first_aid/cpr entries (question, answer, action, durationMs …). */
+  meta?: Record<string, unknown>;
   photoUrl?: string;
   /** Voice message attachment (server-relative URL). */
   audioUrl?: string;
@@ -285,6 +289,8 @@ export class IncidentsService implements OnModuleInit {
     await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS audio_url TEXT`);
     await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER`);
     await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS transcript TEXT`);
+    await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS kind TEXT`);
+    await this.db.query(`ALTER TABLE incident_messages ADD COLUMN IF NOT EXISTS meta JSONB`);
 
     // Legacy PostGIS `location` geometry column may exist with a NOT NULL
     // constraint from an older schema. No current code populates it, so relax
@@ -379,8 +385,8 @@ export class IncidentsService implements OnModuleInit {
       const id = randomUUID();
       const now = new Date().toISOString();
       await this.db.query(
-        `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, created_at)
-         VALUES ($1, $2, $3, 'system', 'System', $4, $5)`,
+        `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, kind, created_at)
+         VALUES ($1, $2, $3, 'system', 'System', $4, 'system', $5)`,
         [id, incidentId, eventId, text, now],
       );
       const message: IncidentMessageRecord = {
@@ -390,6 +396,7 @@ export class IncidentsService implements OnModuleInit {
         authorId: "system",
         authorName: "System",
         text,
+        kind: "system",
         createdAt: now,
       };
       await this.redisService.publish(`event:${eventId}:incidents`, {
@@ -1083,6 +1090,8 @@ export class IncidentsService implements OnModuleInit {
       audio_url: string | null;
       audio_duration_ms: number | null;
       transcript: string | null;
+      kind: string | null;
+      meta: Record<string, unknown> | null;
       created_at: string;
     }>(
       `SELECT * FROM incident_messages WHERE incident_id = $1 AND event_id = $2 ORDER BY created_at ASC`,
@@ -1095,6 +1104,9 @@ export class IncidentsService implements OnModuleInit {
       authorId: r.author_id,
       authorName: r.author_name,
       text: r.text,
+      // Backfill kind for rows written before the column existed.
+      kind: r.kind ?? (r.audio_url ? "voice" : "text"),
+      meta: r.meta ?? undefined,
       photoUrl: r.photo_url ?? undefined,
       audioUrl: r.audio_url ?? undefined,
       audioDurationMs: r.audio_duration_ms ?? undefined,
@@ -1107,7 +1119,15 @@ export class IncidentsService implements OnModuleInit {
     eventId: string,
     incidentId: string,
     authorId: string,
-    input: { text: string; photoUrl?: string; audioUrl?: string; audioDurationMs?: number; transcript?: string },
+    input: {
+      text: string;
+      photoUrl?: string;
+      audioUrl?: string;
+      audioDurationMs?: number;
+      transcript?: string;
+      kind?: string;
+      meta?: Record<string, unknown>;
+    },
   ): Promise<IncidentMessageRecord> {
     const { rows: incidentRows } = await this.db.query<{ created_by: string; reporter_name: string | null }>(
       `SELECT created_by, reporter_name FROM incidents WHERE id = $1 AND event_id = $2`,
@@ -1133,10 +1153,11 @@ export class IncidentsService implements OnModuleInit {
 
     const id = randomUUID();
     const now = new Date().toISOString();
+    const kind = input.kind ?? (input.audioUrl ? "voice" : "text");
     await this.db.query(
-      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, audio_url, audio_duration_ms, transcript, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, input.audioUrl ?? null, input.audioDurationMs ?? null, input.transcript ?? null, now],
+      `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, photo_url, audio_url, audio_duration_ms, transcript, kind, meta, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [id, incidentId, eventId, authorId, authorName, input.text, input.photoUrl ?? null, input.audioUrl ?? null, input.audioDurationMs ?? null, input.transcript ?? null, kind, input.meta ? JSON.stringify(input.meta) : null, now],
     );
 
     const message: IncidentMessageRecord = {
@@ -1146,6 +1167,8 @@ export class IncidentsService implements OnModuleInit {
       authorId,
       authorName,
       text: input.text,
+      kind,
+      meta: input.meta,
       photoUrl: input.photoUrl,
       audioUrl: input.audioUrl,
       audioDurationMs: input.audioDurationMs,

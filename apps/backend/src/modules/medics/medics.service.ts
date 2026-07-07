@@ -3,6 +3,7 @@ import { computeFreshness, MedicDestination, MedicRoute, MedicState, MedicStatus
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { EventsService } from "../events/events.service";
 
 interface RosterRow {
   id: string;
@@ -53,7 +54,25 @@ export class MedicsService implements OnModuleInit {
     private readonly db: DbService,
     private readonly redis: RedisService,
     private readonly notifications: NotificationsService,
+    private readonly events: EventsService,
   ) {}
+
+  /**
+   * Broadcast a medic position update. Inside the event's active hours it goes
+   * to the shared map room; outside them only coordinators receive it (they
+   * join the :map:coordinators room at connect). Ingestion is never filtered.
+   */
+  private async publishMedicLocation(eventId: string, state: MedicState): Promise<void> {
+    const channel = this.events.isWithinActiveHours(eventId)
+      ? `event:${eventId}:map`
+      : `event:${eventId}:map:coordinators`;
+    await this.redis.publish(channel, { type: "medic_location", payload: state });
+  }
+
+  /** Non-coordinators may see medic positions only inside the event's active hours. */
+  isMedicVisibilityRestricted(eventId: string, role?: string): boolean {
+    return role !== "coordinator" && !this.events.isWithinActiveHours(eventId);
+  }
 
   async onModuleInit() {
     // Idempotent column additions — safe to run on every boot
@@ -232,10 +251,7 @@ export class MedicsService implements OnModuleInit {
       ],
     );
 
-    await this.redis.publish(`event:${params.eventId}:map`, {
-      type: "medic_location",
-      payload: state,
-    });
+    await this.publishMedicLocation(params.eventId, state);
 
     return state;
   }
@@ -285,10 +301,7 @@ export class MedicsService implements OnModuleInit {
 
     const updated: MedicState = { ...existing, status, destination: destination ?? null, route: null, lastSeenAt: now };
 
-    await this.redis.publish(`event:${eventId}:map`, {
-      type: "medic_location",
-      payload: updated,
-    });
+    await this.publishMedicLocation(eventId, updated);
 
     // Notify the assigned medic only when somebody else dispatched them.
     if (destination && !isSelf) {
@@ -342,7 +355,7 @@ export class MedicsService implements OnModuleInit {
       route: route ?? null,
       lastSeenAt: now,
     };
-    await this.redis.publish(`event:${eventId}:map`, { type: "medic_location", payload: updated });
+    await this.publishMedicLocation(eventId, updated);
     return updated;
   }
 
@@ -368,10 +381,7 @@ export class MedicsService implements OnModuleInit {
 
     const updated: MedicState = { ...existing, status, destination: null, route: null, lastSeenAt: now };
 
-    await this.redis.publish(`event:${eventId}:map`, {
-      type: "medic_location",
-      payload: updated,
-    });
+    await this.publishMedicLocation(eventId, updated);
 
     return updated;
   }
@@ -438,6 +448,8 @@ export class MedicsService implements OnModuleInit {
    * nearest-medic pill.
    */
   async getPublicActiveMedics(eventId: string): Promise<PublicMedicState[]> {
+    // Outside the event's active hours medic positions are coordinator-only.
+    if (!this.events.isWithinActiveHours(eventId)) return [];
     const medics = await this.getActiveMedics(eventId);
     return medics.map((m) => ({
       medicId: m.medicId,
