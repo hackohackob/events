@@ -78,6 +78,26 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
     useNavStore.getState().updateProgress({ lat: fix.lat, lng: fix.lng, at: fix.at });
   }, [phase, fix]);
 
+  // Entering the transport picker: zoom out so both me and the destination are
+  // on screen (the blue preview arc between them tells the story). The picker
+  // sheet covers the lower part of the screen, hence the bottom padding.
+  useEffect(() => {
+    if (phase !== "transport") return;
+    const dest = useNavStore.getState().destination;
+    const f = useLocationStatus.getState().lastFix;
+    if (!dest || !f) return;
+    const minLng = Math.min(f.lng, dest.lng);
+    const maxLng = Math.max(f.lng, dest.lng);
+    const minLat = Math.min(f.lat, dest.lat);
+    const maxLat = Math.max(f.lat, dest.lat);
+    const padLng = Math.max((maxLng - minLng) * 0.25, 0.002);
+    const padLat = Math.max((maxLat - minLat) * 0.25, 0.002);
+    cameraRef.current?.fitBounds(
+      [minLng - padLng, minLat - padLat, maxLng + padLng, maxLat + padLat],
+      { padding: { top: 90, right: 40, bottom: Math.round(SCREEN_H * 0.45), left: 40 }, duration: 650 },
+    );
+  }, [phase, cameraRef]);
+
   // Ease the navigation camera on each progress tick (and on mode/recenter change).
   // "north" keeps the map north-up + flat; "follow" tilts and rotates to travel
   // direction with the puck in the lower third. A pinched zoom is kept until the

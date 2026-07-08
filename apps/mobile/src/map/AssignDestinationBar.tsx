@@ -166,42 +166,43 @@ export function AssignDestinationBar({
         </Pressable>
       )}
 
-      {/* Assign myself to this point without starting navigation — for incidents
-          (join responders) and for plain POIs (take the point as my post). */}
-      {!goingHere ? (
-        incidentId && amResponder ? (
-          <View style={[styles.btn, styles.assignedBtn]}>
-            <Text style={styles.assignedBtnText}>✓ You're assigned</Text>
-          </View>
-        ) : (
-          <Pressable style={[styles.btn, styles.markBtn]} onPress={markAssigned} disabled={markBusy}>
-            <Text style={styles.markBtnText}>
-              {markBusy ? "…" : incidentId ? "✓ Mark me assigned" : "✓ Assign me here"}
-            </Text>
-          </Pressable>
-        )
-      ) : null}
+      {/* Secondary actions side by side (each stretches when it's alone):
+          assign myself without navigation + coordinator dispatch. */}
+      <View style={styles.secondaryRow}>
+        {!goingHere ? (
+          incidentId && amResponder ? (
+            <View style={[styles.btn, styles.assignedBtn, styles.halfBtn]}>
+              <Text style={styles.assignedBtnText}>✓ You're assigned</Text>
+            </View>
+          ) : (
+            <Pressable style={[styles.btn, styles.markBtn, styles.halfBtn]} onPress={markAssigned} disabled={markBusy}>
+              <Text style={styles.markBtnText}>
+                {markBusy ? "…" : incidentId ? "✓ Mark me assigned" : "✓ Assign me here"}
+              </Text>
+            </Pressable>
+          )
+        ) : null}
 
-      {amCoordinator ? (
-        <>
-          <Pressable style={[styles.btn, styles.assignBtn]} onPress={() => setPicking((v) => !v)}>
+        {amCoordinator ? (
+          <Pressable style={[styles.btn, styles.assignBtn, styles.halfBtn]} onPress={() => setPicking((v) => !v)}>
             <Text style={styles.assignBtnText}>{picking ? "Cancel" : "Assign medic…"}</Text>
           </Pressable>
-          {picking ? (
-            <View style={styles.pickList}>
-              {others.length === 0 ? (
-                <Text style={styles.pickEmpty}>No other medics on the roster.</Text>
-              ) : (
-                others.map((m) => (
-                  <Pressable key={m.id} style={styles.pickRow} onPress={() => dispatch(m.id)} disabled={busyId === m.id}>
-                    <Text style={styles.pickName}>{m.name}</Text>
-                    <Text style={styles.pickSend}>{busyId === m.id ? "…" : "Send →"}</Text>
-                  </Pressable>
-                ))
-              )}
-            </View>
-          ) : null}
-        </>
+        ) : null}
+      </View>
+
+      {amCoordinator && picking ? (
+        <View style={styles.pickList}>
+          {others.length === 0 ? (
+            <Text style={styles.pickEmpty}>No other medics on the roster.</Text>
+          ) : (
+            others.map((m) => (
+              <Pressable key={m.id} style={styles.pickRow} onPress={() => dispatch(m.id)} disabled={busyId === m.id}>
+                <Text style={styles.pickName}>{m.name}</Text>
+                <Text style={styles.pickSend}>{busyId === m.id ? "…" : "Send →"}</Text>
+              </Pressable>
+            ))
+          )}
+        </View>
       ) : null}
     </View>
   );
@@ -210,6 +211,8 @@ export function AssignDestinationBar({
 const styles = StyleSheet.create({
   wrap: { gap: 8, marginTop: 10 },
   btn: { paddingVertical: 12, borderRadius: 12, alignItems: "center" },
+  secondaryRow: { flexDirection: "row", gap: 8 },
+  halfBtn: { flex: 1, paddingHorizontal: 6 },
   goBtn: { backgroundColor: "#f59e0b" },
   goBtnText: { color: "#1a1206", fontSize: 14, fontWeight: "900" },
   clearBtn: { backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1, borderColor: "rgba(239,68,68,0.35)" },

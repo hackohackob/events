@@ -661,8 +661,13 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                     return (
                       <View key={m.id} style={styles.careChipRow}>
                         <View style={[styles.careChip, isCpr ? styles.careChipCpr : null]}>
-                          <Feather name={isCpr ? "heart" : "clipboard"} size={10} color={isCpr ? "#f87171" : "#34d399"} />
-                          <Text style={styles.careChipText} numberOfLines={1}>
+                          <Feather
+                            name={isCpr ? "heart" : "clipboard"}
+                            size={10}
+                            color={isCpr ? "#f87171" : "#34d399"}
+                            style={styles.careChipIcon}
+                          />
+                          <Text style={styles.careChipText}>
                             {!isCpr && meta.question ? (
                               <Text style={styles.careChipQuestionInline}>{meta.question} · </Text>
                             ) : null}
@@ -1028,12 +1033,13 @@ const styles = StyleSheet.create({
   logTime: { color: "#48586c", fontSize: 10, fontWeight: "700" },
   // Guided-care chips (first-aid answers / CPR from the runner app)
   careChipRow: { alignItems: "center", paddingVertical: 1 },
+  // Compact but never truncating: text wraps, icon/time hug the first line.
   careChip: {
     maxWidth: "94%",
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 6,
-    borderRadius: 999,
+    borderRadius: 11,
     paddingVertical: 4,
     paddingHorizontal: 10,
     backgroundColor: "rgba(52,211,153,0.07)",
@@ -1041,8 +1047,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(52,211,153,0.22)",
   },
   careChipCpr: { backgroundColor: "rgba(248,113,113,0.08)", borderColor: "rgba(248,113,113,0.25)" },
-  careChipTime: { color: "#48586c", fontSize: 9.5, fontWeight: "700" },
-  careChipText: { color: "#e2ecf7", fontSize: 11.5, fontWeight: "800", flexShrink: 1 },
+  careChipIcon: { marginTop: 3 },
+  careChipTime: { color: "#48586c", fontSize: 9.5, fontWeight: "700", marginTop: 2 },
+  careChipText: { color: "#e2ecf7", fontSize: 11.5, fontWeight: "800", flexShrink: 1, lineHeight: 16 },
   careChipQuestionInline: { color: "#7d8ea4", fontWeight: "600" },
   bubble: { maxWidth: "85%", borderRadius: 13, paddingVertical: 7, paddingHorizontal: 11 },
   bubbleMine: { alignSelf: "flex-end", backgroundColor: "rgba(34,197,94,0.16)", borderTopRightRadius: 4 },

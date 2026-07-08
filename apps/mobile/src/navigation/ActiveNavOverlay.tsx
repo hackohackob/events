@@ -5,7 +5,7 @@ import * as Haptics from "expo-haptics";
 import { useNavStore } from "./nav-store";
 import { useLocationStatus } from "../debug/location-status";
 import { formatDistance, formatDuration, formatEta } from "./geo";
-import { maneuverGlyph, maneuverLabel, SURFACE_COLORS, SURFACE_LABELS } from "./surface";
+import { maneuverGlyph, maneuverLabel, SURFACE_COLORS } from "./surface";
 
 /** Bottom inset for nav UI — the tabs bar is hidden during navigation. */
 const NAV_BOTTOM_INSET = 10;
@@ -93,17 +93,24 @@ export function ActiveNavOverlay() {
         <OffRouteStrip meters={progress?.offRouteMeters ?? 0} rerouting={rerouting} />
       ) : null}
 
-      {/* ── Bottom: speed puck + dock ── */}
+      {/* ── Bottom: speed puck + voice toggle floating above the dock ── */}
       <View style={styles.bottomStack} pointerEvents="box-none">
-        <SpeedPuck speedMps={progress?.speedMps ?? null} surface={progress?.surface ?? "road"} />
+        <View style={styles.floatRow} pointerEvents="box-none">
+          <SpeedPuck speedMps={progress?.speedMps ?? null} surface={progress?.surface ?? "road"} />
+          <Pressable
+            style={styles.voiceBtn}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              toggleVoiceMuted();
+            }}
+            hitSlop={8}
+          >
+            <Feather name={voiceMuted ? "volume-x" : "volume-2"} size={19} color={voiceMuted ? "#f5b301" : "#cfe0f4"} />
+          </Pressable>
+        </View>
         <NavDock
           route={route}
           progressState={progress}
-          voiceMuted={voiceMuted}
-          onToggleVoice={() => {
-            void Haptics.selectionAsync();
-            toggleVoiceMuted();
-          }}
           onEnd={() => {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             stop();
@@ -152,14 +159,10 @@ function SpeedPuck({ speedMps, surface }: { speedMps: number | null; surface: ke
 function NavDock({
   route,
   progressState,
-  voiceMuted,
-  onToggleVoice,
   onEnd,
 }: {
   route: { distanceMeters: number; durationMs: number; ascentMeters?: number; descentMeters?: number };
   progressState: ReturnType<typeof useNavStore.getState>["progress"];
-  voiceMuted: boolean;
-  onToggleVoice: () => void;
   onEnd: () => void;
 }) {
   const fix = useLocationStatus((s) => s.lastFix);
@@ -171,7 +174,6 @@ function NavDock({
     route.distanceMeters > 0
       ? Math.max(0, Math.min(1, 1 - remainingMeters / route.distanceMeters))
       : 0;
-  const surface = progressState?.surface ?? "road";
 
   return (
     <Pressable
@@ -206,9 +208,6 @@ function NavDock({
           </View>
         </View>
 
-        <Pressable style={styles.voiceBtn} onPress={onToggleVoice} hitSlop={8}>
-          <Feather name={voiceMuted ? "volume-x" : "volume-2"} size={18} color={voiceMuted ? "#f5b301" : "#cfe0f4"} />
-        </Pressable>
         <Pressable
           style={({ pressed }) => [styles.endBtn, pressed && styles.endBtnPressed]}
           onPress={onEnd}
@@ -219,14 +218,12 @@ function NavDock({
         </Pressable>
       </View>
 
-      {/* Tap-to-expand: terrain + device details. */}
+      {/* Tap-to-expand: terrain + GPS details. */}
       {expanded ? (
         <View style={styles.detailRow}>
           <DetailCell icon="trending-up" value={route.ascentMeters != null ? `${Math.round(route.ascentMeters)} m` : "—"} caption="climb" />
           <DetailCell icon="trending-down" value={route.descentMeters != null ? `${Math.round(route.descentMeters)} m` : "—"} caption="descent" />
-          <DetailCell icon="layers" value={SURFACE_LABELS[surface]} caption="surface" color={SURFACE_COLORS[surface]} />
           <DetailCell icon="target" value={fix?.accuracy != null ? `±${Math.round(fix.accuracy)} m` : "—"} caption="GPS" />
-          <DetailCell icon="battery" value={fix?.battery != null ? `${Math.round(fix.battery * 100)}%` : "—"} caption="battery" />
         </View>
       ) : null}
     </Pressable>
@@ -261,7 +258,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 66,
     left: 12,
-    right: 12,
+    // Leaves the right-hand map controls column (layers / locate / compass,
+    // 46px wide at right:12) fully clear.
+    right: 70,
     borderRadius: 20,
     backgroundColor: "rgba(7, 12, 22, 0.97)",
     borderWidth: 1,
@@ -317,7 +316,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 152,
     left: 26,
-    right: 26,
+    right: 84,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -342,9 +341,15 @@ const styles = StyleSheet.create({
     bottom: NAV_BOTTOM_INSET,
     gap: 10,
   },
+  // Speed puck bottom-left, voice toggle bottom-right — both floating above
+  // the dock so the dock row stays uncrowded.
+  floatRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    paddingHorizontal: 2,
+  },
   speedPuck: {
-    alignSelf: "flex-start",
-    marginLeft: 2,
     width: 58,
     height: 58,
     borderRadius: 29,
@@ -392,14 +397,19 @@ const styles = StyleSheet.create({
   statValue: { color: "#eef4fb", fontSize: 16.5, fontWeight: "900", lineHeight: 20 },
   statCaption: { color: "#4d6076", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 },
   voiceBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(7, 12, 22, 0.96)",
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.18)",
+    borderColor: "rgba(148,163,184,0.25)",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
   },
   endBtn: {
     flexDirection: "row",

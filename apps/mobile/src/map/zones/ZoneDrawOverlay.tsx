@@ -1,7 +1,9 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -36,6 +38,21 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
   const [color, setColor] = useState(ZONE_COLORS[0]);
   const [alarm, setAlarm] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // The overlay is absolutely positioned, so KeyboardAvoidingView can't help —
+  // track the keyboard height and lift the naming card above it (same pattern
+  // as the event chat composer).
+  const [kbHeight, setKbHeight] = useState(0);
+  useEffect(() => {
+    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   // Pixel queue → unproject pump. Move events arrive far faster than the async
   // bridge round-trips, so points are queued and drained in ordered batches.
@@ -140,9 +157,9 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
         </Pressable>
       </View>
 
-      {/* Naming card */}
+      {/* Naming card — lifted above the keyboard while typing. */}
       {phase === "name" ? (
-        <View style={styles.card}>
+        <View style={[styles.card, kbHeight > 0 ? { bottom: kbHeight + 12 } : null]}>
           <Text style={styles.cardTitle}>NEW ZONE</Text>
           <TextInput
             value={name}

@@ -82,6 +82,7 @@ import { useNotificationFocus } from "../notifications/notification-focus";
 import { useNavStore } from "../navigation/nav-store";
 import { useNavigationCamera } from "../navigation/useNavigationCamera";
 import { NavigationMapLayers } from "../navigation/NavigationMapLayers";
+import { TransportPreviewLayer } from "../navigation/TransportPreviewLayer";
 import { MedicRoutesLayer } from "../navigation/MedicRoutesLayer";
 import { AssignedRoutesLayer } from "../navigation/AssignedRoutesLayer";
 import { AssignedIncidentBanner } from "../navigation/AssignedIncidentBanner";
@@ -1475,6 +1476,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Hospital pins — shown while the hospitals drawer is open. Capped to the
   // nearest few dozen so a country-wide directory doesn't flood the map.
   const allHospitals = useHospitalsStore((state) => state.hospitals);
+  // A tapped pin highlights (expands + flashes) its card in the drawer list.
+  const [hospitalHighlight, setHospitalHighlight] = useState<{ id: string; nonce: number } | null>(null);
+  // One camera fit per drawer open — frames me + the closest 24/7 ERs.
+  const hospitalsFramedRef = useRef(false);
 
   // Team zones — medic-only regions. Runners never load or render them.
   const sessionRole = useSessionStore((state) => state.role);
@@ -1597,12 +1602,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     }),
   ).current;
 
+  // Scrub updates are coalesced to one state write per frame: move events
+  // arrive far faster than 60Hz and every write re-renders this (huge)
+  // screen, which is what made scrubbing feel glitchy.
+  const trackProfilePendingRatioRef = useRef<number | null>(null);
+  const trackProfileRafRef = useRef<number | null>(null);
   const updateTrackProfileProgressFromX = (locationX: number) => {
     if (trackProfileWidth <= 0) {
       return;
     }
-    const ratio = Math.max(0, Math.min(1, locationX / trackProfileWidth));
-    setTrackProfileProgress(ratio);
+    trackProfilePendingRatioRef.current = Math.max(0, Math.min(1, locationX / trackProfileWidth));
+    if (trackProfileRafRef.current == null) {
+      trackProfileRafRef.current = requestAnimationFrame(() => {
+        trackProfileRafRef.current = null;
+        if (trackProfilePendingRatioRef.current != null) {
+          setTrackProfileProgress(trackProfilePendingRatioRef.current);
+        }
+      });
+    }
   };
 
   const measureTrackProfileChart = () => {
@@ -2195,6 +2212,41 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     [focusedTrackId, trackVisuals],
   );
   const trackModeActive = activeTab === "tracks";
+
+  // Opening the hospitals drawer zooms out to show me + the 3 closest 24/7
+  // ERs, wherever they are — if they're outside the 10 km ring the frame
+  // simply grows to include them. Runs once per open, as soon as both the
+  // directory and a GPS fix are available.
+  useEffect(() => {
+    if (hospitalsSheetIndex < 0) {
+      hospitalsFramedRef.current = false;
+      return;
+    }
+    if (hospitalsFramedRef.current || !allHospitals || !myLocationFix) return;
+    const closestErs = allHospitals
+      .filter((h) => h.emergency24h)
+      .map((h) => ({ h, km: distanceKm(myLocationFix.lat, myLocationFix.lng, h.lat, h.lng) }))
+      .sort((a, b) => a.km - b.km)
+      .slice(0, 3)
+      .map(({ h }) => h);
+    if (closestErs.length === 0) return;
+    hospitalsFramedRef.current = true;
+    let minLng = myLocationFix.lng, maxLng = myLocationFix.lng;
+    let minLat = myLocationFix.lat, maxLat = myLocationFix.lat;
+    for (const h of closestErs) {
+      minLng = Math.min(minLng, h.lng);
+      maxLng = Math.max(maxLng, h.lng);
+      minLat = Math.min(minLat, h.lat);
+      maxLat = Math.max(maxLat, h.lat);
+    }
+    const padded = padCollapsedBounds(minLng, minLat, maxLng, maxLat);
+    cameraRef.current?.fitBounds([padded.minLng, padded.minLat, padded.maxLng, padded.maxLat], {
+      // The drawer covers the lower ~46% — keep the frame in the visible half.
+      padding: { top: 90, right: 40, bottom: Math.round(SCREEN_HEIGHT * 0.5), left: 40 },
+      duration: 650,
+    });
+  }, [hospitalsSheetIndex, allHospitals, myLocationFix]);
+
   // Nearest hospitals as map pins while the drawer is open (24/7 ERs pop red).
   const hospitalPins = useMemo(() => {
     if (hospitalsSheetIndex < 0 || !allHospitals) return [];
@@ -2261,6 +2313,57 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       focusedTrackProfile.maxElevationMeters,
     );
   }, [focusedTrackProfile, focusedTrackSample]);
+
+  // The chart's ~500 segment views are static per track — memoised so scrub
+  // re-renders (which only move the cursor) don't re-create them all.
+  const elevationChartSegments = useMemo(() => {
+    if (!focusedTrackProfile) return null;
+    return focusedTrackElevationLinePoints.slice(0, -1).map((point, index) => {
+      const next = focusedTrackElevationLinePoints[index + 1];
+      if (!next) {
+        return null;
+      }
+      const currentTop = elevationToChartTopPercent(
+        point.value,
+        focusedTrackProfile.minElevationMeters,
+        focusedTrackProfile.maxElevationMeters,
+      );
+      const nextTop = elevationToChartTopPercent(
+        next.value,
+        focusedTrackProfile.minElevationMeters,
+        focusedTrackProfile.maxElevationMeters,
+      );
+      const stepTop = Math.min(currentTop, nextTop);
+      const stepHeight = Math.max(1, Math.abs(nextTop - currentTop));
+      const horizontalWidth = Math.max(0.8, (next.progress - point.progress) * 100);
+      return (
+        <React.Fragment key={point.key}>
+          <View
+            style={[
+              styles.profileGradientChartSegmentHorizontal,
+              {
+                left: `${point.progress * 100}%`,
+                width: `${horizontalWidth}%`,
+                top: `${currentTop}%`,
+                backgroundColor: focusedTrackElevationLineColor,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.profileGradientChartSegmentVertical,
+              {
+                left: `${next.progress * 100}%`,
+                top: `${stepTop}%`,
+                height: `${stepHeight}%`,
+                backgroundColor: focusedTrackElevationLineColor,
+              },
+            ]}
+          />
+        </React.Fragment>
+      );
+    });
+  }, [focusedTrackProfile, focusedTrackElevationLinePoints, focusedTrackElevationLineColor]);
 
   // Project the user's current GPS fix onto the focused track to find where they
   // are along it, then derive remaining distance / climb / descent to the finish.
@@ -2903,6 +3006,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         {navPhase !== "active" && trackNavPhase === "idle" ? <UserLocation /> : null}
 
         <NavigationMapLayers />
+        <TransportPreviewLayer />
         <TrackNavLayers />
         <MedicRoutesLayer zoom={mapZoom} dimmed={assignedToIncident} />
 
@@ -3254,14 +3358,16 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         {hospitalPins.map((h) => (
           <Marker key={`hospital-${h.id}`} lngLat={[h.lng, h.lat]}>
             <Pressable
-              onPress={() =>
+              onPress={() => {
+                // Center the pin AND light its card up in the drawer list.
+                setHospitalHighlight({ id: h.id, nonce: Date.now() });
                 cameraRef.current?.easeTo({
                   center: [h.lng, h.lat],
                   zoom: Math.max(mapZoom, 12.5),
                   padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.46), left: 0, right: 0 },
                   duration: 420,
-                })
-              }
+                });
+              }}
               style={styles.hospitalPinWrap}
             >
               <View style={[styles.hospitalPin, h.emergency24h && styles.hospitalPin24]}>
@@ -3993,51 +4099,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </View>
               <View ref={trackProfileChartRef} style={styles.profileGradientChart}>
                 <View style={styles.profileGradientChartZeroLine} />
-                {focusedTrackElevationLinePoints.slice(0, -1).map((point, index) => {
-                  const next = focusedTrackElevationLinePoints[index + 1];
-                  if (!next) {
-                    return null;
-                  }
-                  const currentTop = elevationToChartTopPercent(
-                    point.value,
-                    focusedTrackProfile.minElevationMeters,
-                    focusedTrackProfile.maxElevationMeters,
-                  );
-                  const nextTop = elevationToChartTopPercent(
-                    next.value,
-                    focusedTrackProfile.minElevationMeters,
-                    focusedTrackProfile.maxElevationMeters,
-                  );
-                  const stepTop = Math.min(currentTop, nextTop);
-                  const stepHeight = Math.max(1, Math.abs(nextTop - currentTop));
-                  const horizontalWidth = Math.max(0.8, (next.progress - point.progress) * 100);
-                  return (
-                    <React.Fragment key={point.key}>
-                      <View
-                        style={[
-                          styles.profileGradientChartSegmentHorizontal,
-                          {
-                            left: `${point.progress * 100}%`,
-                            width: `${horizontalWidth}%`,
-                            top: `${currentTop}%`,
-                            backgroundColor: focusedTrackElevationLineColor,
-                          },
-                        ]}
-                      />
-                      <View
-                        style={[
-                          styles.profileGradientChartSegmentVertical,
-                          {
-                            left: `${next.progress * 100}%`,
-                            top: `${stepTop}%`,
-                            height: `${stepHeight}%`,
-                            backgroundColor: focusedTrackElevationLineColor,
-                          },
-                        ]}
-                      />
-                    </React.Fragment>
-                  );
-                })}
+                {elevationChartSegments}
                 <View style={[styles.profileGradientChartCursorLine, { left: `${trackProfileProgress * 100}%` }]} />
                 <View
                   style={[
@@ -4406,6 +4468,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         sheetRef={hospitalsSheetRef}
         currentFix={myLocationFix ? { lat: myLocationFix.lat, lng: myLocationFix.lng } : null}
         onIndexChange={setHospitalsSheetIndex}
+        highlight={hospitalHighlight}
         onNavigate={(hospital) => {
           hospitalsSheetRef.current?.close();
           useNavStore.getState().openTransport({ lat: hospital.lat, lng: hospital.lng, label: hospital.name });

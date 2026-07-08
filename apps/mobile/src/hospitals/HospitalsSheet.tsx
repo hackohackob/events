@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import { Feather } from "@expo/vector-icons";
@@ -72,6 +72,7 @@ export function HospitalsSheet({
   onNavigate,
   onClose,
   onIndexChange,
+  highlight,
 }: {
   sheetRef: React.RefObject<BottomSheet | null>;
   currentFix: LatLng | null;
@@ -80,6 +81,8 @@ export function HospitalsSheet({
   onClose?: () => void;
   /** Live snap index (-1 = closed) — the map uses it to show pins / hide tracks. */
   onIndexChange?: (index: number) => void;
+  /** A map pin was tapped: expand + scroll to + flash this hospital's card. */
+  highlight?: { id: string; nonce: number } | null;
 }) {
   const hospitals = useHospitalsStore((s) => s.hospitals);
   const loading = useHospitalsStore((s) => s.loading);
@@ -87,6 +90,26 @@ export function HospitalsSheet({
   const load = useHospitalsStore((s) => s.load);
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof BottomSheetScrollView> | null>(null);
+  const cardY = useRef<Map<string, number>>(new Map());
+
+  // React to a pin tap: expand the card, scroll it into view, flash briefly.
+  useEffect(() => {
+    if (!highlight) return;
+    setExpandedId(highlight.id);
+    setFlashId(highlight.id);
+    const t1 = setTimeout(() => {
+      const y = cardY.current.get(highlight.id);
+      if (y != null) scrollRef.current?.scrollTo({ y: Math.max(0, y - 60), animated: true });
+    }, 120);
+    const t2 = setTimeout(() => setFlashId(null), 1600);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight?.nonce]);
 
   // Lazy-load the directory the first time the sheet opens.
   const handleSheetChange = useCallback(
@@ -125,7 +148,9 @@ export function HospitalsSheet({
       index={-1}
       snapPoints={SNAP_POINTS}
       enableDynamicSizing={false}
-      enablePanDownToClose
+      // Deliberately NOT closable by dragging down — a stray swipe while
+      // scrolling the list must not dismiss the directory. Close via the X.
+      enablePanDownToClose={false}
       onChange={handleSheetChange}
       backgroundStyle={styles.sheetBg}
       handleStyle={styles.sheetHandleContainer}
@@ -136,12 +161,15 @@ export function HospitalsSheet({
           <View style={styles.headerIconWrap}>
             <Feather name="plus-square" size={16} color="#f87171" />
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>Hospitals</Text>
             <Text style={styles.headerSubtitle}>
               {currentFix ? "Nearest first · tap a card for actions" : "Waiting for GPS — alphabetical"}
             </Text>
           </View>
+          <Pressable style={styles.closeBtn} onPress={() => sheetRef.current?.close()} hitSlop={8}>
+            <Feather name="x" size={18} color="#cbd5e1" />
+          </Pressable>
         </View>
         <BottomSheetTextInput
           style={styles.searchInput}
@@ -154,7 +182,7 @@ export function HospitalsSheet({
         />
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView ref={scrollRef} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
         {loading ? (
           <View style={styles.stateWrap}>
             <ActivityIndicator color="#34d399" />
@@ -173,14 +201,16 @@ export function HospitalsSheet({
           </View>
         ) : (
           visible.map((h) => (
-            <HospitalCard
-              key={h.id}
-              hospital={h}
-              distance={currentFix ? distanceMeters(currentFix, { lat: h.lat, lng: h.lng }) : null}
-              expanded={expandedId === h.id}
-              onToggle={() => setExpandedId((cur) => (cur === h.id ? null : h.id))}
-              onNavigate={() => onNavigate(h)}
-            />
+            <View key={h.id} onLayout={(e) => cardY.current.set(h.id, e.nativeEvent.layout.y)}>
+              <HospitalCard
+                hospital={h}
+                distance={currentFix ? distanceMeters(currentFix, { lat: h.lat, lng: h.lng }) : null}
+                expanded={expandedId === h.id}
+                flash={flashId === h.id}
+                onToggle={() => setExpandedId((cur) => (cur === h.id ? null : h.id))}
+                onNavigate={() => onNavigate(h)}
+              />
+            </View>
           ))
         )}
       </BottomSheetScrollView>
@@ -192,12 +222,14 @@ function HospitalCard({
   hospital: h,
   distance,
   expanded,
+  flash,
   onToggle,
   onNavigate,
 }: {
   hospital: Hospital;
   distance: number | null;
   expanded: boolean;
+  flash?: boolean;
   onToggle: () => void;
   onNavigate: () => void;
 }) {
@@ -205,7 +237,7 @@ function HospitalCard({
   const caps = CAPABILITY_ORDER.filter((c) => h.capabilities.includes(c));
 
   return (
-    <Pressable style={[styles.card, expanded && styles.cardExpanded]} onPress={onToggle}>
+    <Pressable style={[styles.card, expanded && styles.cardExpanded, flash && styles.cardFlash]} onPress={onToggle}>
       <View style={styles.cardTopRow}>
         <View style={styles.cardTitleWrap}>
           <Text style={styles.cardTitle} numberOfLines={expanded ? undefined : 2}>
@@ -349,6 +381,17 @@ const styles = StyleSheet.create({
     borderColor: "rgba(148,163,184,0.1)",
   },
   cardExpanded: { borderColor: "rgba(52,211,153,0.35)", backgroundColor: "rgba(52,211,153,0.05)" },
+  cardFlash: { borderColor: "#7dd3fc", backgroundColor: "rgba(125,211,252,0.1)" },
+  closeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+  },
   cardTopRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   cardTitleWrap: { flex: 1 },
   cardTitle: { color: "#f1f5f9", fontSize: 14, fontWeight: "800", lineHeight: 18 },

@@ -12,8 +12,10 @@ const ELEVATION_BARS = 44;
 const LOOP_TOAST_MS = 4_500;
 
 /**
- * Full track-following overlay: next-turn card (top), whole-track progress bar
- * with elevation strip + controls (bottom), off-track and loop-skip feedback.
+ * Track-following HUD — the same visual language as point-to-point navigation
+ * (maneuver banner, floating speed puck + controls, bottom dock), plus the
+ * track-specific extras: the elevation strip painted up to the current
+ * position, done/total km, distance left and % completed.
  */
 export function TrackNavOverlay() {
   const phase = useTrackNavStore((s) => s.phase);
@@ -53,7 +55,9 @@ export function TrackNavOverlay() {
 
   if (phase === "idle" || !prepared || !track) return null;
 
+  const accent = track.color ?? "#34d399";
   const instruction = prepared.instructions[progress?.instructionIndex ?? 0];
+  const nextInstruction = prepared.instructions[(progress?.instructionIndex ?? 0) + 1];
   const maneuver = instruction?.maneuver ?? "continue";
   const toManeuver = progress?.toManeuverMeters ?? 0;
   const barFill = Math.max(0.04, Math.min(1, 1 - toManeuver / MANEUVER_BAR_REFERENCE_M));
@@ -67,131 +71,169 @@ export function TrackNavOverlay() {
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* Next-turn card. */}
-      <View style={styles.turnCard}>
-        <View style={styles.turnRow}>
-          <View style={[styles.arrowBadge, arrived && styles.arrowBadgeArrived]}>
-            <Text style={styles.arrowGlyph}>{arrived ? "◎" : maneuverGlyph(maneuver)}</Text>
-          </View>
-          <View style={styles.turnTextWrap}>
-            <Text style={styles.turnDistance}>{progress ? formatDistance(toManeuver) : "—"}</Text>
-            <Text style={styles.turnLabel} numberOfLines={1}>
-              {arrived ? "Track complete" : maneuverLabel(maneuver)}
+      {/* ── Maneuver banner ── */}
+      <View style={[styles.banner, arrived && styles.bannerArrive]}>
+        <View style={styles.bannerRow}>
+          <View style={[styles.arrowBadge, arrived && styles.arrowBadgeArrive]}>
+            <Text style={styles.arrowGlyph} allowFontScaling={false}>
+              {arrived ? "◎" : maneuverGlyph(maneuver)}
             </Text>
           </View>
+          <View style={styles.bannerTextWrap}>
+            <Text style={styles.bannerDistance} allowFontScaling={false}>
+              {arrived ? "Done" : progress ? formatDistance(toManeuver) : "—"}
+            </Text>
+            <Text style={styles.bannerLabel} numberOfLines={1}>
+              {arrived ? "Track complete" : `${maneuverLabel(maneuver)} · ${track.label}`}
+            </Text>
+          </View>
+          {nextInstruction && !arrived ? (
+            <View style={styles.thenChip}>
+              <Text style={styles.thenChipCaption}>then</Text>
+              <Text style={styles.thenChipGlyph} allowFontScaling={false}>
+                {maneuverGlyph(nextInstruction.maneuver)}
+              </Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.maneuverTrack}>
-          <View style={[styles.maneuverFill, { width: `${barFill * 100}%` }]} />
+          <View style={[styles.maneuverFill, arrived && styles.maneuverFillArrive, { width: `${barFill * 100}%` }]} />
         </View>
-        {progress?.offTrack ? <OffTrackPill meters={progress.offTrackMeters} /> : null}
-        {paused ? (
-          <View style={styles.pausedPill}>
-            <Feather name="pause" size={12} color="#dbe7f5" />
-            <Text style={styles.pausedText}>Guidance paused</Text>
-          </View>
-        ) : null}
       </View>
+
+      {/* Off-track / paused strip, right under the banner. */}
+      {progress?.offTrack && !paused ? <OffTrackStrip meters={progress.offTrackMeters} /> : null}
+      {paused ? (
+        <View style={styles.pausedStrip}>
+          <Feather name="pause" size={13} color="#dbe7f5" />
+          <Text style={styles.pausedText}>Guidance paused</Text>
+        </View>
+      ) : null}
 
       {/* Loop-skip toast. */}
       {loopSkip ? <LoopSkipToast jumpMeters={loopSkip.jumpMeters} /> : null}
 
-      {/* Bottom panel: elevation strip + whole-track progress + controls. */}
-      <View style={styles.bottomPanel}>
-        <View style={styles.trackTitleRow}>
-          <View style={[styles.trackDot, { backgroundColor: track.color ?? "#34d399" }]} />
-          <Text style={styles.trackTitle} numberOfLines={1}>
-            {track.label}
-          </Text>
-          <Text style={styles.trackPercent}>{percent}%</Text>
-        </View>
-
-        {elevationBars ? (
-          <View style={styles.elevationRow}>
-            {elevationBars.map((h, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.elevationBar,
-                  {
-                    height: 4 + h * 22,
-                    backgroundColor: i <= positionIndex ? (track.color ?? "#34d399") : "rgba(148,163,184,0.28)",
-                  },
-                ]}
-              />
-            ))}
+      {/* ── Bottom: speed puck + pause/voice floating above the dock ── */}
+      <View style={styles.bottomStack} pointerEvents="box-none">
+        <View style={styles.floatRow} pointerEvents="box-none">
+          <SpeedPuck speedMps={progress?.speedMps ?? null} accent={accent} />
+          <View style={styles.floatButtons}>
+            <Pressable
+              style={styles.floatBtn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                if (paused) resume();
+                else pause();
+              }}
+              hitSlop={8}
+            >
+              <Feather name={paused ? "play" : "pause"} size={18} color={paused ? "#34d399" : "#cfe0f4"} />
+            </Pressable>
+            <Pressable
+              style={styles.floatBtn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                toggleMuted();
+              }}
+              hitSlop={8}
+            >
+              <Feather name={muted ? "volume-x" : "volume-2"} size={18} color={muted ? "#f5b301" : "#cfe0f4"} />
+            </Pressable>
           </View>
-        ) : null}
-
-        <View style={styles.progressTrack}>
-          <Animated.View
-            style={[
-              styles.progressFill,
-              {
-                backgroundColor: track.color ?? "#34d399",
-                width: fillAnim.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
-              },
-            ]}
-          />
         </View>
 
-        <View style={styles.statsRow}>
-          <Text style={styles.statsDone}>
-            {doneKm} <Text style={styles.statsMuted}>/ {totalKm} km</Text>
-          </Text>
-          <Text style={styles.statsRemaining}>
-            {progress ? formatDistance(progress.remainingMeters) : "—"} left
-            {progress?.speedMps != null ? `  ·  ${(progress.speedMps * 3.6).toFixed(1)} km/h` : ""}
-          </Text>
-        </View>
+        {/* ── Dock ── */}
+        <View style={styles.dock}>
+          {/* Elevation strip, painted up to the current position. */}
+          {elevationBars ? (
+            <View style={styles.elevationRow}>
+              {elevationBars.map((h, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.elevationBar,
+                    {
+                      height: 3 + h * 20,
+                      backgroundColor: i <= positionIndex ? accent : "rgba(148,163,184,0.24)",
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
 
-        <View style={styles.controlsRow}>
-          <Pressable
-            style={({ pressed }) => [styles.controlBtn, pressed && styles.controlBtnPressed]}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              toggleMuted();
-            }}
-            hitSlop={6}
-          >
-            <Feather name={muted ? "volume-x" : "volume-2"} size={17} color={muted ? "#f5b301" : "#9fb3cc"} />
-            <Text style={[styles.controlText, muted && { color: "#f5b301" }]}>{muted ? "Muted" : "Voice"}</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.controlBtn, pressed && styles.controlBtnPressed]}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              if (paused) resume();
-              else pause();
-            }}
-            hitSlop={6}
-          >
-            <Feather name={paused ? "play" : "pause"} size={17} color="#9fb3cc" />
-            <Text style={styles.controlText}>{paused ? "Resume" : "Pause"}</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.controlBtn, styles.stopBtn, pressed && styles.stopBtnPressed]}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              stop();
-            }}
-            hitSlop={6}
-          >
-            <View style={styles.stopIcon} />
-            <Text style={styles.stopText}>End</Text>
-          </Pressable>
+          {/* Whole-track progress. */}
+          <View style={styles.routeTrack}>
+            <Animated.View
+              style={[
+                styles.routeFill,
+                {
+                  backgroundColor: accent,
+                  width: fillAnim.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
+                },
+              ]}
+            />
+          </View>
+
+          <View style={styles.dockRow}>
+            <View style={styles.dockStats}>
+              <View style={styles.statGroup}>
+                <Text style={styles.heroValue} allowFontScaling={false}>
+                  <Text style={{ color: accent }}>{doneKm}</Text>
+                  <Text style={styles.heroMuted}> / {totalKm} km</Text>
+                </Text>
+                <Text style={styles.statCaption}>done</Text>
+              </View>
+              <View style={styles.dockDivider} />
+              <View style={styles.statGroup}>
+                <Text style={styles.statValue} allowFontScaling={false}>
+                  {progress ? formatDistance(progress.remainingMeters) : "—"}
+                </Text>
+                <Text style={styles.statCaption}>left</Text>
+              </View>
+              <View style={styles.dockDivider} />
+              <View style={styles.statGroup}>
+                <Text style={styles.statValue} allowFontScaling={false}>{percent}%</Text>
+                <Text style={styles.statCaption}>completed</Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [styles.endBtn, pressed && styles.endBtnPressed]}
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                stop();
+              }}
+              hitSlop={6}
+            >
+              <View style={styles.endStopIcon} />
+              <Text style={styles.endText}>End</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </View>
   );
 }
 
-/** Flashing gold pill while off the track, with the distance back to it. */
-function OffTrackPill({ meters }: { meters: number }) {
+/** Current speed in a floating circular puck, ringed in the track colour. */
+function SpeedPuck({ speedMps, accent }: { speedMps: number | null; accent: string }) {
+  const kmh = speedMps != null && speedMps > 0.4 ? Math.round(speedMps * 3.6) : 0;
+  return (
+    <View style={[styles.speedPuck, { borderColor: accent }]}>
+      <Text style={styles.speedValue} allowFontScaling={false}>{kmh}</Text>
+      <Text style={styles.speedUnit} allowFontScaling={false}>km/h</Text>
+    </View>
+  );
+}
+
+/** Flashing amber strip while off the track, with the distance back to it. */
+function OffTrackStrip({ meters }: { meters: number }) {
   const flash = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(flash, { toValue: 0.4, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(flash, { toValue: 0.45, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
         Animated.timing(flash, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ]),
     );
@@ -200,8 +242,8 @@ function OffTrackPill({ meters }: { meters: number }) {
   }, [flash]);
 
   return (
-    <Animated.View style={[styles.offTrackPill, { opacity: flash }]}>
-      <Feather name="corner-up-left" size={12} color="#1a1206" />
+    <Animated.View style={[styles.offTrackStrip, { opacity: flash }]}>
+      <Feather name="corner-up-left" size={13} color="#1a1206" />
       <Text style={styles.offTrackText}>Off track · {formatDistance(meters)} back to route</Text>
     </Animated.View>
   );
@@ -251,83 +293,104 @@ function buildElevationBars(elevations: Array<number | undefined>): number[] | n
 }
 
 const styles = StyleSheet.create({
-  turnCard: {
+  // ── Maneuver banner (mirrors ActiveNavOverlay) ──
+  banner: {
     position: "absolute",
-    top: 70,
+    top: 66,
     left: 12,
-    minWidth: 184,
-    maxWidth: 250,
-    backgroundColor: "rgba(9,14,24,0.96)",
-    borderRadius: 18,
+    // Clear of the right-hand map controls column.
+    right: 70,
+    borderRadius: 20,
+    backgroundColor: "rgba(7, 12, 22, 0.97)",
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    borderColor: "rgba(245, 179, 1, 0.35)",
+    paddingTop: 12,
+    paddingHorizontal: 14,
+    overflow: "hidden",
     shadowColor: "#000",
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 16,
+    elevation: 18,
   },
-  turnRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  bannerArrive: { borderColor: "rgba(52, 211, 153, 0.55)" },
+  bannerRow: { flexDirection: "row", alignItems: "center", gap: 13, paddingBottom: 12 },
   arrowBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: 54,
+    height: 54,
+    borderRadius: 16,
     backgroundColor: "#f5b301",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#f5b301",
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.45,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
     elevation: 6,
   },
-  arrowBadgeArrived: { backgroundColor: "#34d399", shadowColor: "#34d399" },
-  arrowGlyph: { color: "#1a1206", fontSize: 30, fontWeight: "900", lineHeight: 34 },
-  turnTextWrap: { flex: 1 },
-  turnDistance: { color: "#FFFFFF", fontSize: 27, fontWeight: "900", letterSpacing: 0.3, lineHeight: 30 },
-  turnLabel: { color: "#9fb3cc", fontSize: 13, fontWeight: "800", marginTop: 1 },
-  maneuverTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(148,163,184,0.18)",
-    marginTop: 10,
-    overflow: "hidden",
+  arrowBadgeArrive: { backgroundColor: "#34d399", shadowColor: "#34d399" },
+  arrowGlyph: { color: "#1a1206", fontSize: 34, fontWeight: "900", lineHeight: 40 },
+  bannerTextWrap: { flex: 1, minWidth: 0 },
+  bannerDistance: { color: "#ffffff", fontSize: 32, fontWeight: "900", letterSpacing: 0.2, lineHeight: 36 },
+  bannerLabel: { color: "#9fb3cc", fontSize: 13.5, fontWeight: "800", marginTop: 1 },
+  thenChip: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.2)",
+    gap: 1,
   },
-  maneuverFill: { height: 4, borderRadius: 2, backgroundColor: "#f5b301" },
-  offTrackPill: {
+  thenChipCaption: { color: "#64748b", fontSize: 9, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  thenChipGlyph: { color: "#dbe7f5", fontSize: 19, fontWeight: "900", lineHeight: 22 },
+  maneuverTrack: { height: 4, backgroundColor: "rgba(148,163,184,0.16)", marginHorizontal: -14 },
+  maneuverFill: { height: 4, backgroundColor: "#f5b301" },
+  maneuverFillArrive: { backgroundColor: "#34d399" },
+
+  // ── Strips under the banner ──
+  offTrackStrip: {
+    position: "absolute",
+    top: 152,
+    left: 26,
+    right: 84,
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
-    marginTop: 9,
-    alignSelf: "flex-start",
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#f5b301",
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     shadowColor: "#f5b301",
     shadowOpacity: 0.5,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 8,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
   },
-  offTrackText: { color: "#1a1206", fontSize: 12, fontWeight: "900", letterSpacing: 0.2 },
-  pausedPill: {
+  offTrackText: { color: "#1a1206", fontSize: 12.5, fontWeight: "900", letterSpacing: 0.2 },
+  pausedStrip: {
+    position: "absolute",
+    top: 152,
+    left: 26,
+    right: 84,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: 9,
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(148,163,184,0.2)",
-    borderRadius: 999,
-    paddingVertical: 5,
-    paddingHorizontal: 11,
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: "rgba(30, 41, 59, 0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.3)",
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
-  pausedText: { color: "#dbe7f5", fontSize: 12, fontWeight: "800" },
+  pausedText: { color: "#dbe7f5", fontSize: 12.5, fontWeight: "800" },
   loopToast: {
     position: "absolute",
-    bottom: 196,
+    bottom: 210,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
@@ -343,65 +406,109 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   loopToastText: { color: "#04140E", fontSize: 13.5, fontWeight: "900", letterSpacing: 0.2 },
-  bottomPanel: {
+
+  // ── Bottom stack ──
+  bottomStack: {
     position: "absolute",
     left: 12,
     right: 12,
-    bottom: 12,
-    backgroundColor: "rgba(9,14,24,0.96)",
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
-    paddingTop: 12,
-    paddingBottom: 12,
-    paddingHorizontal: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 16,
+    bottom: 10,
+    gap: 10,
   },
-  trackTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  trackDot: { width: 8, height: 8, borderRadius: 4 },
-  trackTitle: { flex: 1, color: "#dbe7f5", fontSize: 13, fontWeight: "800" },
-  trackPercent: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
+  floatRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    paddingHorizontal: 2,
+  },
+  floatButtons: { flexDirection: "row", gap: 9 },
+  floatBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(7, 12, 22, 0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+  speedPuck: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 3,
+    backgroundColor: "rgba(7, 12, 22, 0.96)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+  speedValue: { color: "#ffffff", fontSize: 19, fontWeight: "900", lineHeight: 22 },
+  speedUnit: { color: "#64748b", fontSize: 9, fontWeight: "800", marginTop: -1 },
+
+  // ── Dock ──
+  dock: {
+    borderRadius: 22,
+    backgroundColor: "rgba(7, 12, 22, 0.97)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 18,
+  },
   elevationRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 2,
-    height: 28,
-    marginTop: 10,
+    height: 26,
+    paddingHorizontal: 14,
+    paddingTop: 8,
   },
   elevationBar: { flex: 1, borderRadius: 1.5 },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(148,163,184,0.18)",
-    marginTop: 8,
-    overflow: "hidden",
-  },
-  progressFill: { height: 6, borderRadius: 3 },
-  statsRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
-  statsDone: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
-  statsMuted: { color: "#64748b", fontSize: 13, fontWeight: "800" },
-  statsRemaining: { color: "#9fb3cc", fontSize: 12.5, fontWeight: "700" },
-  controlsRow: { flexDirection: "row", gap: 8, marginTop: 12 },
-  controlBtn: {
-    flex: 1,
+  routeTrack: { height: 3.5, backgroundColor: "rgba(148,163,184,0.14)", marginTop: 7 },
+  routeFill: { height: 3.5 },
+  dockRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    gap: 10,
+  },
+  dockStats: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  statGroup: { alignItems: "flex-start" },
+  heroValue: { fontSize: 21, fontWeight: "900", lineHeight: 24 },
+  heroMuted: { color: "#64748b", fontSize: 14, fontWeight: "800" },
+  statValue: { color: "#eef4fb", fontSize: 16.5, fontWeight: "900", lineHeight: 20 },
+  statCaption: { color: "#4d6076", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 },
+  dockDivider: { width: 1, height: 26, backgroundColor: "rgba(148,163,184,0.16)" },
+  endBtn: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 7,
     paddingVertical: 11,
-    borderRadius: 13,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 15,
+    borderRadius: 14,
+    backgroundColor: "#ef4444",
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
+    borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#ef4444",
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
-  controlBtnPressed: { backgroundColor: "rgba(255,255,255,0.12)" },
-  controlText: { color: "#9fb3cc", fontSize: 13, fontWeight: "800" },
-  stopBtn: { backgroundColor: "#ef4444", borderColor: "rgba(255,255,255,0.18)" },
-  stopBtnPressed: { backgroundColor: "#dc2626" },
-  stopIcon: { width: 11, height: 11, borderRadius: 3, backgroundColor: "#fff" },
-  stopText: { color: "#fff", fontSize: 13.5, fontWeight: "900", letterSpacing: 0.3 },
+  endBtnPressed: { backgroundColor: "#dc2626", transform: [{ scale: 0.96 }] },
+  endStopIcon: { width: 11, height: 11, borderRadius: 3, backgroundColor: "#fff" },
+  endText: { color: "#ffffff", fontSize: 14, fontWeight: "900", letterSpacing: 0.4 },
 });

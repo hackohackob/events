@@ -30,7 +30,9 @@ interface SettingsState {
 
 const DEFAULTS = {
   locationIntervalMs: 60_000,
-  trackOffsetEnabled: true,
+  // Off by default — overlapping tracks draw on top of each other unless the
+  // user explicitly asks for the side-by-side spread.
+  trackOffsetEnabled: false,
   trackGradientEnabled: true,
 };
 
