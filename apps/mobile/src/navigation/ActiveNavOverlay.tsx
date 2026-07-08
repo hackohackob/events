@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Dimensions, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useNavStore } from "./nav-store";
@@ -7,15 +7,28 @@ import { useLocationStatus } from "../debug/location-status";
 import { formatDistance, formatDuration, formatEta } from "./geo";
 import { maneuverGlyph, maneuverLabel, SURFACE_COLORS, SURFACE_LABELS } from "./surface";
 
-const SCREEN_W = Dimensions.get("window").width;
-/** Bottom inset for nav UI — the tracks tab bar is hidden during navigation. */
-const NAV_BOTTOM_INSET = 12;
-const STATUS_BAR_HEIGHT = 86;
-const PAGE_WIDTH = SCREEN_W - 24;
+/** Bottom inset for nav UI — the tabs bar is hidden during navigation. */
+const NAV_BOTTOM_INSET = 10;
 /** Reference distance over which the maneuver progress bar fills (metres). */
 const MANEUVER_BAR_REFERENCE_M = 400;
 
-/** Full active-navigation overlay: next-turn card + swipable status bar + end control. */
+/**
+ * Active-navigation HUD.
+ *
+ *  ┌──────────────────────────────┐   Maneuver banner: big arrow + distance,
+ *  │ ⬏  240 m                     │   street, per-maneuver progress fill and
+ *  │    Turn left · Vitosha blvd  │   a "then ↱" lookahead chip. Turns green
+ *  └──────────────────────────────┘   on final approach; a flashing strip
+ *                                     appears under it when off-route.
+ *      (map)
+ *
+ *   ⌀ 34         Speed puck (ringed in the current surface colour).
+ *  ┌──────────────────────────────┐
+ *  │ ━━━━━━━━━━━░░░░░░░░░░░░░░░░ │   Whole-route progress.
+ *  │ 14:32 ETA · 3.4 km · 12 min  │   Tap the dock for terrain/GPS details.
+ *  │                    🔇  ■ End │
+ *  └──────────────────────────────┘
+ */
 export function ActiveNavOverlay() {
   const phase = useNavStore((s) => s.phase);
   const routes = useNavStore((s) => s.routes);
@@ -24,82 +37,90 @@ export function ActiveNavOverlay() {
   const rerouting = useNavStore((s) => s.rerouting);
   const voiceMuted = useNavStore((s) => s.voiceMuted);
   const toggleVoiceMuted = useNavStore((s) => s.toggleVoiceMuted);
+  const destination = useNavStore((s) => s.destination);
   const stop = useNavStore((s) => s.stop);
 
   if (phase !== "active") return null;
   const route = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
   if (!route) return null;
 
-  const instruction = progress ? route.instructions[progress.instructionIndex] : route.instructions[0];
+  const instructionIndex = progress?.instructionIndex ?? 0;
+  const instruction = route.instructions[instructionIndex];
+  const nextInstruction = route.instructions[instructionIndex + 1];
   const maneuver = instruction?.maneuver ?? "continue";
   const toManeuver = progress?.toManeuverMeters ?? 0;
   const barFill = Math.max(0.04, Math.min(1, 1 - toManeuver / MANEUVER_BAR_REFERENCE_M));
+  // Final approach: paint the banner green so "you're there" is unmissable.
+  const arriving = maneuver === "arrive" && (progress?.remainingMeters ?? Infinity) < 120;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* Next-turn card — top-left, just under the standard top bar. */}
-      <View style={styles.turnCard}>
-        <View style={styles.turnRow}>
-          <View style={styles.arrowBadge}>
-            <Text style={styles.arrowGlyph}>{maneuverGlyph(maneuver)}</Text>
+      {/* ── Maneuver banner ── */}
+      <View style={[styles.banner, arriving && styles.bannerArrive]}>
+        <View style={styles.bannerRow}>
+          <View style={[styles.arrowBadge, arriving && styles.arrowBadgeArrive]}>
+            <Text style={styles.arrowGlyph} allowFontScaling={false}>{maneuverGlyph(maneuver)}</Text>
           </View>
-          <View style={styles.turnTextWrap}>
-            <Text style={styles.turnDistance}>{progress ? formatDistance(toManeuver) : "—"}</Text>
-            <Text style={styles.turnLabel} numberOfLines={1}>
-              {maneuverLabel(maneuver)}
+          <View style={styles.bannerTextWrap}>
+            <Text style={styles.bannerDistance} allowFontScaling={false}>
+              {progress ? formatDistance(toManeuver) : "—"}
+            </Text>
+            <Text style={styles.bannerLabel} numberOfLines={1}>
+              {arriving
+                ? (destination?.label ? `Arrive · ${destination.label}` : "Arrive at destination")
+                : instruction?.streetName
+                  ? `${maneuverLabel(maneuver)} · ${instruction.streetName}`
+                  : maneuverLabel(maneuver)}
             </Text>
           </View>
+          {/* Lookahead: what comes right after this maneuver. */}
+          {nextInstruction && !arriving ? (
+            <View style={styles.thenChip}>
+              <Text style={styles.thenChipCaption}>then</Text>
+              <Text style={styles.thenChipGlyph} allowFontScaling={false}>
+                {maneuverGlyph(nextInstruction.maneuver)}
+              </Text>
+            </View>
+          ) : null}
         </View>
-        {instruction?.streetName ? (
-          <Text style={styles.turnStreet} numberOfLines={1}>
-            {instruction.streetName}
-          </Text>
-        ) : null}
         <View style={styles.maneuverTrack}>
-          <View style={[styles.maneuverFill, { width: `${barFill * 100}%` }]} />
+          <View style={[styles.maneuverFill, arriving && styles.maneuverFillArrive, { width: `${barFill * 100}%` }]} />
         </View>
-        {progress?.offRoute || rerouting ? (
-          <OffRoutePrompt meters={progress?.offRouteMeters ?? 0} rerouting={rerouting} />
-        ) : null}
       </View>
 
-      {/* Voice guidance mute toggle — stacked above the End button. */}
-      <Pressable
-        style={({ pressed }) => [styles.voiceButton, pressed && styles.voiceButtonPressed]}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          toggleVoiceMuted();
-        }}
-        hitSlop={8}
-      >
-        <Feather name={voiceMuted ? "volume-x" : "volume-2"} size={19} color={voiceMuted ? "#f5b301" : "#dbe7f5"} />
-      </Pressable>
+      {/* Off-route / rerouting strip, right under the banner. */}
+      {progress?.offRoute || rerouting ? (
+        <OffRouteStrip meters={progress?.offRouteMeters ?? 0} rerouting={rerouting} />
+      ) : null}
 
-      {/* End navigation — bold red action, bottom-right above the status bar. */}
-      <Pressable
-        style={({ pressed }) => [styles.endButton, pressed && styles.endButtonPressed]}
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          stop();
-        }}
-        hitSlop={8}
-      >
-        <View style={styles.endStopIcon} />
-        <Text style={styles.endText}>End</Text>
-      </Pressable>
-
-      <NavStatusBar />
+      {/* ── Bottom: speed puck + dock ── */}
+      <View style={styles.bottomStack} pointerEvents="box-none">
+        <SpeedPuck speedMps={progress?.speedMps ?? null} surface={progress?.surface ?? "road"} />
+        <NavDock
+          route={route}
+          progressState={progress}
+          voiceMuted={voiceMuted}
+          onToggleVoice={() => {
+            void Haptics.selectionAsync();
+            toggleVoiceMuted();
+          }}
+          onEnd={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            stop();
+          }}
+        />
+      </View>
     </View>
   );
 }
 
-/** Flashing "return to path" prompt shown when the user strays off the route. */
-function OffRoutePrompt({ meters, rerouting }: { meters: number; rerouting: boolean }) {
+/** Flashing "return to path" strip shown when the user strays off the route. */
+function OffRouteStrip({ meters, rerouting }: { meters: number; rerouting: boolean }) {
   const flash = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(flash, { toValue: 0.35, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(flash, { toValue: 0.45, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
         Animated.timing(flash, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ]),
     );
@@ -108,215 +129,307 @@ function OffRoutePrompt({ meters, rerouting }: { meters: number; rerouting: bool
   }, [flash]);
 
   return (
-    <Animated.View style={[styles.offRoutePill, { opacity: flash }]}>
-      <Feather name={rerouting ? "refresh-cw" : "alert-triangle"} size={12} color="#fecaca" />
+    <Animated.View style={[styles.offRouteStrip, { opacity: flash }]}>
+      <Feather name={rerouting ? "refresh-cw" : "alert-triangle"} size={13} color="#fff" />
       <Text style={styles.offRouteText}>
-        {rerouting ? "Finding a new route…" : `Return to path · ${Math.round(meters)} m off`}
+        {rerouting ? "Finding a new route…" : `Off route · ${Math.round(meters)} m from the path`}
       </Text>
     </Animated.View>
   );
 }
 
-/** Swipable bottom status bar. Page 1: speed/distance/ETA, then extra metrics. */
-function NavStatusBar() {
-  const progress = useNavStore((s) => s.progress);
-  const routes = useNavStore((s) => s.routes);
-  const selectedRouteId = useNavStore((s) => s.selectedRouteId);
+/** Current speed in a floating circular puck, ringed in the surface colour. */
+function SpeedPuck({ speedMps, surface }: { speedMps: number | null; surface: keyof typeof SURFACE_COLORS }) {
+  const kmh = speedMps != null && speedMps > 0.4 ? Math.round(speedMps * 3.6) : 0;
+  return (
+    <View style={[styles.speedPuck, { borderColor: SURFACE_COLORS[surface] }]}>
+      <Text style={styles.speedValue} allowFontScaling={false}>{kmh}</Text>
+      <Text style={styles.speedUnit} allowFontScaling={false}>km/h</Text>
+    </View>
+  );
+}
+
+function NavDock({
+  route,
+  progressState,
+  voiceMuted,
+  onToggleVoice,
+  onEnd,
+}: {
+  route: { distanceMeters: number; durationMs: number; ascentMeters?: number; descentMeters?: number };
+  progressState: ReturnType<typeof useNavStore.getState>["progress"];
+  voiceMuted: boolean;
+  onToggleVoice: () => void;
+  onEnd: () => void;
+}) {
   const fix = useLocationStatus((s) => s.lastFix);
-  const [page, setPage] = useState(0);
+  const [expanded, setExpanded] = useState(false);
 
-  const route = routes.find((r) => r.id === selectedRouteId) ?? routes[0];
-  const speedKmh = progress?.speedMps != null ? (progress.speedMps * 3.6).toFixed(1) : "—";
-  const remaining = progress ? formatDistance(progress.remainingMeters) : "—";
-  const eta = progress ? formatEta(progress.remainingMs) : "—";
-  const surface = progress?.surface ?? "road";
-
-  const pages: Array<Array<{ icon: keyof typeof Feather.glyphMap; value: string; unit: string }>> = [
-    // 1 — the essentials: speed, what's left, how long it takes, when you arrive.
-    [
-      { icon: "activity", value: speedKmh, unit: "km/h" },
-      { icon: "navigation-2", value: remaining, unit: "remaining" },
-      { icon: "flag", value: progress ? formatDuration(progress.remainingMs) : "—", unit: "to dest" },
-      { icon: "clock", value: eta, unit: "ETA" },
-    ],
-    // 2 — terrain ahead: climb/descent and what's under the wheels.
-    [
-      { icon: "trending-up", value: route?.ascentMeters != null ? `${Math.round(route.ascentMeters)}` : "—", unit: "ascent m" },
-      { icon: "trending-down", value: route?.descentMeters != null ? `${Math.round(route.descentMeters)}` : "—", unit: "descent m" },
-      { icon: "layers", value: SURFACE_LABELS[surface], unit: "surface" },
-    ],
-    // 3 — device & signal health: GPS quality, heading, battery.
-    [
-      { icon: "target", value: fix?.accuracy != null ? `±${Math.round(fix.accuracy)}` : "—", unit: "GPS m" },
-      { icon: "compass", value: progress ? `${Math.round(progress.bearing)}°` : "—", unit: "bearing" },
-      { icon: "battery", value: fix?.battery != null ? `${Math.round(fix.battery * 100)}%` : "—", unit: "battery" },
-    ],
-  ];
+  const remainingMeters = progressState?.remainingMeters ?? route.distanceMeters;
+  const remainingMs = progressState?.remainingMs ?? route.durationMs;
+  const routeFraction =
+    route.distanceMeters > 0
+      ? Math.max(0, Math.min(1, 1 - remainingMeters / route.distanceMeters))
+      : 0;
+  const surface = progressState?.surface ?? "road";
 
   return (
-    <View style={styles.statusWrap}>
-      <ScrollView
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / PAGE_WIDTH))}
-      >
-        {pages.map((cells, pageIndex) => (
-          <View key={pageIndex} style={[styles.statusPage, { width: PAGE_WIDTH }]}>
-            {cells.map((cell, cellIndex) => (
-              <View key={cellIndex} style={styles.statusCell}>
-                <Feather name={cell.icon} size={15} color="#64748b" />
-                <Text
-                  style={[styles.statusValue, cell.unit === "surface" && { color: SURFACE_COLORS[surface] }]}
-                  numberOfLines={1}
-                >
-                  {cell.value}
-                </Text>
-                <Text style={styles.statusUnit}>{cell.unit}</Text>
-              </View>
-            ))}
-          </View>
-        ))}
-      </ScrollView>
-      <View style={styles.dots}>
-        {pages.map((_, i) => (
-          <View key={i} style={[styles.dot, i === page && styles.dotActive]} />
-        ))}
+    <Pressable
+      style={styles.dock}
+      onPress={() => {
+        void Haptics.selectionAsync();
+        setExpanded((v) => !v);
+      }}
+    >
+      {/* Whole-route progress. */}
+      <View style={styles.routeTrack}>
+        <View style={[styles.routeFill, { width: `${Math.max(1.5, routeFraction * 100)}%` }]} />
       </View>
+
+      <View style={styles.dockRow}>
+        <View style={styles.dockStats}>
+          <View style={styles.etaGroup}>
+            <Text style={styles.etaValue} allowFontScaling={false}>
+              {progressState ? formatEta(remainingMs) : "—"}
+            </Text>
+            <Text style={styles.etaCaption}>ETA</Text>
+          </View>
+          <View style={styles.dockDivider} />
+          <View style={styles.statGroup}>
+            <Text style={styles.statValue} allowFontScaling={false}>{formatDistance(remainingMeters)}</Text>
+            <Text style={styles.statCaption}>left</Text>
+          </View>
+          <View style={styles.dockDivider} />
+          <View style={styles.statGroup}>
+            <Text style={styles.statValue} allowFontScaling={false}>{formatDuration(remainingMs)}</Text>
+            <Text style={styles.statCaption}>time</Text>
+          </View>
+        </View>
+
+        <Pressable style={styles.voiceBtn} onPress={onToggleVoice} hitSlop={8}>
+          <Feather name={voiceMuted ? "volume-x" : "volume-2"} size={18} color={voiceMuted ? "#f5b301" : "#cfe0f4"} />
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.endBtn, pressed && styles.endBtnPressed]}
+          onPress={onEnd}
+          hitSlop={6}
+        >
+          <View style={styles.endStopIcon} />
+          <Text style={styles.endText}>End</Text>
+        </Pressable>
+      </View>
+
+      {/* Tap-to-expand: terrain + device details. */}
+      {expanded ? (
+        <View style={styles.detailRow}>
+          <DetailCell icon="trending-up" value={route.ascentMeters != null ? `${Math.round(route.ascentMeters)} m` : "—"} caption="climb" />
+          <DetailCell icon="trending-down" value={route.descentMeters != null ? `${Math.round(route.descentMeters)} m` : "—"} caption="descent" />
+          <DetailCell icon="layers" value={SURFACE_LABELS[surface]} caption="surface" color={SURFACE_COLORS[surface]} />
+          <DetailCell icon="target" value={fix?.accuracy != null ? `±${Math.round(fix.accuracy)} m` : "—"} caption="GPS" />
+          <DetailCell icon="battery" value={fix?.battery != null ? `${Math.round(fix.battery * 100)}%` : "—"} caption="battery" />
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function DetailCell({
+  icon,
+  value,
+  caption,
+  color,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  value: string;
+  caption: string;
+  color?: string;
+}) {
+  return (
+    <View style={styles.detailCell}>
+      <Feather name={icon} size={13} color="#64748b" />
+      <Text style={[styles.detailValue, color ? { color } : null]} numberOfLines={1} allowFontScaling={false}>
+        {value}
+      </Text>
+      <Text style={styles.detailCaption}>{caption}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  turnCard: {
+  // ── Maneuver banner ──
+  banner: {
     position: "absolute",
-    // Just under the top bar — the medic status button that used to occupy
-    // this slot is hidden during active navigation.
-    top: 70,
+    top: 66,
     left: 12,
-    minWidth: 184,
-    maxWidth: 250,
-    backgroundColor: "rgba(9,14,24,0.96)",
-    borderRadius: 18,
+    right: 12,
+    borderRadius: 20,
+    backgroundColor: "rgba(7, 12, 22, 0.97)",
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    borderColor: "rgba(245, 179, 1, 0.35)",
+    paddingTop: 12,
+    paddingHorizontal: 14,
+    overflow: "hidden",
     shadowColor: "#000",
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 16,
+    elevation: 18,
   },
-  turnRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  bannerArrive: { borderColor: "rgba(52, 211, 153, 0.55)" },
+  bannerRow: { flexDirection: "row", alignItems: "center", gap: 13, paddingBottom: 12 },
   arrowBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: 54,
+    height: 54,
+    borderRadius: 16,
     backgroundColor: "#f5b301",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#f5b301",
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.45,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
     elevation: 6,
   },
-  arrowGlyph: { color: "#1a1206", fontSize: 30, fontWeight: "900", lineHeight: 34 },
-  turnTextWrap: { flex: 1 },
-  turnDistance: { color: "#FFFFFF", fontSize: 27, fontWeight: "900", letterSpacing: 0.3, lineHeight: 30 },
-  turnLabel: { color: "#9fb3cc", fontSize: 13, fontWeight: "800", marginTop: 1 },
-  turnStreet: { color: "#dbe7f5", fontSize: 12.5, fontWeight: "700", marginTop: 8 },
-  maneuverTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(148,163,184,0.18)",
-    marginTop: 10,
-    overflow: "hidden",
-  },
-  maneuverFill: { height: 4, borderRadius: 2, backgroundColor: "#f5b301" },
-  offRoutePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    marginTop: 9,
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(239,68,68,0.92)",
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    shadowColor: "#ef4444",
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 8,
-  },
-  offRouteText: { color: "#fff", fontSize: 12, fontWeight: "900", letterSpacing: 0.2 },
-  endButton: {
-    position: "absolute",
-    right: 14,
-    bottom: NAV_BOTTOM_INSET + STATUS_BAR_HEIGHT + 44,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 9,
-    paddingVertical: 12,
-    paddingHorizontal: 19,
-    borderRadius: 17,
-    backgroundColor: "#ef4444",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    shadowColor: "#ef4444",
-    shadowOpacity: 0.55,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 14,
-    zIndex: 30,
-  },
-  endButtonPressed: { backgroundColor: "#dc2626", transform: [{ scale: 0.96 }] },
-  voiceButton: {
-    position: "absolute",
-    right: 14,
-    bottom: NAV_BOTTOM_INSET + STATUS_BAR_HEIGHT + 108,
-    width: 46,
-    height: 46,
-    borderRadius: 17,
-    backgroundColor: "rgba(9,14,24,0.96)",
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
+  arrowBadgeArrive: { backgroundColor: "#34d399", shadowColor: "#34d399" },
+  arrowGlyph: { color: "#1a1206", fontSize: 34, fontWeight: "900", lineHeight: 40 },
+  bannerTextWrap: { flex: 1, minWidth: 0 },
+  bannerDistance: { color: "#ffffff", fontSize: 32, fontWeight: "900", letterSpacing: 0.2, lineHeight: 36 },
+  bannerLabel: { color: "#9fb3cc", fontSize: 13.5, fontWeight: "800", marginTop: 1 },
+  thenChip: {
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 12,
-    zIndex: 30,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.2)",
+    gap: 1,
   },
-  voiceButtonPressed: { transform: [{ scale: 0.94 }] },
-  endStopIcon: { width: 13, height: 13, borderRadius: 3.5, backgroundColor: "#fff" },
-  endText: { color: "#ffffff", fontSize: 15, fontWeight: "900", letterSpacing: 0.4 },
-  statusWrap: {
+  thenChipCaption: { color: "#64748b", fontSize: 9, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  thenChipGlyph: { color: "#dbe7f5", fontSize: 19, fontWeight: "900", lineHeight: 22 },
+  maneuverTrack: { height: 4, backgroundColor: "rgba(148,163,184,0.16)", marginHorizontal: -14 },
+  maneuverFill: { height: 4, backgroundColor: "#f5b301" },
+  maneuverFillArrive: { backgroundColor: "#34d399" },
+
+  // ── Off-route strip ──
+  offRouteStrip: {
+    position: "absolute",
+    top: 152,
+    left: 26,
+    right: 26,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(220, 38, 38, 0.95)",
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    shadowColor: "#ef4444",
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
+  },
+  offRouteText: { color: "#fff", fontSize: 12.5, fontWeight: "900", letterSpacing: 0.2 },
+
+  // ── Bottom stack ──
+  bottomStack: {
     position: "absolute",
     left: 12,
     right: 12,
     bottom: NAV_BOTTOM_INSET,
-    backgroundColor: "rgba(9,14,24,0.96)",
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
-    paddingTop: 12,
-    paddingBottom: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 16,
+    gap: 10,
   },
-  statusPage: { flexDirection: "row", justifyContent: "space-around", alignItems: "center" },
-  statusCell: { flex: 1, alignItems: "center", gap: 3 },
-  statusValue: { color: "#FFFFFF", fontSize: 21, fontWeight: "900" },
-  statusUnit: { color: "#64748b", fontSize: 11, fontWeight: "700" },
-  dots: { flexDirection: "row", justifyContent: "center", gap: 6, marginTop: 8 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(148,163,184,0.35)" },
-  dotActive: { backgroundColor: "#3B82F6", width: 18 },
+  speedPuck: {
+    alignSelf: "flex-start",
+    marginLeft: 2,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 3,
+    backgroundColor: "rgba(7, 12, 22, 0.96)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+  speedValue: { color: "#ffffff", fontSize: 19, fontWeight: "900", lineHeight: 22 },
+  speedUnit: { color: "#64748b", fontSize: 9, fontWeight: "800", marginTop: -1 },
+
+  // ── Dock ──
+  dock: {
+    borderRadius: 22,
+    backgroundColor: "rgba(7, 12, 22, 0.97)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 18,
+  },
+  routeTrack: { height: 3.5, backgroundColor: "rgba(148,163,184,0.14)" },
+  routeFill: { height: 3.5, backgroundColor: "#34d399" },
+  dockRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    gap: 10,
+  },
+  dockStats: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  etaGroup: { alignItems: "flex-start" },
+  etaValue: { color: "#34d399", fontSize: 23, fontWeight: "900", lineHeight: 26 },
+  etaCaption: { color: "#4d6076", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 },
+  dockDivider: { width: 1, height: 26, backgroundColor: "rgba(148,163,184,0.16)" },
+  statGroup: { alignItems: "flex-start" },
+  statValue: { color: "#eef4fb", fontSize: 16.5, fontWeight: "900", lineHeight: 20 },
+  statCaption: { color: "#4d6076", fontSize: 9.5, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.7 },
+  voiceBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  endBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingVertical: 11,
+    paddingHorizontal: 15,
+    borderRadius: 14,
+    backgroundColor: "#ef4444",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    shadowColor: "#ef4444",
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  endBtnPressed: { backgroundColor: "#dc2626", transform: [{ scale: 0.96 }] },
+  endStopIcon: { width: 11, height: 11, borderRadius: 3, backgroundColor: "#fff" },
+  endText: { color: "#ffffff", fontSize: 14, fontWeight: "900", letterSpacing: 0.4 },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingBottom: 11,
+    paddingTop: 3,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(148,163,184,0.1)",
+  },
+  detailCell: { alignItems: "center", gap: 2, minWidth: 56 },
+  detailValue: { color: "#eef4fb", fontSize: 13, fontWeight: "900" },
+  detailCaption: { color: "#4d6076", fontSize: 9, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
 });

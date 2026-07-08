@@ -9,12 +9,13 @@ import { debugLog } from "../debug/debug-log";
 
 type Status = "available" | "stationary" | "rest" | "going_to" | "sweeper";
 
-const STATUS_META: Record<Status, { label: string; color: string; bg: string; icon: keyof typeof Feather.glyphMap }> = {
+/** `emoji` (when set) renders instead of the Feather `icon` — e.g. the 🧹 sweeper. */
+const STATUS_META: Record<Status, { label: string; color: string; bg: string; icon: keyof typeof Feather.glyphMap; emoji?: string }> = {
   available:  { label: "Available",  color: "#34d399", bg: "rgba(6, 24, 20, 0.95)", icon: "check-circle" },
   // Stationary = on station / holding a post. Green like available, but anchored.
   stationary: { label: "Stationary", color: "#34d399", bg: "rgba(6, 24, 20, 0.95)", icon: "anchor" },
   // Sweeper = riding the tail of the field, sweeping the course behind the last runners.
-  sweeper:    { label: "Sweeper",    color: "#38bdf8", bg: "rgba(6, 19, 30, 0.95)", icon: "wind" },
+  sweeper:    { label: "Sweeper",    color: "#38bdf8", bg: "rgba(6, 19, 30, 0.95)", icon: "wind", emoji: "🧹" },
   going_to:   { label: "Going to",   color: "#fbbf24", bg: "rgba(31, 22, 6, 0.95)", icon: "navigation" },
   rest:       { label: "Rest",       color: "#a78bfa", bg: "rgba(22, 16, 38, 0.95)", icon: "moon" },
 };
@@ -83,6 +84,8 @@ export function MedicStatusControl() {
       >
         {busy ? (
           <ActivityIndicator size="small" color={meta.color} />
+        ) : meta.emoji ? (
+          <Text style={styles.buttonEmoji} allowFontScaling={false}>{meta.emoji}</Text>
         ) : (
           <Feather name={meta.icon} size={20} color={meta.color} />
         )}
@@ -112,7 +115,11 @@ export function MedicStatusControl() {
                 style={[styles.option, active && { backgroundColor: `${m.color}1f`, borderColor: `${m.color}66` }]}
                 onPress={() => choose(opt)}
               >
-                <Feather name={m.icon} size={16} color={m.color} />
+                {m.emoji ? (
+                  <Text style={styles.optionEmoji} allowFontScaling={false}>{m.emoji}</Text>
+                ) : (
+                  <Feather name={m.icon} size={16} color={m.color} />
+                )}
                 <Text style={[styles.optionText, active && { color: m.color }]}>{m.label}</Text>
                 {active ? <Feather name="check" size={15} color={m.color} style={{ marginLeft: "auto" }} /> : null}
               </Pressable>
@@ -201,4 +208,6 @@ const styles = StyleSheet.create({
   },
   stopOption: { backgroundColor: "rgba(239,68,68,0.1)", borderColor: "rgba(239,68,68,0.25)" },
   optionText: { color: "#cbd5e1", fontSize: 13, fontWeight: "800" },
+  buttonEmoji: { fontSize: 19, lineHeight: 22, includeFontPadding: false },
+  optionEmoji: { fontSize: 15, lineHeight: 18, includeFontPadding: false },
 });

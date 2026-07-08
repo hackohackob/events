@@ -24,6 +24,7 @@ import {
 } from "expo-audio";
 import { resolveMediaUrl } from "../ui/api-client";
 import { useSessionStore } from "../security/session-store";
+import { useNotificationFocus } from "../notifications/notification-focus";
 import { getSocket } from "../realtime/socket-client";
 import { debugLog } from "../debug/debug-log";
 import {
@@ -227,9 +228,26 @@ function MessageRow({ row }: { row: Row }) {
 
 function SystemCard({ msg }: { msg: EventMessageDto }) {
   const meta = FEED_META[msg.feedType ?? "incident"];
+  // Incident / response / POI cards deep-link to their map marker: the focus
+  // store switches to the map tab, frames the target and opens its sheet —
+  // the same flow a tapped incident notification takes.
+  const targetId =
+    (msg.meta?.incidentId as string | undefined) ?? (msg.meta?.poiId as string | undefined);
   return (
     <View style={styles.systemRow}>
-      <View style={[styles.systemCard, { borderColor: `${meta.color}44`, backgroundColor: `${meta.color}12` }]}>
+      <Pressable
+        disabled={!targetId}
+        onPress={() => {
+          if (!targetId) return;
+          void Haptics.selectionAsync();
+          useNotificationFocus.getState().focusIncident(targetId);
+        }}
+        style={({ pressed }) => [
+          styles.systemCard,
+          { borderColor: `${meta.color}44`, backgroundColor: `${meta.color}12` },
+          pressed && targetId ? { opacity: 0.7 } : null,
+        ]}
+      >
         <View style={[styles.systemIcon, { backgroundColor: `${meta.color}22`, borderColor: `${meta.color}55` }]}>
           <Feather name={meta.icon} size={14} color={meta.color} />
         </View>
@@ -237,8 +255,11 @@ function SystemCard({ msg }: { msg: EventMessageDto }) {
           <Text style={[styles.systemLabel, { color: meta.color }]}>{meta.label}</Text>
           <Text style={styles.systemText}>{msg.text}</Text>
         </View>
-        <Text style={styles.systemTime}>{formatTime(msg.createdAt)}</Text>
-      </View>
+        <View style={styles.systemRight}>
+          <Text style={styles.systemTime}>{formatTime(msg.createdAt)}</Text>
+          {targetId ? <Feather name="chevron-right" size={14} color="#5f7088" /> : null}
+        </View>
+      </Pressable>
     </View>
   );
 }
@@ -509,7 +530,8 @@ const styles = StyleSheet.create({
   systemIcon: { width: 28, height: 28, borderRadius: 9, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   systemLabel: { fontSize: 10.5, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" },
   systemText: { color: "#d6e2f0", fontSize: 13, fontWeight: "600", marginTop: 1 },
-  systemTime: { color: "#5f7088", fontSize: 10, fontWeight: "700", alignSelf: "flex-start", marginTop: 2 },
+  systemTime: { color: "#5f7088", fontSize: 10, fontWeight: "700" },
+  systemRight: { alignItems: "flex-end", gap: 3, alignSelf: "flex-start", marginTop: 2 },
 
   bubbleRow: { flexDirection: "row", alignItems: "flex-end", gap: 7, marginVertical: 1.5 },
   bubbleRowMine: { justifyContent: "flex-end" },

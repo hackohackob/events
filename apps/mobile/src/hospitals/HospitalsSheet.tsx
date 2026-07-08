@@ -5,9 +5,11 @@ import { Feather } from "@expo/vector-icons";
 import type { Hospital, HospitalCapability } from "@events/contracts";
 import { distanceMeters } from "../navigation/geo";
 import type { LatLng } from "../navigation/types";
-import { listHospitals } from "./hospitals-api";
+import { useHospitalsStore } from "./hospitals-store";
 
-const SNAP_POINTS = ["46%", "88%"];
+/** Exported so the map can position the scale ruler above the open drawer. */
+export const HOSPITALS_SHEET_SNAP_POINTS = ["46%", "88%"];
+const SNAP_POINTS = HOSPITALS_SHEET_SNAP_POINTS;
 
 /** Badge copy for capability codes — short, scannable pills. */
 const CAPABILITY_LABELS: Record<HospitalCapability, string> = {
@@ -69,35 +71,31 @@ export function HospitalsSheet({
   currentFix,
   onNavigate,
   onClose,
+  onIndexChange,
 }: {
   sheetRef: React.RefObject<BottomSheet | null>;
   currentFix: LatLng | null;
   /** Start in-app navigation to the hospital (closes the sheet first). */
   onNavigate: (hospital: Hospital) => void;
   onClose?: () => void;
+  /** Live snap index (-1 = closed) — the map uses it to show pins / hide tracks. */
+  onIndexChange?: (index: number) => void;
 }) {
-  const [hospitals, setHospitals] = useState<Hospital[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const hospitals = useHospitalsStore((s) => s.hospitals);
+  const loading = useHospitalsStore((s) => s.loading);
+  const error = useHospitalsStore((s) => s.error);
+  const load = useHospitalsStore((s) => s.load);
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    listHospitals()
-      .then((list) => setHospitals(list))
-      .catch(() => setError("Couldn't load hospitals — check your connection."))
-      .finally(() => setLoading(false));
-  }, []);
 
   // Lazy-load the directory the first time the sheet opens.
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index >= 0 && hospitals === null && !loading) load();
+      onIndexChange?.(index);
+      if (index >= 0) void load();
       if (index < 0) onClose?.();
     },
-    [hospitals, loading, load, onClose],
+    [load, onClose, onIndexChange],
   );
 
   const visible = useMemo(() => {
@@ -112,9 +110,12 @@ export function HospitalsSheet({
         )
       : hospitals;
     if (!currentFix) return filtered;
+    // Nearest first, but 24/7 ERs within 10 km always outrank everything —
+    // in a field emergency those are the ones that matter.
     return [...filtered]
       .map((h) => ({ h, d: distanceMeters(currentFix, { lat: h.lat, lng: h.lng }) }))
-      .sort((a, b) => a.d - b.d)
+      .map((x) => ({ ...x, priority: x.h.emergency24h && x.d <= 10_000 ? 0 : 1 }))
+      .sort((a, b) => a.priority - b.priority || a.d - b.d)
       .map(({ h }) => h);
   }, [hospitals, search, currentFix]);
 
@@ -127,6 +128,7 @@ export function HospitalsSheet({
       enablePanDownToClose
       onChange={handleSheetChange}
       backgroundStyle={styles.sheetBg}
+      handleStyle={styles.sheetHandleContainer}
       handleIndicatorStyle={styles.sheetHandle}
     >
       <View style={styles.header}>
@@ -301,7 +303,8 @@ function OpenBadge({ state, hoursText }: { state: OpenState; hoursText?: string 
 
 const styles = StyleSheet.create({
   sheetBg: { backgroundColor: "#131a22", borderTopLeftRadius: 20, borderTopRightRadius: 20 },
-  sheetHandle: { backgroundColor: "rgba(148,163,184,0.35)", width: 40 },
+  sheetHandle: { backgroundColor: "rgba(148,163,184,0.5)", width: 72, height: 6.5, borderRadius: 999 },
+  sheetHandleContainer: { paddingTop: 12, paddingBottom: 12 },
   header: { paddingHorizontal: 16, paddingBottom: 10, gap: 10 },
   headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   headerIconWrap: {

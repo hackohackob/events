@@ -15,8 +15,33 @@ const ALERT_CHANNEL_ID = "alerts";
  * AudioAttributes USAGE_ALARM — it plays on the ALARM volume stream, which
  * stays audible when the ring/notification volume is turned down. Notifee
  * still *displays* on this channel (channels are app-global).
+ *
+ * v6: fresh id (channel settings are immutable once created — v5 installs in
+ * the field may carry a mangled config) + the alarm-stream volume is forced up
+ * right before ringing (see ensureAlarmStreamVolume), because no channel
+ * config can ring through an alarm stream the user has slid to zero.
  */
-export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v5";
+export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v6";
+
+/**
+ * An alarm on the ALARM stream is still silent if the user dragged that volume
+ * to zero — so push it to max right before ringing. Uses
+ * react-native-volume-manager, which needs a new dev build; the dynamic
+ * require keeps OTA-updated binaries built before the dependency from crashing
+ * (they just skip the boost).
+ */
+async function ensureAlarmStreamVolume(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { setVolume } = require("react-native-volume-manager") as {
+      setVolume: (value: number, config?: { type?: string; showUI?: boolean }) => Promise<void>;
+    };
+    await setVolume(1, { type: "alarm", showUI: false });
+  } catch (err) {
+    debugLog("app", "warn", "alarm volume boost unavailable", String(err));
+  }
+}
 let alertChannelEnsured = false;
 
 async function ensureChannels(): Promise<void> {
@@ -87,6 +112,9 @@ export async function showBroadcastNotification(
     }
     await notifee.requestPermission();
     await ensureChannels();
+    // Ring-through guarantee: an alarm-stream siren is inaudible at alarm
+    // volume 0 no matter how the channel is configured.
+    if (alarm) await ensureAlarmStreamVolume();
     await notifee.displayNotification({
       // Stable id per incident: the socket path and the data-only push path can
       // both fire for the same incident — the second display replaces the
@@ -107,6 +135,9 @@ export async function showBroadcastNotification(
         ...(alarm
           ? {
               category: AndroidCategory.ALARM,
+              // Channel sound drives 8.0+; the notification-level sound covers
+              // older Androids and doubles as a belt-and-braces fallback.
+              sound: "incident_alarm",
               // The bundled siren is itself ~30s long, so a single play already
               // rings for the full window. We deliberately do NOT loop it
               // (FLAG_INSISTENT): looping would ring forever until dismissed, and

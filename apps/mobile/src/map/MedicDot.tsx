@@ -61,7 +61,7 @@ export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationar
       ) : null}
       {isSweeper && !isGrey ? (
         <View style={[styles.badge, styles.sweeperBadge]}>
-          <Feather name="wind" size={13} color="#04121f" />
+          <Text style={styles.badgeEmoji} allowFontScaling={false}>🧹</Text>
         </View>
       ) : null}
       {isGoingToPoint && !isGrey ? (
@@ -117,4 +117,5 @@ const styles = StyleSheet.create({
   stationaryBadge: { backgroundColor: "#34d399" },
   sweeperBadge: { backgroundColor: "#38bdf8" },
   movingBadge: { backgroundColor: "#fbbf24" },
+  badgeEmoji: { fontSize: 11, lineHeight: 13, includeFontPadding: false },
 });

@@ -73,6 +73,7 @@ import { ZoneSketchLayer } from "./zones/ZoneSketchLayer";
 import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
 import { useZoneEntryAlarm } from "./zones/zone-alarm";
 import { deleteZone, updateZone } from "./zones/zone-api";
+import { noteMapGesture } from "./map-gesture";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
@@ -89,7 +90,8 @@ import { TransportSheet } from "../navigation/TransportSheet";
 import { RouteVariantsOverlay } from "../navigation/RouteVariantsOverlay";
 import { RouteEditingSheet, RouteEditHelperBanner } from "../navigation/RouteEditingSheet";
 import { ActiveNavOverlay } from "../navigation/ActiveNavOverlay";
-import { HospitalsSheet } from "../hospitals/HospitalsSheet";
+import { HospitalsSheet, HOSPITALS_SHEET_SNAP_POINTS } from "../hospitals/HospitalsSheet";
+import { useHospitalsStore } from "../hospitals/hospitals-store";
 import { useTrackNavStore } from "../tracknav/track-nav-store";
 import { useTrackNavCamera } from "../tracknav/useTrackNavCamera";
 import { TrackNavLayers } from "../tracknav/TrackNavLayers";
@@ -122,6 +124,8 @@ const TRACK_STUDIO_CAMERA_PADDING = {
 };
 
 type AppViewMode = "runner" | "paramedic";
+/** Tabs inside the layers popup — keeps zones/tracks from bloating one list. */
+type LayersTab = "layers" | "tracks" | "zones";
 
 interface EventTrackResponse {
   id: string;
@@ -1468,6 +1472,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const loadRoster = useRosterStore((state) => state.load);
   const trackingHealth = useTrackingHealth();
 
+  // Hospital pins — shown while the hospitals drawer is open. Capped to the
+  // nearest few dozen so a country-wide directory doesn't flood the map.
+  const allHospitals = useHospitalsStore((state) => state.hospitals);
+
   // Team zones — medic-only regions. Runners never load or render them.
   const sessionRole = useSessionStore((state) => state.role);
   const isTeamRole = sessionRole !== "runner" && sessionRole !== "spectator";
@@ -1477,6 +1485,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   const mapRef = useRef<MapRef | null>(null);
   const cameraRef = useRef<CameraRef | null>(null);
+  // Throttle for pinch-zoom capture during navigation (onRegionIsChanging).
+  const lastGestureZoomNoteRef = useRef(0);
   const didInitialEventFitRef = useRef(false);
   const markerSheetRef = useRef<BottomSheet | null>(null);
   const trackSheetRef = useRef<BottomSheet | null>(null);
@@ -1508,12 +1518,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // menu or by tapping a participant dot), not a full-screen tab.
   const participantsSheetRef = useRef<BottomSheet | null>(null);
   const [participantsOpen, setParticipantsOpen] = useState(false);
+  // Live snap indexes of every bottom drawer (-1 = closed) — they drive where
+  // the scale ruler sits so it always rides just above the tallest open drawer.
+  const [participantsSheetIndex, setParticipantsSheetIndex] = useState(-1);
+  const [hospitalsSheetIndex, setHospitalsSheetIndex] = useState(-1);
+  const [markerSheetIndex, setMarkerSheetIndex] = useState(0);
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mapZoom, setMapZoom] = useState(FALLBACK_ZOOM);
   const [mapCenterLat, setMapCenterLat] = useState(FALLBACK_LAT);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [layersTab, setLayersTab] = useState<LayersTab>("layers");
   const [pendingPoi, setPendingPoi] = useState<{ lat: number; lng: number } | null>(null);
   // Move-POI mode: set from the POI sheet; the next map tap becomes the point's
   // new position (confirmed to the server via PATCH + broadcast to everyone).
@@ -2179,12 +2195,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     [focusedTrackId, trackVisuals],
   );
   const trackModeActive = activeTab === "tracks";
+  // Nearest hospitals as map pins while the drawer is open (24/7 ERs pop red).
+  const hospitalPins = useMemo(() => {
+    if (hospitalsSheetIndex < 0 || !allHospitals) return [];
+    if (!myLocationFix) return allHospitals.slice(0, 40);
+    return [...allHospitals]
+      .map((h) => ({ h, km: distanceKm(myLocationFix.lat, myLocationFix.lng, h.lat, h.lng) }))
+      .sort((a, b) => a.km - b.km)
+      .slice(0, 40)
+      .map(({ h }) => h);
+  }, [hospitalsSheetIndex, allHospitals, myLocationFix]);
   const renderedTrackVisuals = useMemo(() => {
+    // Hospitals mode: the pins are the story — tracks would bury them.
+    if (hospitalsSheetIndex >= 0) return [];
     if (trackModeActive && focusedTrackVisual) {
       return [focusedTrackVisual];
     }
     return visibleTrackVisuals;
-  }, [focusedTrackVisual, trackModeActive, visibleTrackVisuals]);
+  }, [focusedTrackVisual, trackModeActive, visibleTrackVisuals, hospitalsSheetIndex]);
   const focusedTrackProfile = useMemo(
     () => (focusedTrack ? buildTrackProfile(focusedTrack) : null),
     [focusedTrack],
@@ -2464,13 +2492,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     });
   }, [focusedTrack, trackModeActive]);
 
+  // Keyed on the marker's ID, not the object: live socket updates rebuild the
+  // markers array (fresh object references) every few seconds, and re-running
+  // this on each of them kept snapping an expanded sheet back to its first
+  // snap point (e.g. mid voice recording) and made open/close jittery.
+  const selectedMarkerKey = selectedMarker?.id ?? null;
   useEffect(() => {
-    if (selectedMarker) {
+    if (selectedMarkerKey) {
       markerSheetRef.current?.snapToIndex(0);
     } else {
       markerSheetRef.current?.close();
     }
-  }, [selectedMarker]);
+  }, [selectedMarkerKey]);
 
   // Track Studio sheet follows the "tracks" tab.
   useEffect(() => {
@@ -2488,9 +2521,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const focusFetchedRef = useRef(-1);
   useEffect(() => {
     if (!focusIncidentId) return;
+    // Focus targets are usually incidents (notification taps) but the event
+    // chat's feed cards also route POI taps through here — accept any marker.
     const marker = useMapStore
       .getState()
-      .markers.find((m) => m.id === focusIncidentId && m.type === "incident");
+      .markers.find((m) => m.id === focusIncidentId);
     if (!marker) {
       // Created while backgrounded? Fetch incidents once, then this effect retries.
       if (focusFetchedRef.current !== focusRequestId) {
@@ -2738,6 +2773,26 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ? distanceKm(myLocationFix.lat, myLocationFix.lng, selectedIncident.lat, selectedIncident.lng)
       : null;
 
+  // ── Scale ruler placement ──
+  // The ruler rides just above the tallest open bottom drawer; with none open
+  // it sits above the bottom menu. Hidden when a drawer covers most of the
+  // screen (no meaningful map left to measure).
+  const snapFraction = (points: string[], index: number) =>
+    Number((points[Math.max(0, Math.min(index, points.length - 1))] ?? "0%").replace("%", "")) / 100;
+  const openDrawerFraction = Math.max(
+    selectedMarker ? snapFraction(MARKER_SHEET_SNAP_POINTS, markerSheetIndex) : 0,
+    trackModeActive ? snapFraction(TRACK_SHEET_SNAP_POINTS, trackSheetIndex) : 0,
+    participantsSheetIndex >= 0 ? snapFraction(PARTICIPANTS_SHEET_SNAP_POINTS, participantsSheetIndex) : 0,
+    hospitalsSheetIndex >= 0 ? snapFraction(HOSPITALS_SHEET_SNAP_POINTS, hospitalsSheetIndex) : 0,
+  );
+  // Hidden while navigating — the nav HUD owns the bottom of the screen (speed
+  // puck + dock) and carries its own distance readouts.
+  const scaleBarVisible = openDrawerFraction < 0.6 && navPhase !== "active" && trackNavPhase === "idle";
+  const scaleBarBottom =
+    openDrawerFraction > 0
+      ? Math.round(SCREEN_HEIGHT * openDrawerFraction) + 14
+      : BOTTOM_BAR_HEIGHT + 64;
+
   return (
     <View style={styles.container}>
       <MapLibreMap
@@ -2771,12 +2826,28 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           if (Array.isArray(center) && Number.isFinite(center[1])) setMapCenterLat(center[1]);
           if (typeof z === "number" && Number.isFinite(z)) {
             setMapZoom(z);
-            // A pinch during active navigation becomes the standing nav zoom, so
-            // the follow camera doesn't snap back on the next location update.
-            const byUser = props.userInteraction ?? props.isUserInteraction;
-            if (byUser && useNavStore.getState().phase === "active") {
-              useNavStore.getState().setNavZoomOverride(z);
-            }
+          }
+        }}
+        // A pinch during active navigation becomes the standing nav zoom, so the
+        // follow camera re-centers at the user's zoom on the next GPS tick
+        // instead of snapping back. This must be the *IsChanging* event: during
+        // nav the camera eases continuously, so RegionDidChange (fires only
+        // when all movement settles) almost never arrives. Throttled + written
+        // straight into the stores (no state) to keep pinch at 60fps.
+        onRegionIsChanging={(event: any) => {
+          const props = event?.nativeEvent ?? event?.properties ?? {};
+          const byUser = props.userInteraction ?? props.isUserInteraction;
+          if (!byUser) return;
+          noteMapGesture();
+          const now = Date.now();
+          if (now - lastGestureZoomNoteRef.current < 200) return;
+          const z = props.zoom ?? props.zoomLevel;
+          if (typeof z !== "number" || !Number.isFinite(z)) return;
+          lastGestureZoomNoteRef.current = now;
+          if (useNavStore.getState().phase === "active") {
+            useNavStore.getState().setNavZoomOverride(z);
+          } else if (useTrackNavStore.getState().phase !== "idle") {
+            useTrackNavStore.getState().setZoomOverride(z);
           }
         }}
         onLongPress={(event: any) => {
@@ -2845,6 +2916,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <Layer
             id="base-raster-layer"
             type="raster"
+            // Pin the base imagery right above the style's background layer
+            // (index 0). Without this, switching base layers remounts the
+            // raster source and its fresh layer lands ON TOP of every overlay
+            // (tracks/zones vanish until toggled off+on). Index 1 keeps it
+            // under all overlays; index 0 would displace the background and
+            // blank the map (see maplibre-base-raster-layerindex).
+            layerIndex={1}
             paint={{
               "raster-opacity": 1,
             }}
@@ -3171,6 +3249,32 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         {/* Team zones (medic-only) + the live freehand sketch while drawing. */}
         {isTeamRole ? <ZonesLayer zones={zones} /> : null}
         {isTeamRole ? <ZoneSketchLayer /> : null}
+
+        {/* Hospital pins — only while the hospitals drawer is open. */}
+        {hospitalPins.map((h) => (
+          <Marker key={`hospital-${h.id}`} lngLat={[h.lng, h.lat]}>
+            <Pressable
+              onPress={() =>
+                cameraRef.current?.easeTo({
+                  center: [h.lng, h.lat],
+                  zoom: Math.max(mapZoom, 12.5),
+                  padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.46), left: 0, right: 0 },
+                  duration: 420,
+                })
+              }
+              style={styles.hospitalPinWrap}
+            >
+              <View style={[styles.hospitalPin, h.emergency24h && styles.hospitalPin24]}>
+                <Text style={styles.hospitalPinCross} allowFontScaling={false}>✚</Text>
+              </View>
+              {h.emergency24h ? (
+                <View style={styles.hospitalPinBadge}>
+                  <Text style={styles.hospitalPinBadgeText} allowFontScaling={false}>24/7</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </Marker>
+        ))}
 
         {selectedMarker && selectedMarker.type === "paramedic" && selectedMarker.accuracy != null && selectedMarker.accuracy > 0 ? (
           <GeoJSONSource
@@ -3511,9 +3615,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
       {/* Map scale bar (мащаб) — bottom-left, outside the top header so its
           absolute `bottom` offset is relative to the screen, not the header.
-          Hidden while an incident/marker sheet is open. */}
-      {!selectedMarker && !trackModeActive ? (
-        <View style={styles.scaleBar} pointerEvents="none">
+          Rides above whichever bottom drawer is currently open. */}
+      {scaleBarVisible ? (
+        <View style={[styles.scaleBar, { bottom: scaleBarBottom }]} pointerEvents="none">
           <ScaleBar zoom={mapZoom} latitude={mapCenterLat} />
         </View>
       ) : null}
@@ -3628,6 +3732,31 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
       {layersOpen ? (
         <ScrollView style={styles.layersPopup} contentContainerStyle={styles.layersPopupContent}>
+          {/* Tab bar: overlays / tracks / zones — keeps each list short. */}
+          <View style={styles.layersTabRow}>
+            {([
+              { key: "layers", label: "Layers" },
+              { key: "tracks", label: "Tracks" },
+              ...(isTeamRole ? [{ key: "zones", label: "Zones" } as const] : []),
+            ] as Array<{ key: LayersTab; label: string }>).map(({ key, label }) => {
+              const active = layersTab === key;
+              return (
+                <Pressable
+                  key={key}
+                  style={[styles.layersTabItem, active && styles.layersTabItemActive]}
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setLayersTab(key);
+                  }}
+                >
+                  <Text style={[styles.layersTabText, active && styles.layersTabTextActive]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {layersTab === "layers" ? (
+          <>
           {/* Base map selector */}
           <Text style={styles.layerSectionLabel}>BASE MAP</Text>
           <View style={styles.segmentRow}>
@@ -3688,11 +3817,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               })}
             </View>
           </View>
+          </>
+          ) : null}
 
           {/* Team zones — visibility/alarm per zone + freehand drawing. */}
-          {isTeamRole ? (
+          {layersTab === "zones" && isTeamRole ? (
             <>
-              <Text style={styles.layerSectionLabel}>ZONES</Text>
+              {zones.length === 0 ? (
+                <Text style={styles.layersEmptyText}>No zones yet — draw the first one below.</Text>
+              ) : null}
               {zones.map((zone) => (
                 <View key={zone.id} style={styles.zoneRow}>
                   <View style={[styles.trackColorDot, { backgroundColor: zone.color }]} />
@@ -3759,6 +3892,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             </>
           ) : null}
 
+          {layersTab === "tracks" ? (
+          <>
           <View style={styles.tracksHeaderRow}>
             <Text style={styles.tracksHeaderText}>Tracks</Text>
             <Pressable style={styles.tracksToggleAllButton} onPress={toggleAllTracks}>
@@ -3777,6 +3912,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </View>
             </Pressable>
           ))}
+          </>
+          ) : null}
         </ScrollView>
       ) : null}
 
@@ -3791,6 +3928,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         enableContentPanningGesture={false}
         onChange={setTrackSheetIndex}
         backgroundStyle={styles.markerSheetBg}
+        handleStyle={styles.sheetHandleContainer}
         handleIndicatorStyle={styles.sheetHandle}
       >
         <BottomSheetView style={styles.markerSheetContent}>
@@ -3838,33 +3976,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 );
               })}
             </ScrollView>
-          ) : null}
-
-          {/* Follow track — voice-guided track navigation along the raw GPX
-              (works even where the routing graph has no matching ways). */}
-          {focusedTrack && focusedTrack.points.length >= 2 ? (
-            <Pressable
-              style={({ pressed }) => [styles.followTrackButton, pressed && styles.followTrackButtonPressed]}
-              onPress={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                trackSheetRef.current?.close();
-                setActiveTab("map");
-                useTrackNavStore.getState().start({
-                  id: focusedTrack.id,
-                  label: focusedTrack.label,
-                  color: focusedTrack.color ?? trackColor(focusedTrack.id),
-                  points: focusedTrack.points,
-                });
-              }}
-            >
-              <Feather name="navigation" size={17} color="#04140E" />
-              <Text style={styles.followTrackButtonText}>Follow track</Text>
-              {focusedTrackProfile ? (
-                <Text style={styles.followTrackButtonMeta}>
-                  {(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km · voice guidance
-                </Text>
-              ) : null}
-            </Pressable>
           ) : null}
 
           {focusedTrackProfile && focusedTrackSample ? (
@@ -4013,6 +4124,34 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               <Text style={styles.profileEmptyText}>Pick a track to inspect profile and location cursor.</Text>
             </View>
           )}
+
+          {/* Follow track — voice-guided track navigation along the raw GPX
+              (works even where the routing graph has no matching ways). Shown
+              only in the expanded drawer, below everything else. */}
+          {trackSheetIndex >= 1 && focusedTrack && focusedTrack.points.length >= 2 ? (
+            <Pressable
+              style={({ pressed }) => [styles.followTrackButton, pressed && styles.followTrackButtonPressed]}
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                trackSheetRef.current?.close();
+                setActiveTab("map");
+                useTrackNavStore.getState().start({
+                  id: focusedTrack.id,
+                  label: focusedTrack.label,
+                  color: focusedTrack.color ?? trackColor(focusedTrack.id),
+                  points: focusedTrack.points,
+                });
+              }}
+            >
+              <Feather name="navigation" size={17} color="#04140E" />
+              <Text style={styles.followTrackButtonText}>Follow track</Text>
+              {focusedTrackProfile ? (
+                <Text style={styles.followTrackButtonMeta}>
+                  {(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km · voice guidance
+                </Text>
+              ) : null}
+            </Pressable>
+          ) : null}
         </View>
         </BottomSheetView>
       </BottomSheet>
@@ -4028,7 +4167,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         // gesture and collapses the expanded sheet. The handle still drags.
         enableContentPanningGesture={false}
         onClose={closeSelection}
+        onChange={(i) => setMarkerSheetIndex(i)}
         backgroundStyle={styles.markerSheetBg}
+        handleStyle={styles.sheetHandleContainer}
         handleIndicatorStyle={styles.sheetHandle}
       >
         {/* Plain View (not BottomSheetView) so the inner BottomSheetScrollView
@@ -4256,7 +4397,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
       {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
-      {!selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
+      {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
       <ReportIncidentSheet />
 
       {/* Hospitals directory drawer (opened from the Menu). "Navigate" hands the
@@ -4264,6 +4405,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       <HospitalsSheet
         sheetRef={hospitalsSheetRef}
         currentFix={myLocationFix ? { lat: myLocationFix.lat, lng: myLocationFix.lng } : null}
+        onIndexChange={setHospitalsSheetIndex}
         onNavigate={(hospital) => {
           hospitalsSheetRef.current?.close();
           useNavStore.getState().openTransport({ lat: hospital.lat, lng: hospital.lng, label: hospital.name });
@@ -4360,9 +4502,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         enableContentPanningGesture={false}
         onChange={(i) => {
           setParticipantsOpen(i >= 0);
+          setParticipantsSheetIndex(i);
           if (i < 0) setParticipantHighlight(null);
         }}
         backgroundStyle={styles.markerSheetBg}
+        handleStyle={styles.sheetHandleContainer}
         handleIndicatorStyle={styles.sheetHandle}
       >
         <BottomSheetView style={styles.markerSheetContent}>
@@ -4547,11 +4691,10 @@ const styles = StyleSheet.create({
   headerActions: {
     gap: 9,
   },
+  // `bottom` is set inline — it follows whichever drawer is open.
   scaleBar: {
     position: "absolute",
     left: 14,
-    // Sit above the offline-download button (bottom-left) so they don't overlap.
-    bottom: BOTTOM_BAR_HEIGHT + 64,
     zIndex: 20,
   },
   clearDestBtn: {
@@ -4666,6 +4809,23 @@ const styles = StyleSheet.create({
     zIndex: 44,
   },
   layersPopupContent: { padding: 12, gap: 9 },
+  layersTabRow: {
+    flexDirection: "row",
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 11,
+    padding: 3,
+  },
+  layersTabItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 7,
+    borderRadius: 9,
+  },
+  layersTabItemActive: { backgroundColor: "rgba(52,211,153,0.16)" },
+  layersTabText: { color: "#7e93ad", fontSize: 12, fontWeight: "800" },
+  layersTabTextActive: { color: "#34d399" },
+  layersEmptyText: { color: "#64748b", fontSize: 12, paddingVertical: 6, textAlign: "center" },
   layerSectionLabel: {
     color: "#4A5F7A",
     fontSize: 10,
@@ -5074,6 +5234,34 @@ const styles = StyleSheet.create({
     height: 15,
     borderWidth: 2,
   },
+  hospitalPinWrap: { alignItems: "center" },
+  hospitalPin: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    backgroundColor: "#64748b",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  hospitalPin24: { backgroundColor: "#ef4444" },
+  hospitalPinCross: { color: "#ffffff", fontSize: 14, fontWeight: "900", lineHeight: 17 },
+  hospitalPinBadge: {
+    marginTop: 2,
+    backgroundColor: "rgba(4, 12, 24, 0.9)",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.5)",
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  hospitalPinBadgeText: { color: "#fca5a5", fontSize: 8.5, fontWeight: "900" },
   zoneRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -5197,11 +5385,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  // Bigger indicator + padded container = a drag handle you can actually grab.
   sheetHandle: {
-    width: 52,
-    height: 5,
+    width: 72,
+    height: 6.5,
     borderRadius: 999,
-    backgroundColor: "rgba(150, 171, 196, 0.62)",
+    backgroundColor: "rgba(150, 171, 196, 0.7)",
+  },
+  sheetHandleContainer: {
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   sheetHeader: {
     flexDirection: "row",

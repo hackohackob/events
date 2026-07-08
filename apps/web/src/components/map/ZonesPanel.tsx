@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bell, BellOff, Eye, EyeOff, Pencil, Trash2, X } from 'lucide-react'
+import { Bell, BellOff, ChevronDown, Eye, EyeOff, Pencil, Trash2, X } from 'lucide-react'
 import type { EventZone } from '@events/contracts'
 
 const ZONE_COLORS = ['#f59e0b', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#14b8a6']
@@ -20,9 +20,10 @@ interface Props {
 }
 
 /**
- * Zones control card (sits under the Layers panel): per-zone visibility/alarm
- * toggles + delete, a freehand draw mode toggle, and the save form shown once
- * a sketch is finished. Zones are team-only — participants never see them.
+ * Zones section, embedded as a collapsible block inside the Layers panel:
+ * per-zone visibility/alarm toggles + delete, a freehand draw mode toggle,
+ * and the save form shown once a sketch is finished. Zones are team-only —
+ * participants never see them.
  */
 export default function ZonesPanel({
   zones,
@@ -38,34 +39,40 @@ export default function ZonesPanel({
   const [name, setName] = useState('')
   const [color, setColor] = useState(ZONE_COLORS[0])
   const [alarm, setAlarm] = useState(false)
+  const [open, setOpen] = useState(false)
 
-  // Reset the form whenever a new sketch arrives.
+  // Reset the form whenever a new sketch arrives, and pop the section open —
+  // the save form must be visible right after drawing.
   useEffect(() => {
     if (pendingPolygon) {
       setName('')
       setAlarm(false)
+      setOpen(true)
     }
   }, [pendingPolygon])
 
   return (
-    <div
-      className="flex flex-col gap-1.5"
-      style={{
-        background: 'rgba(10,18,34,0.92)',
-        backdropFilter: 'blur(12px)',
-        borderRadius: 14,
-        border: '1px solid rgba(148,163,184,0.12)',
-        padding: '10px 12px',
-        width: 228,
-      }}
-    >
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-1.5" style={{ borderTop: '1px solid rgba(148,163,184,0.1)', marginTop: 8, paddingTop: 8 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center justify-between w-full"
+        style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+      >
         <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#334155' }}>
           Zones
         </span>
-        <span className="text-[10px] font-bold" style={{ color: '#475569' }}>{zones.length}</span>
-      </div>
+        <span className="flex items-center gap-1.5">
+          {drawActive && <span className="text-[9px] font-bold" style={{ color: '#f59e0b' }}>drawing…</span>}
+          <span className="text-[10px] font-bold" style={{ color: '#475569' }}>{zones.length}</span>
+          <ChevronDown
+            className="w-3.5 h-3.5 transition-transform"
+            style={{ color: '#64748b', transform: open ? 'rotate(180deg)' : 'none' }}
+          />
+        </span>
+      </button>
 
+      {open && (
+      <>
       {/* Zone rows */}
       {zones.map(zone => (
         <div
@@ -159,6 +166,8 @@ export default function ZonesPanel({
           <Pencil className="w-3 h-3" />
           {drawActive ? 'Drawing — drag on the map' : 'Draw zone'}
         </button>
+      )}
+      </>
       )}
     </div>
   )

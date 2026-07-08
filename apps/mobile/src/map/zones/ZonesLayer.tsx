@@ -8,6 +8,10 @@ import { ringCentroid } from "./zone-geometry";
  * Renders the visible team zones: tinted fill + outline (dashed when the zone
  * carries an entry alarm) and a floating name label at the centroid. Zones are
  * medic-only — runner sessions never receive any to render.
+ *
+ * The source + layers stay mounted permanently (with an empty collection when
+ * no zone is visible): mounting/unmounting GL sources as zones toggle crashes
+ * the native MapLibre surface (gray screen).
  */
 export function ZonesLayer({ zones }: { zones: EventZone[] }) {
   const drawable = useMemo(() => zones.filter((z) => z.visible && z.polygon.length >= 3), [zones]);
@@ -27,8 +31,6 @@ export function ZonesLayer({ zones }: { zones: EventZone[] }) {
     [drawable],
   );
 
-  if (drawable.length === 0) return null;
-
   return (
     <>
       <GeoJSONSource id="team-zones-source" data={collection}>
@@ -40,14 +42,14 @@ export function ZonesLayer({ zones }: { zones: EventZone[] }) {
         <Layer
           id="team-zones-outline"
           type="line"
-          filter={["!", ["get", "alarm"]]}
+          filter={["==", ["get", "alarm"], false]}
           paint={{ "line-color": ["get", "color"], "line-width": 2, "line-opacity": 0.85 }}
         />
         {/* Alarm zones get a dashed outline so they read as "hot" at a glance. */}
         <Layer
           id="team-zones-outline-alarm"
           type="line"
-          filter={["get", "alarm"]}
+          filter={["==", ["get", "alarm"], true]}
           paint={{
             "line-color": ["get", "color"],
             "line-width": 2.5,

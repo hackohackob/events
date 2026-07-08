@@ -5,6 +5,7 @@ import type { CameraRef } from "@maplibre/maplibre-react-native";
 import { useNavStore } from "./nav-store";
 import { useLocationStatus } from "../debug/location-status";
 import { sendNavLocationFix } from "../location/location-tracker";
+import { isMapGestureActive } from "../map/map-gesture";
 import { distanceMeters } from "./geo";
 import { debugLog } from "../debug/debug-log";
 
@@ -26,7 +27,6 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
   const phase = useNavStore((s) => s.phase);
   const progress = useNavStore((s) => s.progress);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
-  const navZoomOverride = useNavStore((s) => s.navZoomOverride);
   const recenterTick = useNavStore((s) => s.recenterTick);
   const fix = useLocationStatus((s) => s.lastFix);
   const enteredActive = useRef(false);
@@ -84,6 +84,10 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
   // user re-centers.
   useEffect(() => {
     if (phase !== "active" || !progress) return;
+    // Fingers on the map (pinching/panning): stand down for this tick instead
+    // of fighting the gesture. The pinched zoom lands in navZoomOverride (via
+    // onRegionIsChanging) and the next tick re-centers at that zoom.
+    if (isMapGestureActive()) return;
     // Follow the real position when off-route (so the puck stays on-screen),
     // else the snapped point on the line.
     const focus = progress.offRoute ? progress.raw : progress.snapped;
@@ -106,7 +110,9 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
 
     cameraRef.current?.easeTo({
       center,
-      zoom: navZoomOverride ?? NAV_ZOOM,
+      // Read the pinch override imperatively: subscribing would re-render the
+      // whole map screen at gesture frequency while the user zooms.
+      zoom: useNavStore.getState().navZoomOverride ?? NAV_ZOOM,
       pitch: northUp ? 0 : NAV_PITCH,
       bearing: northUp ? 0 : progress.bearing,
       // Follow mode pushes the focal point low (route ahead dominant); north-up
@@ -116,7 +122,7 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
         : { top: Math.round(SCREEN_H * 0.46), bottom: 120, left: 0, right: 0 },
       duration,
     });
-  }, [phase, progress, navCameraMode, navZoomOverride, recenterTick, cameraRef]);
+  }, [phase, progress, navCameraMode, recenterTick, cameraRef]);
 
   // Reset the tilt when navigation ends.
   useEffect(() => {

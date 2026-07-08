@@ -1235,28 +1235,28 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   ) : null}
                 </button>
               ))}
+
+              {/* Team zones — collapsible section within the Layers panel. */}
+              <ZonesPanel
+                zones={zones}
+                drawActive={zoneDraw}
+                onToggleDraw={() => { setPendingZonePolygon(null); setZoneDraw(v => !v) }}
+                pendingPolygon={pendingZonePolygon}
+                onSavePending={({ name, color, alarm }) => {
+                  const polygon = pendingZonePolygon
+                  setPendingZonePolygon(null)
+                  if (!polygon) return
+                  // Zones start hidden (server default) — toggle the eye to show.
+                  void createZone({ name, color, alarm, polygon })
+                }}
+                onCancelPending={() => setPendingZonePolygon(null)}
+                onToggleVisible={(zone) => void patchZone(zone.id, { visible: !zone.visible })}
+                onToggleAlarm={(zone) => void patchZone(zone.id, { alarm: !zone.alarm })}
+                onDelete={(zone) => void removeZone(zone.id)}
+              />
               </>
               )}
             </div>
-
-            {/* Team zones — drawing, visibility & alarm management */}
-            <ZonesPanel
-              zones={zones}
-              drawActive={zoneDraw}
-              onToggleDraw={() => { setPendingZonePolygon(null); setZoneDraw(v => !v) }}
-              pendingPolygon={pendingZonePolygon}
-              onSavePending={({ name, color, alarm }) => {
-                const polygon = pendingZonePolygon
-                setPendingZonePolygon(null)
-                if (!polygon) return
-                // Zones start hidden (server default) — toggle the eye to show.
-                void createZone({ name, color, alarm, polygon })
-              }}
-              onCancelPending={() => setPendingZonePolygon(null)}
-              onToggleVisible={(zone) => void patchZone(zone.id, { visible: !zone.visible })}
-              onToggleAlarm={(zone) => void patchZone(zone.id, { alarm: !zone.alarm })}
-              onDelete={(zone) => void removeZone(zone.id)}
-            />
           </div>
 
           {/* Live participant stats — shown when heatmap is active */}
@@ -1278,35 +1278,6 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           )}
 
-          {/* POI legend — bottom left */}
-          {showPois && totalPois > 0 && (
-            <div
-              className="absolute bottom-4 left-4"
-              style={{
-                background: 'rgba(10,18,34,0.92)',
-                backdropFilter: 'blur(12px)',
-                borderRadius: '16px',
-                border: '1px solid rgba(148,163,184,0.12)',
-                padding: '12px 16px',
-              }}
-            >
-              <div className="flex items-center gap-3">
-                {POI_CONFIGS.map(config => {
-                  const count = allPois.filter(p => p.type === config.type).length
-                  if (count === 0) return null
-                  return (
-                    <div key={config.type} className="flex flex-col items-center gap-1">
-                      <div className="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold"
-                        style={{ background: config.bg, color: config.color }}>
-                        {POI_ICON[config.type]}
-                      </div>
-                      <div className="text-xs font-bold text-slate-200">{count}</div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

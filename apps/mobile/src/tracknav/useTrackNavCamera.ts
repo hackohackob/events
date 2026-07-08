@@ -4,6 +4,7 @@ import * as ExpoLocation from "expo-location";
 import type { CameraRef } from "@maplibre/maplibre-react-native";
 import { useLocationStatus } from "../debug/location-status";
 import { sendNavLocationFix } from "../location/location-tracker";
+import { isMapGestureActive } from "../map/map-gesture";
 import { distanceMeters } from "../navigation/geo";
 import { debugLog } from "../debug/debug-log";
 import { useTrackNavStore } from "./track-nav-store";
@@ -26,7 +27,6 @@ export function useTrackNavCamera(cameraRef: React.RefObject<CameraRef | null>) 
   const phase = useTrackNavStore((s) => s.phase);
   const progress = useTrackNavStore((s) => s.progress);
   const camMode = useTrackNavStore((s) => s.camMode);
-  const zoomOverride = useTrackNavStore((s) => s.zoomOverride);
   const recenterTick = useTrackNavStore((s) => s.recenterTick);
   const fix = useLocationStatus((s) => s.lastFix);
   const enteredActive = useRef(false);
@@ -86,6 +86,9 @@ export function useTrackNavCamera(cameraRef: React.RefObject<CameraRef | null>) 
   // Ease the camera on each progress tick — identical feel to regular nav.
   useEffect(() => {
     if (phase !== "active" || !progress) return;
+    // Fingers on the map: don't fight the gesture; the pinched zoom lands in
+    // zoomOverride and the next tick re-centers at it.
+    if (isMapGestureActive()) return;
     const focus = progress.offTrack ? progress.raw : progress.snapped;
     const center: [number, number] = [focus.lng, focus.lat];
     const northUp = camMode === "north";
@@ -101,7 +104,9 @@ export function useTrackNavCamera(cameraRef: React.RefObject<CameraRef | null>) 
 
     cameraRef.current?.easeTo({
       center,
-      zoom: zoomOverride ?? NAV_ZOOM,
+      // Imperative read — subscribing would re-render the map screen at
+      // gesture frequency while the user pinches.
+      zoom: useTrackNavStore.getState().zoomOverride ?? NAV_ZOOM,
       pitch: northUp ? 0 : NAV_PITCH,
       bearing: northUp ? 0 : progress.bearing,
       padding: northUp
@@ -109,7 +114,7 @@ export function useTrackNavCamera(cameraRef: React.RefObject<CameraRef | null>) 
         : { top: Math.round(SCREEN_H * 0.46), bottom: 120, left: 0, right: 0 },
       duration,
     });
-  }, [phase, progress, camMode, zoomOverride, recenterTick, cameraRef]);
+  }, [phase, progress, camMode, recenterTick, cameraRef]);
 
   // Return to a flat, north-up view when the session ends.
   useEffect(() => {
