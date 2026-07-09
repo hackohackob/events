@@ -23,6 +23,7 @@ import {
   Map as MapLibreMap,
   type MapRef,
   Marker,
+  RasterDEMSource,
   RasterSource,
   UserLocation,
 } from "@maplibre/maplibre-react-native";
@@ -318,6 +319,13 @@ const BASE_LAYERS: Record<BaseLayer, { label: string; icon: keyof typeof Feather
     maxZoom: 19,
   },
 };
+
+// Keyless AWS Terrain Tiles (Terrarium-encoded DEM) powering the 3D relief
+// toggle on every base layer. MapLibre Native (unlike GL JS on the dashboard)
+// has no true 3D terrain mesh, so the effect is hillshade relief + camera tilt.
+const RELIEF_DEM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+/** Camera pitch applied when the 3D relief toggle turns on. */
+const RELIEF_PITCH = 55;
 
 type TrackVisibility = Record<string, boolean>;
 
@@ -1567,6 +1575,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [trackVisibility, setTrackVisibility] = useState<TrackVisibility>({});
   const [heatWeightScale, setHeatWeightScale] = useState(0.12);
   const [baseLayer, setBaseLayer] = useState<BaseLayer>("regular");
+  // 3D relief (hillshade + tilt) — independent of the base layer choice.
+  const [relief3d, setRelief3d] = useState(false);
 
   const mapyTilesTemplateUrl = USE_MAPY_TILES ? getMapyTilesTemplateUrl() : null;
   const regularTilesTemplateUrl = mapyTilesTemplateUrl ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -2871,6 +2881,30 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     });
   };
 
+  // Tilt into a 3D perspective when relief is toggled on, flatten when it turns
+  // off — the tilt is what sells the hillshade as depth. Skipped during
+  // navigation (the nav camera owns pitch) and on mount (nothing to ease).
+  const relief3dMountedRef = useRef(false);
+  useEffect(() => {
+    if (!relief3dMountedRef.current) {
+      relief3dMountedRef.current = true;
+      return;
+    }
+    if (navPhase === "active" || trackNavPhase !== "idle") return;
+    void (async () => {
+      const viewState = await mapRef.current?.getViewState();
+      if (!viewState) return;
+      cameraRef.current?.easeTo({
+        center: viewState.center,
+        zoom: viewState.zoom,
+        bearing: viewState.bearing,
+        pitch: relief3d ? RELIEF_PITCH : 0,
+        duration: 700,
+      });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relief3d]);
+
   const incidentDistance =
     selectedIncident && myLocationFix
       ? distanceKm(myLocationFix.lat, myLocationFix.lng, selectedIncident.lat, selectedIncident.lng)
@@ -3032,6 +3066,30 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             }}
           />
         </RasterSource>
+
+        {relief3d ? (
+          <RasterDEMSource
+            id="relief-dem-source"
+            tiles={[RELIEF_DEM_TILES]}
+            encoding="terrarium"
+            tileSize={256}
+            maxzoom={15}
+          >
+            <Layer
+              id="relief-hillshade-layer"
+              type="hillshade"
+              // Pinned right above the base raster (index 1) so a toggle
+              // remount never lands on top of tracks/zones/markers — same
+              // constraint as base-raster-layer above.
+              layerIndex={2}
+              paint={{
+                "hillshade-exaggeration": 0.6,
+                "hillshade-shadow-color": "#2f3f2f",
+                "hillshade-highlight-color": "#ffffff",
+              }}
+            />
+          </RasterDEMSource>
+        ) : null}
 
         {renderedTrackVisuals.map((track) => (
           <React.Fragment key={`track-${track.id}`}>
@@ -3880,6 +3938,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               );
             })}
           </View>
+
+          {/* 3D relief — works with every base map. */}
+          <Pressable
+            style={styles.layerRow}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setRelief3d((v) => !v);
+            }}
+          >
+            <Text style={styles.layerLabel}>3D relief</Text>
+            <View style={[styles.switchTrack, relief3d ? styles.switchTrackOn : null]}>
+              <View style={[styles.switchKnob, relief3d ? styles.switchKnobOn : null]} />
+            </View>
+          </Pressable>
 
           {/* Overlays */}
           <Text style={styles.layerSectionLabel}>OVERLAYS</Text>

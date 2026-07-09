@@ -296,6 +296,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [showParticipants, setShowParticipants] = useState(false)
   const [showIncidents, setShowIncidents] = useState(true)
   const [baseLayer, setBaseLayer] = useState<BaseLayer>('streets')
+  const [map3d, setMap3d] = useState(false)
   const [layersOpen, setLayersOpen] = useState(true)
   // -1 = All days, 0+ = specific day index
   const [selectedDayIdx, setSelectedDayIdx] = useState<number>(-1)
@@ -1088,6 +1089,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             center={[23.3219, 42.6977]}
             zoom={11}
             baseLayer={baseLayer}
+            enable3d={map3d}
             pois={showPois ? mapPois : []}
             tracks={showTracks ? allTracks : []}
             liveMedics={isActive && showMedics ? medics : []}
@@ -1198,6 +1200,21 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   )
                 })}
               </div>
+
+              {/* 3D elevation — independent of the base layer choice */}
+              <button
+                onClick={() => setMap3d(v => !v)}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-all text-left w-full"
+                style={{
+                  background: map3d ? '#8b5cf618' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${map3d ? '#8b5cf640' : 'rgba(148,163,184,0.08)'}`,
+                }}
+              >
+                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: map3d ? '#8b5cf6' : '#334155' }} />
+                <span className="flex-1 text-xs font-medium" style={{ color: map3d ? '#e2e8f0' : '#475569' }}>
+                  3D terrain
+                </span>
+              </button>
 
               {[
                 { key: 'tracks', label: 'Tracks', count: allTracks.filter(t => t.coordinates.length > 0).length, color: '#3b82f6', active: showTracks, toggle: () => setShowTracks(v => !v) },

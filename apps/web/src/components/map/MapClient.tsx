@@ -11,7 +11,7 @@ import { smoothZonePolygon, zoneFeature } from '@/lib/zone-geometry'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import type { LiveIncident } from '@/hooks/useLiveMap'
-import type { StyleSpecification } from 'maplibre-gl'
+import type { StyleSpecification, RasterDEMSourceSpecification } from 'maplibre-gl'
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 
@@ -27,12 +27,34 @@ function rasterStyle(tiles: string, attribution: string): StyleSpecification {
   }
 }
 
-// 3D terrain elevation: keyless AWS Terrain Tiles (Terrarium encoding), enabled
-// while the "terrain" base layer is selected.
+// 3D terrain elevation: keyless AWS Terrain Tiles (Terrarium encoding), driven
+// by the standalone 3D toggle — available on every base layer.
 const TERRAIN_DEM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 const TERRAIN_EXAGGERATION = 1.6
-/** Pitch applied when switching into the 3D terrain view. */
+/** Pitch applied when switching into the 3D view. */
 const TERRAIN_PITCH = 60
+
+const TERRAIN_DEM_SOURCE: RasterDEMSourceSpecification = {
+  type: 'raster-dem',
+  tiles: [TERRAIN_DEM_TILES],
+  encoding: 'terrarium',
+  tileSize: 256,
+  maxzoom: 15,
+}
+
+// The DEM source + `terrain` live INSIDE the style JSON — not as a <Source>
+// child + `terrain` prop. react-map-gl re-attaches style components right after
+// the style loads, and terrain attached before its just-added DEM source has
+// loaded makes the first wave of DEM tiles error pre-fetch; errored terrain
+// tiles are never retried, so the map silently renders flat. Baked into the
+// style, maplibre sequences source load → terrain itself.
+function with3d(style: StyleSpecification): StyleSpecification {
+  return {
+    ...style,
+    sources: { ...style.sources, 'terrain-dem': TERRAIN_DEM_SOURCE },
+    terrain: { source: 'terrain-dem', exaggeration: TERRAIN_EXAGGERATION },
+  }
+}
 
 // Built once at module level: react-map-gl compares mapStyle by REFERENCE, so a
 // fresh object per render triggers a full setStyle() reload on every re-render
@@ -42,39 +64,41 @@ const SATELLITE_STYLE = rasterStyle(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   '© Esri, Maxar',
 )
-// The DEM source + `terrain` live INSIDE the style JSON — not as a <Source>
-// child + `terrain` prop. react-map-gl re-attaches style components right after
-// the style loads, and terrain attached before its just-added DEM source has
-// loaded makes the first wave of DEM tiles error pre-fetch; errored terrain
-// tiles are never retried, so the map silently renders flat. Baked into the
-// style, maplibre sequences source load → terrain itself.
-const TERRAIN_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    base: {
-      type: 'raster',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'],
-      tileSize: 256,
-      attribution: '© Esri',
-    },
-    'terrain-dem': {
-      type: 'raster-dem',
-      tiles: [TERRAIN_DEM_TILES],
-      encoding: 'terrarium',
-      tileSize: 256,
-      maxzoom: 15,
-    },
-  },
-  layers: [{ id: 'base', type: 'raster', source: 'base' }],
-  terrain: { source: 'terrain-dem', exaggeration: TERRAIN_EXAGGERATION },
+const TERRAIN_STYLE = rasterStyle(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+  '© Esri',
+)
+const SATELLITE_3D_STYLE = with3d(SATELLITE_STYLE)
+const TERRAIN_3D_STYLE = with3d(TERRAIN_STYLE)
+
+// Streets is a remote vector style URL, so its 3D variant can't be built
+// statically — the JSON is fetched once, merged with the DEM, and cached at
+// module level (same reference-stability requirement as above).
+let streets3dCached: StyleSpecification | null = null
+let streets3dPromise: Promise<StyleSpecification | null> | null = null
+function loadStreets3dStyle(): Promise<StyleSpecification | null> {
+  if (!streets3dPromise) {
+    streets3dPromise = fetch(MAP_STYLE)
+      .then(r => r.json())
+      .then((s: StyleSpecification) => {
+        streets3dCached = with3d(s)
+        return streets3dCached
+      })
+      .catch(() => {
+        streets3dPromise = null // allow a retry on the next toggle
+        return null
+      })
+  }
+  return streets3dPromise
 }
 
-/** Base map style per selected layer. Satellite + terrain use keyless Esri
- *  rasters; streets is the default Carto vector style. */
-function styleFor(base: BaseLayer): string | StyleSpecification {
-  if (base === 'satellite') return SATELLITE_STYLE
-  if (base === 'terrain') return TERRAIN_STYLE
-  return MAP_STYLE
+/** Base map style per selected layer (+ optional 3D DEM variant). Satellite +
+ *  terrain use keyless Esri rasters; streets is the default Carto vector style.
+ *  Streets 3D falls back to the flat URL until the merged style is cached. */
+function styleFor(base: BaseLayer, want3d: boolean): string | StyleSpecification {
+  if (base === 'satellite') return want3d ? SATELLITE_3D_STYLE : SATELLITE_STYLE
+  if (base === 'terrain') return want3d ? TERRAIN_3D_STYLE : TERRAIN_STYLE
+  return want3d && streets3dCached ? streets3dCached : MAP_STYLE
 }
 
 export interface TrackLayer {
@@ -121,6 +145,8 @@ interface MapClientProps {
   showControls?: boolean
   /** Selected base map layer (streets / satellite / terrain). */
   baseLayer?: BaseLayer
+  /** Drape the current base layer over 3D DEM terrain (works with any base). */
+  enable3d?: boolean
   hoverCoord?: [number, number]
   hoverCoordColor?: string
   fitBounds?: [[number, number], [number, number]]
@@ -1224,6 +1250,7 @@ export default function MapClient({
   showHeatmap = false,
   showControls = true,
   baseLayer = 'streets',
+  enable3d = false,
   hoverCoord,
   hoverCoordColor = '#f97316',
   fitBounds,
@@ -1312,31 +1339,43 @@ export default function MapClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget?.nonce])
 
-  // Tilt into a 3D perspective when the terrain base layer is picked, and flatten
-  // back to a top-down view when leaving it (terrain looks broken at pitch 0 only
-  // in the sense that you can't see it — the tilt is what sells the relief).
-  const is3dTerrain = baseLayer === 'terrain'
+  // Tilt into a 3D perspective when the 3D toggle turns on, and flatten back to
+  // a top-down view when it turns off (terrain looks broken at pitch 0 only in
+  // the sense that you can't see it — the tilt is what sells the relief).
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    map.easeTo({ pitch: is3dTerrain ? TERRAIN_PITCH : 0, duration: 800 })
-  }, [is3dTerrain])
+    map.easeTo({ pitch: enable3d ? TERRAIN_PITCH : 0, duration: 800 })
+  }, [enable3d])
 
-  // The base style actually applied to the map lags `baseLayer` by one commit
-  // when LEAVING terrain: 3D terrain must be torn down (setTerrain(null) is
-  // synchronous) before the style swap, or maplibre's terrain depth pass renders
-  // against the half-replaced style and crashes ("shaderPreludeCode" TypeError).
-  const [appliedBaseLayer, setAppliedBaseLayer] = useState(baseLayer)
+  // Streets 3D needs the remote vector style fetched + merged with the DEM; the
+  // bump re-renders once the cache fills so styleFor() picks up the 3D variant.
+  const [, bumpStreets3d] = useState(0)
   useEffect(() => {
-    if (baseLayer === appliedBaseLayer) return
-    if (appliedBaseLayer === 'terrain') {
+    if (!enable3d || baseLayer !== 'streets' || streets3dCached) return
+    let alive = true
+    void loadStreets3dStyle().then(() => {
+      if (alive) bumpStreets3d(n => n + 1)
+    })
+    return () => { alive = false }
+  }, [enable3d, baseLayer])
+
+  // The style actually applied to the map lags `baseLayer`/`enable3d` by one
+  // commit when LEAVING a 3D style: 3D terrain must be torn down
+  // (setTerrain(null) is synchronous) before the style swap, or maplibre's
+  // terrain depth pass renders against the half-replaced style and crashes
+  // ("shaderPreludeCode" TypeError).
+  const [applied, setApplied] = useState({ base: baseLayer, is3d: enable3d })
+  useEffect(() => {
+    if (applied.base === baseLayer && applied.is3d === enable3d) return
+    if (applied.is3d) {
       try {
         const map = mapRef.current?.getMap()
         if (map?.getTerrain()) map.setTerrain(null)
       } catch {/* style mid-load — swapping it out is safe anyway */}
     }
-    setAppliedBaseLayer(baseLayer)
-  }, [baseLayer, appliedBaseLayer])
+    setApplied({ base: baseLayer, is3d: enable3d })
+  }, [baseLayer, enable3d, applied])
 
   const boundsKey = fitBounds ? JSON.stringify(fitBounds) : null
 
@@ -1436,7 +1475,7 @@ export default function MapClient({
     <MapGL
       ref={mapRef}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom }}
-      mapStyle={styleFor(appliedBaseLayer)}
+      mapStyle={styleFor(applied.base, applied.is3d)}
       maxPitch={70}
       style={{ width: '100%', height: '100%' }}
       cursor={zoneDrawActive ? 'crosshair' : interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
@@ -1458,7 +1497,7 @@ export default function MapClient({
       }}
     >
       {showControls && (
-        <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={is3dTerrain} />
+        <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={enable3d} />
       )}
 
       {/* Team zones (medic-only regions) */}
