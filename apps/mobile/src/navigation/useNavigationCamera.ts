@@ -5,6 +5,7 @@ import type { CameraRef } from "@maplibre/maplibre-react-native";
 import { useNavStore } from "./nav-store";
 import { useLocationStatus } from "../debug/location-status";
 import { sendNavLocationFix } from "../location/location-tracker";
+import { noteEnergyEvent } from "../debug/battery-diagnostics";
 import { isMapGestureActive } from "../map/map-gesture";
 import { distanceMeters } from "./geo";
 import { debugLog } from "../debug/debug-log";
@@ -49,6 +50,7 @@ export function useNavigationCamera(cameraRef: React.RefObject<CameraRef | null>
         distanceInterval: 1,
       },
       (location) => {
+        noteEnergyEvent("gpsFix");
         useLocationStatus.getState().setFix({
           lat: location.coords.latitude,
           lng: location.coords.longitude,

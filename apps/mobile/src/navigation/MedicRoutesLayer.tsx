@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
+import { useMarchingDash } from "./useMarchingDash";
 import { useMapStore } from "../map/map-store";
 import { useSessionStore } from "../security/session-store";
 import { SURFACE_COLORS } from "./surface";
@@ -36,11 +37,7 @@ const ETA_MIN_ZOOM = 12.5;
  * white dashes on screen); keeping the high-frequency update local fixes that.
  */
 function MedicFlowLine({ medicId, geometry }: { medicId: string; geometry: LngLat[] }) {
-  const [dashIndex, setDashIndex] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
-    return () => clearInterval(timer);
-  }, []);
+  const dashIndex = useMarchingDash(DASH_SEQUENCE.length);
   return (
     <GeoJSONSource id={`mflow-${medicId}`} data={lineFeature(geometry)}>
       <Layer

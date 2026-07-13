@@ -55,6 +55,8 @@ export interface Announcer {
   offTrack(distanceBackMeters: number): void;
   backOnTrack(): void;
   loopSkipped(jumpMeters: number): void;
+  /** The matcher switched legs (out-and-back direction correction). */
+  directionCorrected(): void;
   /** A fresh route was computed mid-navigation: forget one-shot cues + announce. */
   rerouted(): void;
   paused(): void;
@@ -137,6 +139,12 @@ export function createAnnouncer(): Announcer {
     loopSkipped(jumpMeters) {
       announcedOffTrack = false;
       speak(`Loop skipped. Continuing ${spokenDistance(jumpMeters)} ahead.`, { urgent: true });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+
+    directionCorrected() {
+      announcedOffTrack = false;
+      speak("Direction updated. Following the track from here.", { urgent: true });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
 

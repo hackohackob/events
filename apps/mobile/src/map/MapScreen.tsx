@@ -36,6 +36,7 @@ import { getSocket } from "../realtime/socket-client";
 import { apiFetch, resolveMediaUrl } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
 import { useMapStore, type MedicMarkerRoute } from "./map-store";
+import { hydrateMapCacheIfEmpty, startMapCachePersistence } from "./map-cache";
 import { useSessionStore } from "../security/session-store";
 import { useRosterStore } from "../security/roster-store";
 import { freshnessBucket, freshnessColor, freshnessLabel } from "./freshness";
@@ -76,6 +77,7 @@ import { useZoneEntryAlarm } from "./zones/zone-alarm";
 import { deleteZone, updateZone } from "./zones/zone-api";
 import { noteMapGesture } from "./map-gesture";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
+import { showChatNotification } from "../notifications/chat-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
 import { useIncidentReadsStore, incidentHasUnread } from "../incidents/incident-reads-store";
@@ -1558,6 +1560,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [trackPickerOpen, setTrackPickerOpen] = useState(false);
   const [focusedTrackId, setFocusedTrackId] = useState<string | null>(null);
   const [trackProfileProgress, setTrackProfileProgress] = useState(0);
+  // True once the user has actually scrubbed the elevation chart — gates the
+  // yellow "scrub point" distance readout (the cursor parks at 0 until then).
+  const [trackScrubbed, setTrackScrubbed] = useState(false);
   const [trackProfileWidth, setTrackProfileWidth] = useState(0);
   const trackProfileChartRef = useRef<View | null>(null);
   const trackProfileChartPageXRef = useRef(0);
@@ -1752,6 +1757,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     let mounted = true;
 
     const loadInitialData = async () => {
+      // Paint the last-known snapshot first (tracks, medics, POIs, incidents) —
+      // on a restart with no coverage the network loads below all fail and the
+      // cache is everything the map has. Live data overwrites it when it lands.
+      startMapCachePersistence();
+      await hydrateMapCacheIfEmpty();
+      if (!mounted) return;
       try {
         const eventId = useSessionStore.getState().eventId ?? "";
         const [initialLocations, activeMedics, eventTracksPayload, eventPois, incidents, rosterParticipants] = await Promise.all([
@@ -1861,10 +1872,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           existingTracksBeforeEnrichedSet,
         );
         setTracks(enrichedMergedTracks);
-      } catch {
-        if (mounted) {
-          setTracks([]);
-        }
+      } catch (err) {
+        // Offline (or server unreachable): keep whatever is showing — the
+        // cached snapshot restored above. Wiping tracks here is what used to
+        // blank the map on a no-coverage restart.
+        debugLog("api", "warn", "initial map data load failed — keeping cached snapshot", String(err));
       }
     };
 
@@ -1878,48 +1890,85 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   useEffect(() => {
     const socket = getSocket();
 
-    socket.on("location.updated", (payload) => {
+    // ── Coalesced location ingestion ────────────────────────────────────────
+    // Position events stream in from every runner and medic; applying each one
+    // immediately meant a full markers-array copy + map re-render per event —
+    // with a team of 10+ senders that's a re-render every couple of seconds,
+    // all day (a measurable battery cost). Nobody sends faster than the ~30s
+    // report cadence anyway, so buffer the payloads (latest per sender wins)
+    // and apply them in ONE store write: immediately when the map is quiet,
+    // otherwise at most once per window.
+    const LOCATION_APPLY_INTERVAL_MS = 30_000;
+    type MedicLocationPayload = { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null };
+    type RunnerLocationPayload = { userId: string; lat: number; lng: number; freshness?: "fresh" | "warning" | "stale" | "offline" };
+    const pendingRunners = new Map<string, RunnerLocationPayload>();
+    const pendingMedics = new Map<string, MedicLocationPayload>();
+    let lastLocationApplyAt = 0;
+    let locationFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyPendingLocations = () => {
+      lastLocationApplyAt = Date.now();
+      if (pendingRunners.size === 0 && pendingMedics.size === 0) return;
       const existing = useMapStore.getState().markers;
-      setMarkers(
-        [
-          ...existing.filter((marker) => marker.id !== payload.userId),
-          {
-            id: payload.userId,
-            type: "runner" as const,
-            label: payload.userId,
-            lat: payload.lat,
-            lng: payload.lng,
-            staleState: payload.freshness,
-          },
-        ].slice(-2200),
-      );
+      const byId = new Map(existing.map((marker) => [marker.id, marker]));
+      const updatedIds = new Set([...pendingRunners.keys(), ...pendingMedics.keys()]);
+      const next: typeof existing = existing.filter((marker) => !updatedIds.has(marker.id));
+      for (const payload of pendingRunners.values()) {
+        next.push({
+          id: payload.userId,
+          type: "runner" as const,
+          label: payload.userId,
+          lat: payload.lat,
+          lng: payload.lng,
+          staleState: payload.freshness,
+        });
+      }
+      for (const payload of pendingMedics.values()) {
+        const previous = byId.get(payload.medicId);
+        next.push({
+          id: payload.medicId,
+          type: "paramedic" as const,
+          label: previous?.label ?? payload.name ?? payload.medicId,
+          name: previous?.name ?? payload.name,
+          vehicle: previous?.vehicle,
+          lat: payload.lat,
+          lng: payload.lng,
+          accuracy: payload.accuracy ?? previous?.accuracy,
+          battery: payload.battery ?? previous?.battery,
+          staleState: "fresh" as const,
+          lastSeenAt: payload.lastSeenAt ?? new Date().toISOString(),
+          status: payload.status ?? previous?.status,
+          destination: payload.destination !== undefined ? payload.destination : previous?.destination ?? null,
+          route: payload.route !== undefined ? payload.route : previous?.route ?? null,
+        });
+      }
+      pendingRunners.clear();
+      pendingMedics.clear();
+      setMarkers(next.slice(-2200));
+    };
+
+    const scheduleLocationApply = () => {
+      const elapsed = Date.now() - lastLocationApplyAt;
+      if (elapsed >= LOCATION_APPLY_INTERVAL_MS) {
+        applyPendingLocations();
+        return;
+      }
+      if (locationFlushTimer == null) {
+        locationFlushTimer = setTimeout(() => {
+          locationFlushTimer = null;
+          applyPendingLocations();
+        }, LOCATION_APPLY_INTERVAL_MS - elapsed);
+      }
+    };
+
+    socket.on("location.updated", (payload: RunnerLocationPayload) => {
+      pendingRunners.set(payload.userId, payload);
+      scheduleLocationApply();
     });
 
-    socket.on("medic_location", (payload: { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null }) => {
-      const existing = useMapStore.getState().markers;
-      const filtered = existing.filter((marker) => marker.id !== payload.medicId);
-      const existing_marker = existing.find((marker) => marker.id === payload.medicId);
-      setMarkers(
-        [
-          ...filtered,
-          {
-            id: payload.medicId,
-            type: "paramedic" as const,
-            label: existing_marker?.label ?? payload.name ?? payload.medicId,
-            name: existing_marker?.name ?? payload.name,
-            vehicle: existing_marker?.vehicle,
-            lat: payload.lat,
-            lng: payload.lng,
-            accuracy: payload.accuracy ?? existing_marker?.accuracy,
-            battery: payload.battery ?? existing_marker?.battery,
-            staleState: "fresh" as const,
-            lastSeenAt: payload.lastSeenAt ?? new Date().toISOString(),
-            status: payload.status ?? existing_marker?.status,
-            destination: payload.destination !== undefined ? payload.destination : existing_marker?.destination ?? null,
-            route: payload.route !== undefined ? payload.route : existing_marker?.route ?? null,
-          },
-        ].slice(-2200),
-      );
+    socket.on("medic_location", (payload: MedicLocationPayload) => {
+      pendingMedics.set(payload.medicId, payload);
+      scheduleLocationApply();
     });
 
     socket.on("incident.created", (payload: IncidentResponse) => {
@@ -2014,6 +2063,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     socket.on("zone.removed", (payload: { id: string }) => useZonesStore.getState().remove(payload.id));
 
     return () => {
+      if (locationFlushTimer != null) clearTimeout(locationFlushTimer);
       socket.off("location.updated");
       socket.off("medic_location");
       socket.off("incident.created");
@@ -2465,21 +2515,33 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     [trackVisibility, trackVisuals],
   );
 
-  const respondingParamedics = useMemo(
-    () =>
-      nonCurrentMarkers.filter(
-        (marker) =>
-          marker.type === "paramedic" &&
-          Boolean(marker.respondingIncidentId) &&
-          layerVisibility.paramedics &&
-          layerVisibility.incidents,
-      ),
-    [layerVisibility.incidents, layerVisibility.paramedics, nonCurrentMarkers],
-  );
-
+  // Freshness-colour refresh. Paused while backgrounded — the foreground
+  // service keeps JS alive with the screen off, and re-rendering this whole
+  // screen every 10s for an invisible map was pure battery burn.
   useEffect(() => {
-    const timer = setInterval(() => setTick((value) => value + 1), 10_000);
-    return () => clearInterval(timer);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (timer == null) timer = setInterval(() => setTick((value) => value + 1), 10_000);
+    };
+    const stop = () => {
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    if (AppState.currentState === "active") start();
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") {
+        setTick((value) => value + 1); // refresh immediately on return
+        start();
+      } else {
+        stop();
+      }
+    });
+    return () => {
+      stop();
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -2514,14 +2576,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     }
   }, [isOnline, offlineQueueCount, justFlushed, offlineBadgeOpacity]);
 
-  useEffect(() => {
-    if (respondingParamedics.length === 0) {
-      return;
-    }
-
-    const timer = setInterval(() => setTick((value) => value + 1), 650);
-    return () => clearInterval(timer);
-  }, [respondingParamedics.length]);
+  // NOTE: there used to be a 650ms tick here that force-re-rendered this whole
+  // screen while any medic was responding, "for the flashing lights" — but
+  // MedicDot runs its own flash timer, so the tick only burned battery.
 
   const densityCountExpression = useMemo(
     () => ["*", ["get", "count"], densityScale],
@@ -2564,6 +2621,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     if (!hasFocusedTrack) {
       setFocusedTrackId(tracks[0].id);
       setTrackProfileProgress(0);
+      setTrackScrubbed(false);
     }
   }, [focusedTrackId, trackModeActive, tracks]);
 
@@ -2752,6 +2810,23 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     };
   }, [activeTab, sessionUserId]);
 
+  // Group-chat tray notification: only for real chat (text/voice) from someone
+  // else, and only while the app isn't foregrounded (in-app the badge covers
+  // it). System/feed cards (added POI, incident echoes) never notify.
+  useEffect(() => {
+    const socket = getSocket();
+    const onChatNotify = (msg: EventMessageDto) => {
+      if (msg.authorId && msg.authorId === sessionUserId) return;
+      if (msg.kind === "system" || msg.feedType) return;
+      if (AppState.currentState === "active") return;
+      void showChatNotification(msg);
+    };
+    socket.on("event.message", onChatNotify);
+    return () => {
+      socket.off("event.message", onChatNotify);
+    };
+  }, [sessionUserId, sessionToken]);
+
   // Broadcast my active navigation path to the whole team when navigation starts,
   // and clear it when it ends — so everyone + the dashboard sees the route + ETA.
   const navWasActiveRef = useRef(false);
@@ -2759,9 +2834,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     const isActive = navPhase === "active";
     const wasActive = navWasActiveRef.current;
     navWasActiveRef.current = isActive;
-    // Background tracking switches to the fast nav cadence while navigating, so
-    // the dashboard stays near-live even when the screen is locked.
-    void setNavModeTracking(isActive);
+    // Background tracking switches to the fast nav cadence while navigating
+    // (point-to-point OR track-following), so the dashboard stays near-live
+    // even when the screen is locked — and the regular direct watch stands
+    // down while the nav hooks run their own 1s foreground watcher.
+    void setNavModeTracking(isActive || trackNavPhase !== "idle");
     if (isActive && !wasActive) {
       const st = useNavStore.getState();
       const route = st.routes.find((r) => r.id === st.selectedRouteId) ?? st.routes[0];
@@ -2781,7 +2858,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     } else if (!isActive && wasActive) {
       void setMyRoute(null).catch(() => {});
     }
-  }, [navPhase]);
+  }, [navPhase, trackNavPhase]);
 
   // Medics currently responding to an open incident — drives the flashing blue
   // lights on their marker for everyone (works for app dispatch + simulator).
@@ -4144,6 +4221,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     onPress={() => {
                       setFocusedTrackId(track.id);
                       setTrackProfileProgress(0);
+                      setTrackScrubbed(false);
                       setTrackPickerOpen(false);
                     }}
                   >
@@ -4159,14 +4237,36 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           {focusedTrackProfile && focusedTrackSample ? (
             <View style={styles.profileCard}>
               <View style={styles.profileReadoutRow}>
+                {/* Where I am along the track (matches the blue position dot). */}
                 <View>
-                  <Text style={styles.profileMetricLabel}>Distance from start</Text>
-                  <Text style={styles.profileMetricValue}>{(focusedTrackSample.distanceMeters / 1000).toFixed(2)} km</Text>
+                  <Text style={styles.profileMetricLabel}>My distance</Text>
+                  <Text style={[styles.profileMetricValue, styles.profileMetricValueMine]}>
+                    {myTrackPosition ? `${(myTrackPosition.distanceMeters / 1000).toFixed(2)} km` : "—"}
+                  </Text>
                 </View>
+                {/* Scrub cursor distance (matches the yellow dot) — only once scrubbed. */}
+                {trackScrubbed ? (
+                  <>
+                    <View style={styles.profileMetricSpacer} />
+                    <View>
+                      <Text style={styles.profileMetricLabel}>Scrub point</Text>
+                      <Text style={[styles.profileMetricValue, styles.profileMetricValueScrub]}>
+                        {(focusedTrackSample.distanceMeters / 1000).toFixed(2)} km
+                      </Text>
+                    </View>
+                  </>
+                ) : null}
                 <View style={styles.profileMetricSpacer} />
                 <View>
                   <Text style={styles.profileMetricLabel}>Elevation</Text>
-                  <Text style={styles.profileMetricValue}>{Math.round(focusedTrackSample.elevationMeters)} m</Text>
+                  <Text style={styles.profileMetricValue}>
+                    {Math.round(
+                      trackScrubbed
+                        ? focusedTrackSample.elevationMeters
+                        : (myTrackPosition?.elevationMeters ?? focusedTrackSample.elevationMeters),
+                    )}{" "}
+                    m
+                  </Text>
                 </View>
               </View>
               <View ref={trackProfileChartRef} style={styles.profileGradientChart}>
@@ -4205,6 +4305,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   onStartShouldSetResponder={() => true}
                   onMoveShouldSetResponder={() => true}
                   onResponderGrant={(event) => {
+                    setTrackScrubbed(true);
                     updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
                   }}
                   onResponderMove={(event) => {
@@ -4826,11 +4927,13 @@ const styles = StyleSheet.create({
   headerActions: {
     gap: 9,
   },
-  // `bottom` is set inline — it follows whichever drawer is open.
+  // `bottom` is set inline — it follows whichever drawer is open. No zIndex:
+  // the bottom sheets are later siblings, so they must paint OVER the ruler —
+  // with an elevated zIndex it hovered on top of the drawer while the sheet
+  // animated up, until the snap-index state caught up and hid it.
   scaleBar: {
     position: "absolute",
     left: 14,
-    zIndex: 20,
   },
   clearDestBtn: {
     flexDirection: "row",
@@ -6010,6 +6113,10 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginTop: 2,
   },
+  // Matches the blue "my position" dot on the chart.
+  profileMetricValueMine: { color: "#38bdf8" },
+  // Matches the yellow scrub cursor dot on the chart.
+  profileMetricValueScrub: { color: "#f8d889" },
   profileMetricSpacer: {
     width: 8,
   },

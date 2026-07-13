@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
+import { useMarchingDash } from "./useMarchingDash";
 import { useMapStore } from "../map/map-store";
 import { useSessionStore } from "../security/session-store";
 import { useNavStore } from "./nav-store";
@@ -42,11 +43,7 @@ function isClosed(status?: string): boolean {
  * static native line layers (leaving just the moving dashes on screen).
  */
 function AssignedFlowLine({ linkKey, arc }: { linkKey: string; arc: LngLat[] }) {
-  const [dashIndex, setDashIndex] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
-    return () => clearInterval(timer);
-  }, []);
+  const dashIndex = useMarchingDash(DASH_SEQUENCE.length);
   return (
     <GeoJSONSource id={`assigned-flow-${linkKey}`} data={lineFeature(arc)}>
       <Layer

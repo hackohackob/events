@@ -20,6 +20,12 @@ import {
   Camera,
   Phone,
   Flashlight,
+  Signal,
+  SignalZero,
+  TrendingDown,
+  TrendingUp,
+  Bed,
+  Fuel,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -47,6 +53,8 @@ const POI_TYPE_ICON: Record<string, LucideIcon> = {
   finish: Trophy,
   shelter: Tent,
   custom: Star,
+  // Parity with the mobile registry, which also resolves plain "marker" POIs.
+  marker: MapPin,
 }
 
 /**
@@ -66,6 +74,12 @@ export const CUSTOM_POI_ICON_OPTIONS: { key: string; label: string; Icon: Lucide
   { key: 'search', label: 'Search point', Icon: Flashlight },
   { key: 'rockfall', label: 'Rockfall', Icon: Mountain },
   { key: 'water', label: 'Water', Icon: Droplet },
+  { key: 'no-service', label: 'No signal', Icon: SignalZero },
+  { key: 'service', label: 'Signal here', Icon: Signal },
+  { key: 'descent-end', label: 'Descent ends', Icon: TrendingDown },
+  { key: 'climb-start', label: 'Climb starts', Icon: TrendingUp },
+  { key: 'hotel', label: 'Hotel', Icon: Bed },
+  { key: 'fuel', label: 'Fuel', Icon: Fuel },
 ]
 
 const CUSTOM_KEY_ICON: Record<string, LucideIcon> = Object.fromEntries(

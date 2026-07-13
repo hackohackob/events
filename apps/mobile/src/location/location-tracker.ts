@@ -7,6 +7,8 @@ import { apiFetch } from "../ui/api-client";
 import { getSocket } from "../realtime/socket-client";
 import { useSessionStore } from "../security/session-store";
 import { OfflineQueue } from "../offline/offline-queue";
+import { isOnline } from "../offline/connectivity";
+import { noteBatterySample, noteEnergyEvent, setLocationQueueSize } from "../debug/battery-diagnostics";
 import { debugLog, describeError } from "../debug/debug-log";
 import { useLocationStatus } from "../debug/location-status";
 import { useSettingsStore } from "../settings/settings-store";
@@ -125,6 +127,7 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
   lastAcceptedAt = Date.now();
 
   const battery = await readBatteryLevel();
+  noteBatterySample(battery);
 
   useLocationStatus.getState().setFix({
     lat: location.coords.latitude,
@@ -160,6 +163,7 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
     const socket = getSocket();
     if (AppState.currentState === "active" && socket.connected) {
       socket.emit("medic_location", payload);
+      noteEnergyEvent("sendWs");
       debugLog("location", "info", "medic location sent via WS", { accuracy: payload.accuracy, battery });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "ws" });
       return;
@@ -167,17 +171,23 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
 
     const eventId = session.eventId ?? "";
     const medicId = session.userId ?? "";
+    // Known offline → don't spin the radio up on a doomed fetch; park the fix
+    // in the queue (newest-only) and let the connectivity listener flush it.
+    if (!isOnline()) {
+      queueLocation("medic_location", { ...payload, eventId, medicId }, "offline");
+      return;
+    }
     try {
       await apiFetch(`/events/${eventId}/medics/${medicId}/location`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
+      noteEnergyEvent("sendHttpOk");
       debugLog("location", "info", "medic location sent via HTTP", { accuracy: payload.accuracy, battery });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "http" });
     } catch (err) {
-      locationQueue.enqueue("medic_location", { ...payload, eventId, medicId });
-      debugLog("location", "error", "medic location send failed — queued", String(err));
-      useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "queue", error: String(err) });
+      noteEnergyEvent("sendHttpFail");
+      queueLocation("medic_location", { ...payload, eventId, medicId }, String(err));
     }
     return;
   }
@@ -191,18 +201,42 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
     battery,
     timestamp: new Date(location.timestamp).toISOString(),
   };
+  if (!isOnline()) {
+    queueLocation("location.update", payload, "offline");
+    return;
+  }
   try {
     await apiFetch(`/events/${eventId}/location`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    noteEnergyEvent("sendHttpOk");
     debugLog("location", "info", "participant location sent", { accuracy: payload.accuracy, battery });
     useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "http" });
   } catch (err) {
-    locationQueue.enqueue("location.update", payload);
-    debugLog("location", "error", "participant location send failed — queued", String(err));
-    useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "queue", error: String(err) });
+    noteEnergyEvent("sendHttpFail");
+    queueLocation("location.update", payload, String(err));
   }
+}
+
+/**
+ * Park a fix in the offline queue, keeping ONLY the newest per type. A stale
+ * position is worthless the moment a fresher one exists, and replaying an
+ * hours-long backlog as a burst when coverage returns was both a server hammer
+ * and a battery drain.
+ */
+function queueLocation(type: string, payload: Record<string, unknown>, reason: string): void {
+  const offline = reason === "offline";
+  if (offline) noteEnergyEvent("sendSkippedOffline");
+  locationQueue.replaceLatest(type, payload);
+  setLocationQueueSize(locationQueue.size);
+  debugLog(
+    "location",
+    offline ? "info" : "error",
+    offline ? "offline — location queued (newest kept)" : "location send failed — queued (newest kept)",
+    reason,
+  );
+  useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "queue", error: reason });
 }
 
 // Newest fix timestamp actually delivered to the server, and when we delivered
@@ -227,6 +261,7 @@ async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<v
         distanceInterval: 0,
       },
       (location) => {
+        noteEnergyEvent("gpsFix");
         // Skip anything the task fallback (or a previous watch) already sent.
         if (location.timestamp <= lastDeliveredFixTimestamp) return;
         // Skip a stale OS-cached fix delivered on unlock (the position from when
@@ -256,6 +291,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
 
   const locations: ExpoLocation.LocationObject[] = data?.locations ?? [];
   if (!locations.length) return;
+  noteEnergyEvent("gpsFix");
 
   const location = locations[locations.length - 1]!;
   const session = useSessionStore.getState();
@@ -460,8 +496,17 @@ export async function startLocationLoop(): Promise<boolean> {
 
     // Primary delivery path: a plain watch subscription (direct callback, no
     // JobScheduler) kept alive by the foreground service. Always started, even
-    // when the background task above fails to register.
-    await startDirectWatch(isMedic, intervalMs);
+    // when the background task above fails to register — EXCEPT while
+    // navigating: the nav camera hook runs its own 1s foreground watcher whose
+    // fixes are already sent (throttled) via sendNavLocationFix, so a second
+    // concurrent GPS subscription would only double the sends and the drain.
+    if (navModeActive) {
+      directWatchSub?.remove();
+      directWatchSub = null;
+      debugLog("location", "info", "direct watch skipped — nav watcher owns foreground delivery");
+    } else {
+      await startDirectWatch(isMedic, intervalMs);
+    }
   } catch (err) {
     debugLog("location", "error", "background location updates failed to start", String(err));
     return false;
@@ -481,8 +526,21 @@ export async function setNavModeTracking(active: boolean): Promise<void> {
   if (navModeActive === active) return;
   navModeActive = active;
   try {
-    const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-    if (!running) return;
+    if (active) {
+      // The nav camera hook's 1s watcher takes over foreground delivery — drop
+      // the regular direct watch so only one GPS subscription feeds sends.
+      directWatchSub?.remove();
+      directWatchSub = null;
+    }
+    const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME).catch(() => false);
+    if (!running) {
+      // No background task (e.g. the known Android NPE) — just restore the
+      // direct watch when navigation ends; nothing else to restart.
+      if (!active && useSessionStore.getState().token) {
+        await startDirectWatch(isMedicSession(), useSettingsStore.getState().locationIntervalMs);
+      }
+      return;
+    }
     debugLog("location", "info", `nav-mode tracking ${active ? "on" : "off"} — restarting updates`);
     await startLocationLoop();
   } catch (err) {
@@ -501,6 +559,12 @@ const NAV_FOREGROUND_SEND_INTERVAL_MS = 5_000;
 export function sendNavLocationFix(location: ExpoLocation.LocationObject): void {
   if (Date.now() - lastNavSendAt < NAV_FOREGROUND_SEND_INTERVAL_MS) return;
   lastNavSendAt = Date.now();
+  // Stamp the shared dedupe marker so the background task (still running at
+  // its own cadence) skips fixes the nav watcher already delivered.
+  if (location.timestamp > lastDeliveredFixTimestamp) {
+    lastDeliveredFixTimestamp = location.timestamp;
+    lastDeliveredAt = Date.now();
+  }
   void sendLocation(location);
 }
 
@@ -531,7 +595,9 @@ export async function ensureTrackingAlive(): Promise<void> {
     // the same native NPE — let the backoff window govern re-attempts instead of
     // the 2-minute watchdog cooldown, and keep the direct watch alive meanwhile.
     if (Date.now() < bgTaskRetryAfter) {
-      if (!directWatchSub) await startDirectWatch(isMedicSession(), useSettingsStore.getState().locationIntervalMs);
+      if (!directWatchSub && !navModeActive) {
+        await startDirectWatch(isMedicSession(), useSettingsStore.getState().locationIntervalMs);
+      }
       return;
     }
 
@@ -561,21 +627,33 @@ export async function stopLocationLoop(): Promise<void> {
   }
 }
 
+let flushInFlight = false;
+
 export async function flushLocationQueue(): Promise<void> {
-  const session = useSessionStore.getState();
-  const ready = locationQueue.listReady();
-  for (const item of ready) {
-    try {
-      // Medic items carry their own eventId — the session one may have changed
-      // since the fix was queued.
-      const eventId = (item.payload as any).eventId ?? session.eventId ?? "";
-      const url = item.type === "medic_location"
-        ? `/events/${eventId}/medics/${(item.payload as any).medicId}/location`
-        : `/events/${eventId}/location`;
-      await apiFetch(url, { method: "POST", body: JSON.stringify(item.payload) });
-      locationQueue.remove(item.id);
-    } catch {
-      locationQueue.markFailed(item.id);
+  // Multiple triggers can coincide (NetInfo flip + app foreground + background
+  // task) — one pass at a time, and never while known-offline.
+  if (flushInFlight || !isOnline() || locationQueue.size === 0) return;
+  flushInFlight = true;
+  noteEnergyEvent("queueFlush");
+  try {
+    const session = useSessionStore.getState();
+    const ready = locationQueue.listReady();
+    for (const item of ready) {
+      try {
+        // Medic items carry their own eventId — the session one may have changed
+        // since the fix was queued.
+        const eventId = (item.payload as any).eventId ?? session.eventId ?? "";
+        const url = item.type === "medic_location"
+          ? `/events/${eventId}/medics/${(item.payload as any).medicId}/location`
+          : `/events/${eventId}/location`;
+        await apiFetch(url, { method: "POST", body: JSON.stringify(item.payload) });
+        locationQueue.remove(item.id);
+      } catch {
+        locationQueue.markFailed(item.id);
+      }
     }
+  } finally {
+    flushInFlight = false;
+    setLocationQueueSize(locationQueue.size);
   }
 }

@@ -1,6 +1,7 @@
 import { useSessionStore } from "../security/session-store";
 import { resolveLocalhostUrl } from "./runtime-host";
 import { debugLog } from "../debug/debug-log";
+import { noteEnergyEvent } from "../debug/battery-diagnostics";
 
 const API_BASE_URL = resolveLocalhostUrl(
   process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
@@ -32,6 +33,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Hard cap on how long a request may hold the radio. On the edge of coverage a
+ * fetch can otherwise hang for minutes in the OS network stack, keeping the
+ * cell radio in its high-power state — one of the main battery drains observed
+ * at remote events. Failing fast also hands the payload to the offline queue
+ * sooner, which is where it belongs.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const state = useSessionStore.getState();
   const headers = new Headers(init?.headers);
@@ -42,12 +52,17 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   headers.set("content-type", "application/json");
 
   const method = (init?.method ?? "GET").toUpperCase();
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: init?.signal ?? abort.signal });
   } catch (networkErr) {
+    noteEnergyEvent("apiNetworkError");
     debugLog("api", "error", `${method} ${path} network error`, String(networkErr));
     throw networkErr;
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!response.ok) {

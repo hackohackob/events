@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
 import { Feather } from "@expo/vector-icons";
+import { useMarchingDash } from "./useMarchingDash";
 import { useNavStore } from "./nav-store";
 import { useLocationStatus } from "../debug/location-status";
 import { arcPoints } from "./geo";
@@ -33,11 +34,7 @@ function lineFeature(coordinates: LngLat[]) {
 
 /** Isolated ant-march overlay so the 130ms dash tick re-renders only this line. */
 function FlowLine({ arc }: { arc: LngLat[] }) {
-  const [dashIndex, setDashIndex] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setDashIndex((i) => (i + 1) % DASH_SEQUENCE.length), 130);
-    return () => clearInterval(timer);
-  }, []);
+  const dashIndex = useMarchingDash(DASH_SEQUENCE.length);
   return (
     <GeoJSONSource id="transport-preview-flow" data={lineFeature(arc)}>
       <Layer

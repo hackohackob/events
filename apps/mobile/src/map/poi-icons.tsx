@@ -46,6 +46,12 @@ const CUSTOM_KEY_ICON: Record<string, MciName> = {
   search: "flashlight",
   rockfall: "image-filter-hdr",
   water: "water",
+  "no-service": "signal-off",
+  service: "signal",
+  "descent-end": "elevation-decline",
+  "climb-start": "elevation-rise",
+  hotel: "bed",
+  fuel: "gas-station",
 };
 
 /** Legacy POIs stored an emoji in `icon`; map the old set onto keyed icons. */
@@ -81,6 +87,12 @@ export const CUSTOM_POI_ICON_OPTIONS: { key: string; label: string; icon: MciNam
   { key: "search", label: "Search point", icon: CUSTOM_KEY_ICON.search },
   { key: "rockfall", label: "Rockfall", icon: CUSTOM_KEY_ICON.rockfall },
   { key: "water", label: "Water", icon: CUSTOM_KEY_ICON.water },
+  { key: "no-service", label: "No signal", icon: CUSTOM_KEY_ICON["no-service"] },
+  { key: "service", label: "Signal here", icon: CUSTOM_KEY_ICON.service },
+  { key: "descent-end", label: "Descent ends", icon: CUSTOM_KEY_ICON["descent-end"] },
+  { key: "climb-start", label: "Climb starts", icon: CUSTOM_KEY_ICON["climb-start"] },
+  { key: "hotel", label: "Hotel", icon: CUSTOM_KEY_ICON.hotel },
+  { key: "fuel", label: "Fuel", icon: CUSTOM_KEY_ICON.fuel },
 ];
 
 function resolveName(type?: string, icon?: string | null): MciName {

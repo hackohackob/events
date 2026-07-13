@@ -25,6 +25,13 @@ export interface MatcherState {
   offTrackSinceMs: number | null;
   /** Global re-acquisition candidate being confirmed across consecutive fixes. */
   reacq: { candidateAlong: number; hits: number } | null;
+  /**
+   * Consecutive on-track commits whose matched segment pointed OPPOSITE to the
+   * travel heading. On an out-and-back track both legs share the road, so the
+   * matcher can latch the outbound leg while the user is actually returning —
+   * perpendicular distance alone can't tell the legs apart, only heading can.
+   */
+  wrongWayHits: number;
 }
 
 export interface MatcherFix {
@@ -45,6 +52,9 @@ export type MatchResult =
       segmentBearing: number;
       /** Set when this commit was a forward jump past a skipped loop. */
       loopSkipMeters: number | null;
+      /** Set when this commit switched legs (out-and-back direction fix); the
+       *  signed arc-length jump from the previously committed position. */
+      legSwitchMeters: number | null;
     }
   | {
       status: "off";
@@ -74,6 +84,16 @@ const FORWARD_SLACK_M = 50;
 const REACQ_STABLE_HITS = 3;
 /** Forward jumps larger than this are reported as a skipped loop. */
 export const LOOP_SKIP_MIN_JUMP_M = 300;
+// Wrong-leg (out-and-back) detection: this many consecutive commits with the
+// travel heading opposing the matched segment flips the matcher onto the
+// heading-agreeing leg. Heading is noisy, so require a sustained streak plus a
+// couple of stable scan hits before jumping.
+const WRONG_WAY_MIN_DEG = 120;
+const WRONG_WAY_HITS = 5;
+const LEG_SWITCH_STABLE_HITS = 2;
+/** After this long continuously off-track, re-acquisition may also look
+ *  BACKWARD along the track (the matcher may have latched a later pass). */
+const OFF_TRACK_ALLOW_BACKWARD_AFTER_MS = 25_000;
 
 interface Candidate {
   alongMeters: number;
@@ -83,7 +103,7 @@ interface Candidate {
 }
 
 export function createMatcherState(startAlong = 0): MatcherState {
-  return { lastAlong: startAlong, offTrackSinceMs: null, reacq: null };
+  return { lastAlong: startAlong, offTrackSinceMs: null, reacq: null, wrongWayHits: 0 };
 }
 
 /** Project a fix onto every segment in [fromIdx, toIdx), keeping those within maxPerp. */
@@ -189,8 +209,38 @@ export function matchFix(
   }
 
   if (best && best.perpMeters <= COMMIT_MAX_PERP_M) {
+    // ── Wrong-leg watch ──────────────────────────────────────────────────────
+    // Committing is geometrically right but may be directionally wrong: on an
+    // out-and-back road the outbound leg projects perfectly even while the
+    // user is on the return leg (the matcher then tracks them BACKWARD and
+    // eventually declares them off-track). A sustained streak of commits with
+    // the heading ~opposite to the segment means we're on the wrong leg —
+    // scan the whole track for a heading-agreeing candidate and switch to it.
+    const opposed =
+      fix.headingDeg !== null &&
+      headingPenaltyDeg(fix.headingDeg, best.segmentBearing) >= WRONG_WAY_MIN_DEG;
+    const wrongWayHits = opposed ? state.wrongWayHits + 1 : 0;
+
+    if (wrongWayHits >= WRONG_WAY_HITS) {
+      const switched = tryLegSwitch(state, fix, track);
+      if (switched.committed) return switched.committed;
+      // Not confirmed yet — keep the local commit but remember the candidate.
+      return {
+        state: { lastAlong: best.alongMeters, offTrackSinceMs: null, reacq: switched.reacq, wrongWayHits },
+        result: {
+          status: "on",
+          alongMeters: best.alongMeters,
+          snapped: best.point,
+          perpMeters: best.perpMeters,
+          segmentBearing: best.segmentBearing,
+          loopSkipMeters: null,
+          legSwitchMeters: null,
+        },
+      };
+    }
+
     return {
-      state: { lastAlong: best.alongMeters, offTrackSinceMs: null, reacq: null },
+      state: { lastAlong: best.alongMeters, offTrackSinceMs: null, reacq: null, wrongWayHits },
       result: {
         status: "on",
         alongMeters: best.alongMeters,
@@ -198,6 +248,7 @@ export function matchFix(
         perpMeters: best.perpMeters,
         segmentBearing: best.segmentBearing,
         loopSkipMeters: null,
+        legSwitchMeters: null,
       },
     };
   }
@@ -207,9 +258,16 @@ export function matchFix(
   let nextState: MatcherState = { ...state, offTrackSinceMs: offSince };
 
   if (fix.atMs - offSince >= GLOBAL_AFTER_MS || candidates.length === 0) {
+    // Normally only forward candidates are eligible (that's what "skipped a
+    // loop" means) — but if we've been off for a long while, the committed
+    // position itself is probably the error (e.g. latched the RETURN leg of an
+    // out-and-back while still outbound, which puts the true position behind
+    // and made re-acquisition impossible). Then heading agreement, not
+    // forwardness, is the arbiter.
+    const allowBackward = fix.atMs - offSince >= OFF_TRACK_ALLOW_BACKWARD_AFTER_MS;
     const global = projectRange(fix, track, 0, track.geometry.length - 1, GLOBAL_MAX_PERP_M).filter(
       (c) =>
-        c.alongMeters >= state.lastAlong - FORWARD_SLACK_M &&
+        (allowBackward || c.alongMeters >= state.lastAlong - FORWARD_SLACK_M) &&
         headingPenaltyDeg(fix.headingDeg, c.segmentBearing) <= GLOBAL_HEADING_MAX_DEG,
     );
 
@@ -236,7 +294,7 @@ export function matchFix(
       if (reacq.hits >= REACQ_STABLE_HITS) {
         const jump = target.alongMeters - state.lastAlong;
         return {
-          state: { lastAlong: target.alongMeters, offTrackSinceMs: null, reacq: null },
+          state: { lastAlong: target.alongMeters, offTrackSinceMs: null, reacq: null, wrongWayHits: 0 },
           result: {
             status: "on",
             alongMeters: target.alongMeters,
@@ -244,6 +302,8 @@ export function matchFix(
             perpMeters: target.perpMeters,
             segmentBearing: target.segmentBearing,
             loopSkipMeters: jump >= LOOP_SKIP_MIN_JUMP_M ? jump : null,
+            // A backward re-acquisition is a position correction, not a skip.
+            legSwitchMeters: jump < -CLUSTER_WITHIN_M ? jump : null,
           },
         };
       }
@@ -263,6 +323,68 @@ export function matchFix(
       distanceBackMeters: nearest.perpMeters,
       nearestPoint: nearest.point,
       offTrackSinceMs: offSince,
+    },
+  };
+}
+
+/**
+ * Wrong-leg correction: scan the WHOLE track for projections whose segment
+ * bearing agrees with the travel heading (the leg we're actually on), pick the
+ * best cluster, and commit once it has been the same candidate for a couple of
+ * consecutive fixes. Unlike loop-skip re-acquisition this ignores forwardness
+ * entirely — the correct leg of an out-and-back can sit at a smaller OR larger
+ * arc-length than the wrongly latched one.
+ */
+function tryLegSwitch(
+  state: MatcherState,
+  fix: MatcherFix,
+  track: PreparedTrack,
+): { committed: { state: MatcherState; result: MatchResult } | null; reacq: MatcherState["reacq"] } {
+  const aligned = projectRange(fix, track, 0, track.geometry.length - 1, GLOBAL_MAX_PERP_M).filter(
+    (c) => headingPenaltyDeg(fix.headingDeg, c.segmentBearing) <= GLOBAL_HEADING_MAX_DEG,
+  );
+  if (aligned.length === 0) return { committed: null, reacq: null };
+
+  // Best projection per arc-length cluster, then the cluster with the smallest
+  // perpendicular error (heading already filtered); forwardness breaks ties.
+  aligned.sort((a, b) => a.alongMeters - b.alongMeters);
+  const clusters: Candidate[] = [];
+  for (const c of aligned) {
+    const last = clusters[clusters.length - 1];
+    if (last && c.alongMeters - last.alongMeters < CLUSTER_WITHIN_M) {
+      if (c.perpMeters < last.perpMeters) clusters[clusters.length - 1] = c;
+    } else {
+      clusters.push(c);
+    }
+  }
+  let target = clusters[0];
+  for (const c of clusters) {
+    if (c.perpMeters < target.perpMeters - 1 || (Math.abs(c.perpMeters - target.perpMeters) <= 1 && c.alongMeters > target.alongMeters)) {
+      target = c;
+    }
+  }
+
+  const reacq =
+    state.reacq && Math.abs(state.reacq.candidateAlong - target.alongMeters) < CLUSTER_WITHIN_M
+      ? { candidateAlong: target.alongMeters, hits: state.reacq.hits + 1 }
+      : { candidateAlong: target.alongMeters, hits: 1 };
+
+  if (reacq.hits < LEG_SWITCH_STABLE_HITS) return { committed: null, reacq };
+
+  const jump = target.alongMeters - state.lastAlong;
+  return {
+    reacq: null,
+    committed: {
+      state: { lastAlong: target.alongMeters, offTrackSinceMs: null, reacq: null, wrongWayHits: 0 },
+      result: {
+        status: "on",
+        alongMeters: target.alongMeters,
+        snapped: target.point,
+        perpMeters: target.perpMeters,
+        segmentBearing: target.segmentBearing,
+        loopSkipMeters: null,
+        legSwitchMeters: jump,
+      },
     },
   };
 }

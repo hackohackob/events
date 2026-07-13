@@ -24,6 +24,7 @@ export function TrackNavOverlay() {
   const progress = useTrackNavStore((s) => s.progress);
   const arrived = useTrackNavStore((s) => s.arrived);
   const loopSkip = useTrackNavStore((s) => s.loopSkip);
+  const legSwitch = useTrackNavStore((s) => s.legSwitch);
   const muted = useTrackNavStore((s) => s.muted);
   const elevations = useTrackNavStore((s) => s.elevations);
   const stop = useTrackNavStore((s) => s.stop);
@@ -31,6 +32,7 @@ export function TrackNavOverlay() {
   const resume = useTrackNavStore((s) => s.resume);
   const toggleMuted = useTrackNavStore((s) => s.toggleMuted);
   const dismissLoopSkip = useTrackNavStore((s) => s.dismissLoopSkip);
+  const dismissLegSwitch = useTrackNavStore((s) => s.dismissLegSwitch);
 
   // Animated whole-track progress fill.
   const fillAnim = useRef(new Animated.Value(0)).current;
@@ -44,12 +46,17 @@ export function TrackNavOverlay() {
     }).start();
   }, [progress, fillAnim]);
 
-  // Loop-skip toast auto-dismiss.
+  // Loop-skip / direction-correction toast auto-dismiss.
   useEffect(() => {
     if (!loopSkip) return;
     const timer = setTimeout(dismissLoopSkip, LOOP_TOAST_MS);
     return () => clearTimeout(timer);
   }, [loopSkip, dismissLoopSkip]);
+  useEffect(() => {
+    if (!legSwitch) return;
+    const timer = setTimeout(dismissLegSwitch, LOOP_TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [legSwitch, dismissLegSwitch]);
 
   const elevationBars = useMemo(() => buildElevationBars(elevations), [elevations]);
 
@@ -110,8 +117,9 @@ export function TrackNavOverlay() {
         </View>
       ) : null}
 
-      {/* Loop-skip toast. */}
-      {loopSkip ? <LoopSkipToast jumpMeters={loopSkip.jumpMeters} /> : null}
+      {/* Loop-skip / direction-correction toasts. */}
+      {loopSkip ? <JumpToast icon="fast-forward" text={`Loop skipped — ${formatDistance(loopSkip.jumpMeters)} ahead`} /> : null}
+      {!loopSkip && legSwitch ? <JumpToast icon="repeat" text="Direction corrected — following your leg" /> : null}
 
       {/* ── Bottom: speed puck + pause/voice floating above the dock ── */}
       <View style={styles.bottomStack} pointerEvents="box-none">
@@ -249,8 +257,9 @@ function OffTrackStrip({ meters }: { meters: number }) {
   );
 }
 
-/** Slide-in confirmation after an auto-detected loop skip. */
-function LoopSkipToast({ jumpMeters }: { jumpMeters: number }) {
+/** Slide-in confirmation after an auto-detected progress jump (loop skip or
+ *  out-and-back direction correction). */
+function JumpToast({ icon, text }: { icon: keyof typeof Feather.glyphMap; text: string }) {
   const slide = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(slide, { toValue: 1, useNativeDriver: true, damping: 14, stiffness: 160 }).start();
@@ -266,8 +275,8 @@ function LoopSkipToast({ jumpMeters }: { jumpMeters: number }) {
         },
       ]}
     >
-      <Feather name="fast-forward" size={14} color="#04140E" />
-      <Text style={styles.loopToastText}>Loop skipped — {formatDistance(jumpMeters)} ahead</Text>
+      <Feather name={icon} size={14} color="#04140E" />
+      <Text style={styles.loopToastText}>{text}</Text>
     </Animated.View>
   );
 }

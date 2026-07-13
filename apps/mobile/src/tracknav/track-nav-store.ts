@@ -55,6 +55,8 @@ interface TrackNavState {
   arrived: boolean;
   /** Set right after an auto-detected loop skip; the overlay shows a toast. */
   loopSkip: { jumpMeters: number; atMs: number } | null;
+  /** Set right after a wrong-leg direction correction; the overlay shows a toast. */
+  legSwitch: { atMs: number } | null;
   lastFix: { lat: number; lng: number; at: number } | null;
   /** Camera orientation, mirroring the regular nav camera behaviour. */
   camMode: "follow" | "north";
@@ -70,6 +72,7 @@ interface TrackNavState {
   toggleCamera: () => void;
   setZoomOverride: (zoom: number | null) => void;
   dismissLoopSkip: () => void;
+  dismissLegSwitch: () => void;
 }
 
 const announcer = createAnnouncer();
@@ -100,6 +103,7 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
   muted: false,
   arrived: false,
   loopSkip: null,
+  legSwitch: null,
   lastFix: null,
   camMode: "follow",
   recenterTick: 0,
@@ -142,6 +146,7 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
       progress: null,
       arrived: false,
       loopSkip: null,
+      legSwitch: null,
       lastFix: null,
       camMode: "follow",
       recenterTick: get().recenterTick + 1,
@@ -163,6 +168,7 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
       matcher: null,
       arrived: false,
       loopSkip: null,
+      legSwitch: null,
       lastFix: null,
       zoomOverride: null,
     });
@@ -206,9 +212,11 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
         }
       }
     }
-    // Device heading when moving fast enough to trust it; else fix-to-fix bearing.
+    // Device heading when moving fast enough to trust it; else fix-to-fix
+    // bearing. Android reports -1 for "unknown heading" — treat it as absent,
+    // otherwise the wrong-leg detector would compare against a bogus bearing.
     const headingDeg =
-      fix.heading != null && Number.isFinite(fix.heading) && (speedMps ?? 0) > 1
+      fix.heading != null && Number.isFinite(fix.heading) && fix.heading >= 0 && (speedMps ?? 0) > 1
         ? fix.heading
         : movedBearing;
 
@@ -224,6 +232,16 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
         if (state.phase === "active") announcer.loopSkipped(result.loopSkipMeters);
         debugLog("location", "info", "track loop skipped", {
           jumpMeters: Math.round(result.loopSkipMeters),
+          alongMeters: Math.round(result.alongMeters),
+        });
+      } else if (result.legSwitchMeters !== null) {
+        // Wrong-leg correction (out-and-back): progress jumped onto the leg
+        // that agrees with the travel direction — re-arm voice cues around the
+        // new position so old maneuvers aren't spoken.
+        announcer.rearmAfterJump(result.alongMeters, prepared.instructions);
+        if (state.phase === "active") announcer.directionCorrected();
+        debugLog("location", "info", "track direction corrected (leg switch)", {
+          jumpMeters: Math.round(result.legSwitchMeters),
           alongMeters: Math.round(result.alongMeters),
         });
       } else if (wasOffTrack && state.phase === "active") {
@@ -247,6 +265,7 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
         lastFix: { lat: fix.lat, lng: fix.lng, at: fixAt },
         arrived,
         loopSkip: result.loopSkipMeters !== null ? { jumpMeters: result.loopSkipMeters, atMs: fixAt } : state.loopSkip,
+        legSwitch: result.legSwitchMeters !== null ? { atMs: fixAt } : state.legSwitch,
         progress: {
           alongMeters: result.alongMeters,
           totalMeters: prepared.totalMeters,
@@ -315,6 +334,8 @@ export const useTrackNavStore = create<TrackNavState>((set, get) => ({
   setZoomOverride: (zoomOverride) => set({ zoomOverride }),
 
   dismissLoopSkip: () => set({ loopSkip: null }),
+
+  dismissLegSwitch: () => set({ legSwitch: null }),
 }));
 
 // Reverse mutual exclusion: any regular navigation start (transport sheet,

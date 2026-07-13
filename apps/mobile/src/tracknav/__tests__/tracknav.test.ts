@@ -230,6 +230,77 @@ test("lollipop: actually walking the loop follows it continuously (no skip)", ()
   assert.ok(lastAlong > 1900, `final along ${lastAlong}`);
 });
 
+// ── Matcher: out-and-back wrong-leg correction ───────────────────────────────
+
+test("out-and-back same road: latched outbound while returning switches to the return leg", () => {
+  // Going and coming back share the exact same line, so perpendicular distance
+  // can never separate the legs — only heading can.
+  const track = prepareTrack(joinLegs(line([0, 0], [1000, 0]), line([1000, 0], [0, 0])));
+  // Matcher committed on the outbound leg at 600 m, but the user has already
+  // turned around and is heading WEST (the return leg).
+  let state = createMatcherState(600);
+  let switched: number | null = null;
+  let finalAlong = 0;
+
+  for (let i = 0, t = 0; i < 15; i += 1, t += 2000) {
+    const x = 600 - i * 20;
+    const { state: s, result } = matchFix(state, { ...fixAt(x, 2), headingDeg: 270, atMs: t }, track);
+    state = s;
+    assert.strictEqual(result.status, "on", `off-track at x=${x}`);
+    if (result.status === "on") {
+      if (result.legSwitchMeters !== null && switched === null) switched = result.legSwitchMeters;
+      finalAlong = result.alongMeters;
+      // After the switch the along must track the RETURN leg (≈ 2000 − x).
+      if (switched !== null) {
+        assert.ok(Math.abs(result.alongMeters - (2000 - x)) < 40, `x=${x} along=${result.alongMeters}`);
+      }
+    }
+  }
+
+  assert.ok(switched !== null, "wrong-leg switch never fired");
+  assert.ok(finalAlong > 1600, `final along ${finalAlong}`);
+});
+
+test("out-and-back offset legs: latched return leg while outbound recovers backward", () => {
+  // Legs 45 m apart (two sides of a wide road): outbound y=0, return y=45.
+  // 45 m is past the 35 m commit gate, so the wrong leg shows as "off-track"
+  // — previously unrecoverable because re-acquisition only looked FORWARD.
+  const track = prepareTrack(joinLegs(line([0, 0], [1000, 0]), line([1000, 45], [0, 45])));
+  // Wrongly committed far along the return leg; the user is actually outbound.
+  let state = createMatcherState(1500);
+  let corrected: number | null = null;
+  let lastResultAlong = 0;
+
+  for (let i = 0, t = 0; i < 14; i += 1, t += 5000) {
+    const x = 500 + i * 20;
+    const { state: s, result } = matchFix(state, { ...fixAt(x, 0), headingDeg: 90, atMs: t }, track);
+    state = s;
+    lastResultAlong = result.alongMeters;
+    if (result.status === "on" && result.legSwitchMeters !== null && corrected === null) {
+      corrected = result.legSwitchMeters;
+    }
+  }
+
+  assert.ok(corrected !== null, "backward re-acquisition never fired");
+  assert.ok(corrected! < -500, `jump ${corrected}`);
+  // Afterwards progress tracks the outbound leg (≈ current x).
+  assert.ok(Math.abs(lastResultAlong - (500 + 13 * 20)) < 40, `final along ${lastResultAlong}`);
+});
+
+test("out-and-back same road: correct outbound travel never triggers a leg switch", () => {
+  const track = prepareTrack(joinLegs(line([0, 0], [1000, 0]), line([1000, 0], [0, 0])));
+  let state = createMatcherState(0);
+  for (let x = 20, t = 0; x <= 960; x += 20, t += 2000) {
+    const { state: s, result } = matchFix(state, { ...fixAt(x, 2), headingDeg: 90, atMs: t }, track);
+    state = s;
+    assert.strictEqual(result.status, "on");
+    if (result.status === "on") {
+      assert.strictEqual(result.legSwitchMeters, null, `false leg switch at x=${x}`);
+      assert.ok(Math.abs(result.alongMeters - x) < 30, `x=${x} along=${result.alongMeters}`);
+    }
+  }
+});
+
 test("off-track reports the distance back to the line", () => {
   const track = prepareTrack(joinLegs(line([0, 0], [1000, 0])));
   let state = createMatcherState(300);

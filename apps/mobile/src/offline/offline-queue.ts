@@ -19,6 +19,23 @@ export class OfflineQueue<TPayload> {
     });
   }
 
+  /**
+   * Enqueue `payload`, dropping any older queued items of the same `type`.
+   * For last-write-wins data (location fixes) only the newest snapshot is
+   * worth sending — replaying a long offline backlog as a burst both hammers
+   * the radio when coverage returns and tells the server nothing new.
+   */
+  replaceLatest(type: string, payload: TPayload) {
+    for (let i = this.queue.length - 1; i >= 0; i -= 1) {
+      if (this.queue[i].type === type) this.queue.splice(i, 1);
+    }
+    this.enqueue(type, payload);
+  }
+
+  get size(): number {
+    return this.queue.length;
+  }
+
   listReady(now = Date.now()): QueueItem<TPayload>[] {
     return this.queue.filter((item) => item.nextRetryAt <= now);
   }

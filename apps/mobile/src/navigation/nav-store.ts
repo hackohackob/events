@@ -441,15 +441,32 @@ export function buildWaypoints(
   ];
 }
 
-/** Cumulative metres at each route vertex. */
+/** Cumulative metres at each route vertex — cached per geometry, recomputing
+ *  an O(n) array on every 1Hz GPS fix was wasted work. */
+const cumulativeCache = new WeakMap<LngLat[], number[]>();
 function cumulativeAlong(geometry: LngLat[]): number[] {
+  const cached = cumulativeCache.get(geometry);
+  if (cached) return cached;
   const out = [0];
   for (let i = 1; i < geometry.length; i += 1) {
     out.push(out[i - 1] + distanceMeters(toLatLng(geometry[i - 1]), toLatLng(geometry[i])));
   }
+  cumulativeCache.set(geometry, out);
   return out;
 }
 
+/**
+ * The UPCOMING maneuver for a position along the route.
+ *
+ * GraphHopper semantics: instruction `i`'s turn happens at the START of its
+ * interval (`interval[0]`, also exposed as `location`), and the interval spans
+ * the leg you drive AFTER making that turn. So while traversing instruction
+ * i's leg, the next turn to show/speak is instruction i+1, located at
+ * `interval[i+1][0]`. This used to match against `interval[1]` and return the
+ * CURRENT leg's instruction — the distance (and the map arrows, drawn at each
+ * instruction's location) pointed at the next turn while the banner text and
+ * the voice announced the turn already behind you.
+ */
 function nextInstruction(
   instructions: RouteInstruction[],
   geometry: LngLat[],
@@ -460,12 +477,13 @@ function nextInstruction(
   }
   const cum = cumulativeAlong(geometry);
   for (let i = 0; i < instructions.length; i += 1) {
-    const endIndex = Math.min(geometry.length - 1, instructions[i].interval[1]);
-    const maneuverAlong = cum[endIndex] ?? 0;
+    const startIndex = Math.min(geometry.length - 1, instructions[i].interval[0]);
+    const maneuverAlong = cum[startIndex] ?? 0;
     if (maneuverAlong > alongMeters + 1) {
       return { index: i, toManeuverMeters: maneuverAlong - alongMeters, instruction: instructions[i] };
     }
   }
+  // Past the last turn point — stick with the final (arrive) instruction.
   const last = instructions[instructions.length - 1];
   const lastAlong = cum[cum.length - 1] ?? 0;
   return { index: instructions.length - 1, toManeuverMeters: Math.max(0, lastAlong - alongMeters), instruction: last };

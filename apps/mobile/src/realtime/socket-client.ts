@@ -2,6 +2,7 @@ import { io, Socket } from "socket.io-client";
 import { useSessionStore } from "../security/session-store";
 import { resolveLocalhostUrl } from "../ui/runtime-host";
 import { debugLog } from "../debug/debug-log";
+import { noteEnergyEvent } from "../debug/battery-diagnostics";
 
 let socket: Socket | null = null;
 // The session token the live socket was authenticated with. If the user
@@ -33,12 +34,18 @@ export function getSocket(): Socket {
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 10000,
+    // With no coverage every attempt spins the radio up for nothing; back off
+    // to a slow trickle instead of retrying every ≤10s for hours.
+    reconnectionDelayMax: 60_000,
+    randomizationFactor: 0.5,
   });
 
   socket.on("connect", () => debugLog("socket", "info", "socket connected", { id: socket?.id }));
   socket.on("disconnect", (reason) => debugLog("socket", "warn", "socket disconnected", reason));
-  socket.on("connect_error", (err) => debugLog("socket", "error", "socket connect error", err.message));
+  socket.on("connect_error", (err) => {
+    noteEnergyEvent("socketConnectError");
+    debugLog("socket", "error", "socket connect error", err.message);
+  });
 
   return socket;
 }

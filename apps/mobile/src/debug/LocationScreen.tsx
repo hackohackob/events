@@ -14,8 +14,16 @@ import * as TaskManager from "expo-task-manager";
 import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization, openAppDetailsSettings } from "../location/battery-optimization";
 import { resolveLocalhostUrl } from "../ui/runtime-host";
 import { useLocationStatus } from "./location-status";
+import {
+  countsInWindow,
+  drainPercentPerHour,
+  ENERGY_EVENT_LABELS,
+  useBatteryDiagnostics,
+  type EnergyEventKind,
+} from "./battery-diagnostics";
 import { freshnessLabel } from "../map/freshness";
 import { useSessionStore } from "../security/session-store";
+import { isOnline } from "../offline/connectivity";
 
 const API_BASE_URL = resolveLocalhostUrl(
   process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
@@ -41,11 +49,31 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** "12 / 340" — window rate + lifetime total for one energy event kind. */
+function EnergyRow({ kind, windowCounts, totals }: {
+  kind: EnergyEventKind;
+  windowCounts: Record<EnergyEventKind, number>;
+  totals: Record<EnergyEventKind, number>;
+}) {
+  const warn = (kind === "sendHttpFail" || kind === "socketConnectError" || kind === "apiNetworkError") && windowCounts[kind] > 0;
+  return (
+    <Row
+      label={ENERGY_EVENT_LABELS[kind]}
+      value={`${windowCounts[kind]} / ${totals[kind]}`}
+      tone={warn ? "warn" : undefined}
+    />
+  );
+}
+
 export function LocationScreen({ onClose }: { onClose?: () => void }) {
   const lastFix = useLocationStatus((s) => s.lastFix);
   const lastReport = useLocationStatus((s) => s.lastReport);
   const role = useSessionStore((s) => s.role);
   const eventId = useSessionStore((s) => s.eventId);
+  const energyTotals = useBatteryDiagnostics((s) => s.totals);
+  const energyEvents = useBatteryDiagnostics((s) => s.events);
+  const batterySamples = useBatteryDiagnostics((s) => s.batterySamples);
+  const locationQueueSize = useBatteryDiagnostics((s) => s.locationQueueSize);
 
   const [fgPerm, setFgPerm] = useState<string>("?");
   const [bgPerm, setBgPerm] = useState<string>("?");
@@ -100,6 +128,9 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
 
   const fixAge = lastFix ? Date.now() - lastFix.at : undefined;
   const reportAge = lastReport ? Date.now() - lastReport.at : undefined;
+
+  const windowCounts = countsInWindow(energyEvents);
+  const drain = drainPercentPerHour(batterySamples);
 
   return (
     <View style={styles.container}>
@@ -201,6 +232,27 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
         <Row label="Latency" value={serverMs != null ? `${serverMs} ms` : "—"} />
         <Row label="API base" value={API_BASE_URL} />
         <Row label="Role / event" value={`${role} / ${eventId ?? "—"}`} />
+      </Section>
+
+      {/* Per-feature energy accounting: which feature touches the radio/GPS
+          and how often, plus the measured battery drop rate. Counts read
+          "last 10 min / since app start". */}
+      <Section title="BATTERY & ENERGY (10 MIN / TOTAL)">
+        <Row
+          label="Drain rate"
+          value={drain == null ? "measuring…" : `${drain.toFixed(1)} %/h`}
+          tone={drain == null ? undefined : drain > 15 ? "bad" : drain > 8 ? "warn" : "ok"}
+        />
+        <Row label="Connectivity gate" value={isOnline() ? "online — sends allowed" : "offline — sends parked"} tone={isOnline() ? "ok" : "warn"} />
+        <Row label="Queued location fixes" value={String(locationQueueSize)} tone={locationQueueSize > 0 ? "warn" : "ok"} />
+        <EnergyRow kind="gpsFix" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="sendWs" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="sendHttpOk" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="sendHttpFail" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="sendSkippedOffline" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="queueFlush" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="socketConnectError" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="apiNetworkError" windowCounts={windowCounts} totals={energyTotals} />
       </Section>
       </ScrollView>
     </View>
