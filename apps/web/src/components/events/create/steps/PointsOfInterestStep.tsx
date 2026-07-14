@@ -4,7 +4,8 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, Info, Trash2, Eye, EyeOff, Check, X, Copy, Mountain, TrendingUp } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceDot } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
-import Map3dToggle from '@/components/map/Map3dToggle'
+import MapLayersControl from '@/components/map/MapLayersControl'
+import type { BaseLayer } from '@/components/map/MapClient'
 import type { EventFormData, PointOfInterest, POIType } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
 import { PoiIcon, CUSTOM_POI_ICON_OPTIONS } from '@/lib/poi-icons'
@@ -119,6 +120,7 @@ function IconPicker({ value, onChange }: { value: string; onChange: (icon: strin
 export default function PointsOfInterestStep({ data, update, onNext, onBack }: Props) {
   const [selectedDayId, setSelectedDayId] = useState(data.days[0]?.id || '')
   const [map3d, setMap3d] = useState(false)
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>('streets')
   const [selectedType, setSelectedType] = useState<POIType | null>(null)
   const [customPoiName, setCustomPoiName] = useState('')
   const [customPoiIcon, setCustomPoiIcon] = useState(CUSTOM_POI_ICON_OPTIONS[0].key)
@@ -641,6 +643,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
           <MapWrapper
             center={trackBounds?.center || MAP_CENTER}
             zoom={12}
+            baseLayer={baseLayer}
             enable3d={map3d}
             pois={displayedPois}
             tracks={visibleTracks}
@@ -653,7 +656,7 @@ export default function PointsOfInterestStep({ data, update, onNext, onBack }: P
             hoverCoord={hoverCoord}
             hoverCoordColor={profileTrack?.color || '#f97316'}
           />
-          <Map3dToggle on={map3d} onToggle={() => setMap3d(v => !v)} />
+          <MapLayersControl baseLayer={baseLayer} onBaseLayer={setBaseLayer} map3d={map3d} onToggle3d={() => setMap3d(v => !v)} />
         </div>
 
         {/* Elevation profile panel (toggled from the TRACKS list) */}

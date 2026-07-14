@@ -3,7 +3,8 @@
 import { useState, useMemo } from 'react'
 import { MapPin, X, Upload, ChevronRight } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
-import Map3dToggle from '@/components/map/Map3dToggle'
+import MapLayersControl from '@/components/map/MapLayersControl'
+import type { BaseLayer } from '@/components/map/MapClient'
 import type { EventFormData, PointOfInterest, EventDay } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER, MAP_ZOOM } from '@/lib/constants'
 import { getDayOfWeek, computeTrackBounds } from '@/lib/utils'
@@ -16,9 +17,9 @@ const FALLBACK_TRACK: [number, number][] = [
 interface Props { data: EventFormData; update: (p: Partial<EventFormData>) => void; onNext: () => void }
 
 export default function EventInfoStep({ data, update, onNext }: Props) {
-  const [mapLayer, setMapLayer] = useState<'outdoor' | 'satellite' | 'terrain'>('outdoor')
   const [showAllPoints, setShowAllPoints] = useState(true)
   const [map3d, setMap3d] = useState(false)
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>('streets')
 
   const allPois = data.days.flatMap(d => d.pois)
   const allAssignments = data.days.flatMap(d => d.assignments)
@@ -332,12 +333,13 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
           <MapWrapper
             center={data.location?.coordinates || trackBounds?.center || MAP_CENTER}
             zoom={MAP_ZOOM}
+            baseLayer={baseLayer}
             enable3d={map3d}
             pois={showAllPoints ? allPois : []}
             tracks={realTracks}
             fitBounds={trackBounds?.bounds}
           />
-          <Map3dToggle on={map3d} onToggle={() => setMap3d(v => !v)} />
+          <MapLayersControl baseLayer={baseLayer} onBaseLayer={setBaseLayer} map3d={map3d} onToggle3d={() => setMap3d(v => !v)} />
         </div>
 
         {/* Stats bar */}
@@ -390,29 +392,6 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
             </>
           )}
 
-          {/* Map layers */}
-          <div className="mt-5 pt-5" style={{ borderTop: '1px solid rgba(148,163,184,0.08)' }}>
-            <div className="text-xs font-semibold mb-3" style={{ color: '#64748b' }}>MAP LAYERS</div>
-            <div className="space-y-2">
-              {(['outdoor', 'satellite', 'terrain'] as const).map(layer => (
-                <label key={layer} className="flex items-center gap-2 cursor-pointer group">
-                  <div
-                    className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
-                    style={{
-                      borderColor: mapLayer === layer ? '#22c55e' : 'rgba(148,163,184,0.3)',
-                      background: mapLayer === layer ? '#22c55e' : 'transparent',
-                    }}
-                    onClick={() => setMapLayer(layer)}
-                  >
-                    {mapLayer === layer && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                  </div>
-                  <span className="text-sm capitalize" style={{ color: '#94a3b8' }}>
-                    {layer}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
