@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { debugLog } from "../debug/debug-log";
-import { createAnnouncer } from "../tracknav/announcer";
+import { createAnnouncer, type SpokenInstruction } from "../tracknav/announcer";
+import { maneuverLabel } from "./surface";
 import { requestRoute } from "./routing-api";
 import {
   bearingDegrees,
@@ -121,6 +122,22 @@ const KEEP_AWAKE_TAG = "point-navigation";
 // track-following (tracknav starts cancel this store and vice versa, so the
 // two announcers can never talk over each other).
 const announcer = createAnnouncer();
+
+// Spoken guidance deliberately drops GraphHopper's street names ("Turn left
+// onto бул. Витоша" reads terribly in the en-US voice) — the voice sticks to
+// the maneuver itself; the banner still shows the street. Cached per
+// instruction array so the mapping doesn't re-allocate on every 1Hz GPS fix.
+const spokenCache = new WeakMap<RouteInstruction[], SpokenInstruction[]>();
+function spokenInstructions(instructions: RouteInstruction[]): SpokenInstruction[] {
+  const cached = spokenCache.get(instructions);
+  if (cached) return cached;
+  const out = instructions.map((inst): SpokenInstruction => ({
+    maneuver: inst.maneuver,
+    text: inst.maneuver === "arrive" ? "You have arrived at your destination" : maneuverLabel(inst.maneuver),
+  }));
+  spokenCache.set(instructions, out);
+  return out;
+}
 
 export const useNavStore = create<NavState>((set, get) => ({
   phase: "idle",
@@ -374,7 +391,7 @@ export const useNavStore = create<NavState>((set, get) => ({
         announcer.onProgress({
           toManeuverMeters,
           instructionIndex: index,
-          instructions: route.instructions,
+          instructions: spokenInstructions(route.instructions),
           remainingMeters,
           speedMps,
           atMs: now,

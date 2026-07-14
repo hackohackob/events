@@ -4,7 +4,7 @@ import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
 import { useNavStore } from "./nav-store";
 import { useMapStore } from "../map/map-store";
 import { NavPuck } from "./NavPuck";
-import { SURFACE_COLORS } from "./surface";
+import { maneuverGlyph, SURFACE_COLORS } from "./surface";
 import { clipRouteAhead } from "./geo";
 import { useSmoothedPosition } from "./useSmoothedPosition";
 import type { LngLat } from "./types";
@@ -68,6 +68,19 @@ export function NavigationMapLayers() {
     if (!isActive || !progress) return { geometry: selected.geometry, segments: selected.segments };
     return clipRouteAhead(selected.geometry, selected.segments, progress.snapped);
   }, [selected, isActive, progress]);
+
+  // Where the upcoming maneuver happens, marked ON the route line so the banner
+  // distance has a visible anchor point on the map. Arrive/depart are skipped —
+  // the destination star / puck already mark those spots.
+  const upcomingTurn = useMemo(() => {
+    if (!isActive || !progress || !selected) return null;
+    const instruction = selected.instructions[progress.instructionIndex];
+    if (!instruction || instruction.maneuver === "arrive" || instruction.maneuver === "depart") return null;
+    const coord =
+      instruction.location ??
+      selected.geometry[Math.min(instruction.interval[0], selected.geometry.length - 1)];
+    return coord ? { coord, maneuver: instruction.maneuver } : null;
+  }, [isActive, progress, selected]);
 
   if (phase === "idle" || phase === "transport") return null;
 
@@ -161,6 +174,18 @@ export function NavigationMapLayers() {
           </Marker>
         ))}
 
+      {/* Upcoming turn point — the banner's arrow, pinned on the path where the
+          maneuver actually happens. */}
+      {upcomingTurn ? (
+        <Marker id="nav-turn-marker" lngLat={upcomingTurn.coord}>
+          <View style={styles.turnMarker}>
+            <Text style={styles.turnMarkerGlyph} allowFontScaling={false}>
+              {maneuverGlyph(upcomingTurn.maneuver)}
+            </Text>
+          </View>
+        </Marker>
+      ) : null}
+
       {/* Live snapped puck — a big arrow pointing in the travel direction. In
           follow mode the map is rotated to travel direction (arrow points up);
           in north-up mode the arrow itself rotates by the route bearing. */}
@@ -210,6 +235,23 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   viaText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900" },
+  // Matches the banner's yellow arrow badge so map point and banner read as one.
+  turnMarker: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#f5b301",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOpacity: 0.45,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 7,
+  },
+  turnMarkerGlyph: { color: "#1a1206", fontSize: 22, fontWeight: "900", lineHeight: 26 },
   puckArrowWrap: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   puckArrowHalo: {
     position: "absolute",

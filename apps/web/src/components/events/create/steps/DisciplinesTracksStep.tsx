@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { Plus, X, Upload, Edit2, Trash2, ChevronLeft, ChevronRight, Mountain, Check, FileText, AlertTriangle, Eye, EyeOff } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
 import MapWrapper from '@/components/map/MapWrapper'
+import Map3dToggle from '@/components/map/Map3dToggle'
 import type { EventFormData, EventDay, Discipline, DisciplineType } from '@/lib/types'
 import { DISCIPLINE_COLORS, MAP_CENTER } from '@/lib/constants'
 import { generateElevationProfile } from '@/lib/mock-data'
@@ -114,6 +115,7 @@ interface Props {
 
 export default function DisciplinesTracksStep({ data, update, onNext, onBack }: Props) {
   const [selectedDayId, setSelectedDayId] = useState(data.days[0]?.id || '')
+  const [map3d, setMap3d] = useState(false)
   const [selectedDiscId, setSelectedDiscId] = useState<string>('')
   const [editingDiscId, setEditingDiscId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
@@ -618,6 +620,7 @@ export default function DisciplinesTracksStep({ data, update, onNext, onBack }: 
             <MapWrapper
               center={trackBounds?.center || MAP_CENTER}
               zoom={12}
+              enable3d={map3d}
               tracks={dayTracks}
               visibleTrackIds={visibleTrackIds}
               pois={selectedDay?.pois || []}
@@ -626,6 +629,7 @@ export default function DisciplinesTracksStep({ data, update, onNext, onBack }: 
               fitBounds={trackBounds?.bounds}
             />
           </div>
+          <Map3dToggle on={map3d} onToggle={() => setMap3d(v => !v)} />
 
           {/* Track legend overlay — grouped by day, clickable */}
           <div className="absolute top-4 right-4 flex flex-col gap-1 max-h-[calc(100%-2rem)] overflow-y-auto">

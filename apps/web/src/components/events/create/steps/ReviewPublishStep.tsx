@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { ChevronLeft, ChevronDown, ChevronRight, Calendar, MapPin, Activity, Users, Eye, EyeOff } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
+import Map3dToggle from '@/components/map/Map3dToggle'
 import type { EventFormData } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER, VEHICLE_CONFIGS } from '@/lib/constants'
 import { MOCK_USERS } from '@/lib/mock-data'
@@ -79,6 +80,7 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing,
   const allTracks = useMemo(() => dayGroups.flatMap(g => g.tracks), [dayGroups])
 
   const [hiddenTrackIds, setHiddenTrackIds] = useState<Set<string>>(new Set())
+  const [map3d, setMap3d] = useState(false)
 
   const visibleTrackIds = useMemo(() => {
     if (allTracks.length === 0) return undefined
@@ -296,11 +298,13 @@ export default function ReviewPublishStep({ data, onPublish, onBack, publishing,
         <MapWrapper
           center={trackBounds?.center || MAP_CENTER}
           zoom={11}
+          enable3d={map3d}
           pois={allPois}
           tracks={allTracks}
           visibleTrackIds={visibleTrackIds}
           fitBounds={trackBounds?.bounds}
         />
+        <Map3dToggle on={map3d} onToggle={() => setMap3d(v => !v)} />
 
         {/* Track visibility overlay — grouped by day */}
         {allTracks.length > 0 && (

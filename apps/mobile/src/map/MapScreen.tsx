@@ -75,7 +75,7 @@ import { ZoneSketchLayer } from "./zones/ZoneSketchLayer";
 import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
 import { useZoneEntryAlarm } from "./zones/zone-alarm";
 import { deleteZone, updateZone } from "./zones/zone-api";
-import { noteMapGesture } from "./map-gesture";
+import { isMapGestureActive, noteMapGesture } from "./map-gesture";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { showChatNotification } from "../notifications/chat-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
@@ -3040,6 +3040,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           if (Array.isArray(center) && Number.isFinite(center[1])) setMapCenterLat(center[1]);
           if (typeof z === "number" && Number.isFinite(z)) {
             setMapZoom(z);
+            // A pinch just settled during navigation: this event carries the
+            // gesture's FINAL zoom, which the throttled IsChanging capture below
+            // can miss — without this the camera re-centers slightly zoomed in
+            // from where the user actually let go.
+            if (isMapGestureActive()) {
+              if (useNavStore.getState().phase === "active") {
+                useNavStore.getState().setNavZoomOverride(z);
+              } else if (useTrackNavStore.getState().phase !== "idle") {
+                useTrackNavStore.getState().setZoomOverride(z);
+              }
+            }
           }
         }}
         // A pinch during active navigation becomes the standing nav zoom, so the
@@ -3054,7 +3065,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           if (!byUser) return;
           noteMapGesture();
           const now = Date.now();
-          if (now - lastGestureZoomNoteRef.current < 200) return;
+          // Light throttle only — nothing subscribes to the zoom overrides (the
+          // nav cameras read them imperatively), so writes are cheap, and a
+          // coarser throttle loses the tail of the pinch (camera then re-centers
+          // a bit zoomed in from where the user released).
+          if (now - lastGestureZoomNoteRef.current < 80) return;
           const z = props.zoom ?? props.zoomLevel;
           if (typeof z !== "number" || !Number.isFinite(z)) return;
           lastGestureZoomNoteRef.current = now;
@@ -3144,29 +3159,34 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           />
         </RasterSource>
 
-        {relief3d ? (
-          <RasterDEMSource
-            id="relief-dem-source"
-            tiles={[RELIEF_DEM_TILES]}
-            encoding="terrarium"
-            tileSize={256}
-            maxzoom={15}
-          >
-            <Layer
-              id="relief-hillshade-layer"
-              type="hillshade"
-              // Pinned right above the base raster (index 1) so a toggle
-              // remount never lands on top of tracks/zones/markers — same
-              // constraint as base-raster-layer above.
-              layerIndex={2}
-              paint={{
-                "hillshade-exaggeration": 0.6,
-                "hillshade-shadow-color": "#2f3f2f",
-                "hillshade-highlight-color": "#ffffff",
-              }}
-            />
-          </RasterDEMSource>
-        ) : null}
+        {/* 3D relief hillshade. Mounted PERMANENTLY and toggled via layout
+            visibility: adding/removing the DEM source + hillshade layer at
+            runtime killed the map's render surface (gray screen until app
+            restart), while a visibility flip never touches the style's
+            source/layer set. Hidden layers fetch no DEM tiles, so the off
+            state costs nothing. */}
+        <RasterDEMSource
+          id="relief-dem-source"
+          tiles={[RELIEF_DEM_TILES]}
+          encoding="terrarium"
+          tileSize={256}
+          maxzoom={15}
+        >
+          <Layer
+            id="relief-hillshade-layer"
+            type="hillshade"
+            // Pinned right above the base raster (index 1) so it never lands
+            // on top of tracks/zones/markers — same constraint as
+            // base-raster-layer above.
+            layerIndex={2}
+            layout={{ visibility: relief3d ? "visible" : "none" }}
+            paint={{
+              "hillshade-exaggeration": 0.6,
+              "hillshade-shadow-color": "#2f3f2f",
+              "hillshade-highlight-color": "#ffffff",
+            }}
+          />
+        </RasterDEMSource>
 
         {renderedTrackVisuals.map((track) => (
           <React.Fragment key={`track-${track.id}`}>

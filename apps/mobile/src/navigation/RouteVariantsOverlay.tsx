@@ -9,6 +9,11 @@ import { SURFACE_COLORS, SURFACE_LABELS, SURFACE_LEGEND } from "./surface";
 
 const BOTTOM_BAR_HEIGHT = 60;
 
+// Temporarily hidden (2026-07): the corridor-avoid routing needs more tuning
+// before it's exposed again. All the store/backend plumbing stays live —
+// flip this back to true to restore the checkbox.
+const SHOW_AVOID_INCOMING_TRAFFIC = false;
+
 /** Floating route chips (A/B/C), surface legend, and the start/edit action bar. */
 export function RouteVariantsOverlay() {
   const phase = useNavStore((s) => s.phase);
@@ -69,22 +74,24 @@ export function RouteVariantsOverlay() {
         <CompactTransportRow style={styles.transportRow} />
 
         {/* Avoid the live race course (off the runners' oncoming flow). */}
-        <Pressable
-          style={styles.avoidRow}
-          onPress={() => {
-            void Haptics.selectionAsync();
-            setAvoidIncomingTraffic(!avoidIncomingTraffic);
-          }}
-        >
-          <View style={[styles.avoidCheck, avoidIncomingTraffic && styles.avoidCheckOn]}>
-            {avoidIncomingTraffic ? <Feather name="check" size={13} color="#04121f" /> : null}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.avoidLabel}>Avoid incoming race traffic</Text>
-            <Text style={styles.avoidHint}>Route off the live course where roads allow</Text>
-          </View>
-          {loading && avoidIncomingTraffic ? <ActivityIndicator size="small" color="#34d399" /> : null}
-        </Pressable>
+        {SHOW_AVOID_INCOMING_TRAFFIC ? (
+          <Pressable
+            style={styles.avoidRow}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setAvoidIncomingTraffic(!avoidIncomingTraffic);
+            }}
+          >
+            <View style={[styles.avoidCheck, avoidIncomingTraffic && styles.avoidCheckOn]}>
+              {avoidIncomingTraffic ? <Feather name="check" size={13} color="#04121f" /> : null}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.avoidLabel}>Avoid incoming race traffic</Text>
+              <Text style={styles.avoidHint}>Route off the live course where roads allow</Text>
+            </View>
+            {loading && avoidIncomingTraffic ? <ActivityIndicator size="small" color="#34d399" /> : null}
+          </Pressable>
+        ) : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <View style={styles.actionRow}>

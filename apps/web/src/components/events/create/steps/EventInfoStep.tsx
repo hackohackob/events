@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { MapPin, X, Upload, ChevronRight } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
+import Map3dToggle from '@/components/map/Map3dToggle'
 import type { EventFormData, PointOfInterest, EventDay } from '@/lib/types'
 import { POI_CONFIGS, MAP_CENTER, MAP_ZOOM } from '@/lib/constants'
 import { getDayOfWeek, computeTrackBounds } from '@/lib/utils'
@@ -17,6 +18,7 @@ interface Props { data: EventFormData; update: (p: Partial<EventFormData>) => vo
 export default function EventInfoStep({ data, update, onNext }: Props) {
   const [mapLayer, setMapLayer] = useState<'outdoor' | 'satellite' | 'terrain'>('outdoor')
   const [showAllPoints, setShowAllPoints] = useState(true)
+  const [map3d, setMap3d] = useState(false)
 
   const allPois = data.days.flatMap(d => d.pois)
   const allAssignments = data.days.flatMap(d => d.assignments)
@@ -330,10 +332,12 @@ export default function EventInfoStep({ data, update, onNext }: Props) {
           <MapWrapper
             center={data.location?.coordinates || trackBounds?.center || MAP_CENTER}
             zoom={MAP_ZOOM}
+            enable3d={map3d}
             pois={showAllPoints ? allPois : []}
             tracks={realTracks}
             fitBounds={trackBounds?.bounds}
           />
+          <Map3dToggle on={map3d} onToggle={() => setMap3d(v => !v)} />
         </div>
 
         {/* Stats bar */}

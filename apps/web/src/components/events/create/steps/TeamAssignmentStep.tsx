@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { Search, ChevronLeft, ChevronRight, Trash2, Users, Copy } from 'lucide-react'
 import MapWrapper from '@/components/map/MapWrapper'
+import Map3dToggle from '@/components/map/Map3dToggle'
 import type { EventFormData, MedicAssignment, VehicleType } from '@/lib/types'
 import type { MedicMarker } from '@/components/map/MapWrapper'
 import { useQuery } from '@tanstack/react-query'
@@ -38,6 +39,7 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
   const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
 
   const [selectedDayId, setSelectedDayId] = useState(data.days[0]?.id || '')
+  const [map3d, setMap3d] = useState(false)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
   const [medicPositions, setMedicPositions] = useState<Record<string, [number, number]>>({})
@@ -485,12 +487,14 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
         <MapWrapper
           center={mapCenter}
           zoom={12}
+          enable3d={map3d}
           pois={currentPois}
           tracks={dayTracks}
           medicMarkers={medicMapMarkers}
           onMedicMove={handleMedicMove}
           fitBounds={trackBounds?.bounds}
         />
+        <Map3dToggle on={map3d} onToggle={() => setMap3d(v => !v)} />
 
         {/* Day summary chip */}
         {multiDay && (
