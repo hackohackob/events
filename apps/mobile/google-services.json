@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "944489924393",
-    "project_id": "paramedic-events-app",
-    "storage_bucket": "paramedic-events-app.firebasestorage.app"
+    "project_number": "703187920734",
+    "project_id": "racesafe-4f68f",
+    "storage_bucket": "racesafe-4f68f.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:944489924393:android:4029ba9405b9201bad5938",
+        "mobilesdk_app_id": "1:703187920734:android:5756d36012d83bca49d1cf",
         "android_client_info": {
-          "package_name": "com.a.atanasov.paramediceventapp"
+          "package_name": "com.academyfirstaid.racesafe"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDhriOpOBgq8euNMXBfp0CXFXJNxNr3-zg"
+          "current_key": "AIzaSyBMDkYdcmBCx1lDhpYNpN7E9gaY7aHjo7s"
         }
       ],
       "services": {
