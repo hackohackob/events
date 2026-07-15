@@ -25,36 +25,78 @@ let openedBackgroundLocationSettings = false;
 let promptedBatteryExemption = false;
 
 // ─── Background-task failure backoff ─────────────────────────────────────────
-// On some Android builds expo-task-manager's TaskService loses its Context
-// (it's held in a WeakReference that can be GC'd), after which every
-// start/stopLocationUpdatesAsync rejects with a SharedPreferences.getAll() NPE
-// — persistently, for the life of the process. Without a backoff the watchdog
-// re-runs the full start every couple of minutes, and each run logs two more
-// native NPEs (stop + start). We latch the failure and exponentially back off
-// re-attempts so the log stays readable and we stop hammering a call that can't
-// succeed, while still retrying occasionally in case a fresh Context recovers.
+// Failures starting the background updates task fall in two classes and get
+// very different treatment:
+//
+// PERMANENT — on some Android builds expo-task-manager's TaskService loses its
+// Context (WeakReference GC'd), after which every start/stopLocationUpdatesAsync
+// rejects with a SharedPreferences.getAll() NPE for the life of the process.
+// Retrying only spams native crashes, so this class gets a long exponential
+// backoff (1 min doubling to 15 min).
+//
+// TRANSIENT — everything else, most commonly Android 12+ refusing to start a
+// location foreground service while the app isn't foregrounded (the join flow
+// bounces through system settings for "Allow all the time", and the start often
+// fires exactly in that window). These recover on a quick retry, so they get a
+// short backoff plus a scheduled re-attempt — previously they were latched into
+// the 15-minute backoff and the app looked like it "never registers tracking"
+// until a full restart.
 let bgTaskFailures = 0;
 let bgTaskRetryAfter = 0; // epoch ms; don't re-attempt the background task before this
+let bgTaskFailurePermanent = false; // true = known native NPE class
+let bgTaskRetryTimer: ReturnType<typeof setTimeout> | null = null;
 const BG_TASK_BACKOFF_BASE_MS = 60_000;
 const BG_TASK_BACKOFF_MAX_MS = 15 * 60_000;
+const BG_TASK_TRANSIENT_BASE_MS = 5_000;
+const BG_TASK_TRANSIENT_MAX_MS = 60_000;
 
 function noteBgTaskFailure(err: unknown): void {
   bgTaskFailures += 1;
-  const backoff = Math.min(BG_TASK_BACKOFF_BASE_MS * 2 ** (bgTaskFailures - 1), BG_TASK_BACKOFF_MAX_MS);
+  const error = describeError(err);
+  bgTaskFailurePermanent = /NullPointerException|SharedPreferences/i.test(JSON.stringify(error) ?? String(err));
+  const backoff = bgTaskFailurePermanent
+    ? Math.min(BG_TASK_BACKOFF_BASE_MS * 2 ** (bgTaskFailures - 1), BG_TASK_BACKOFF_MAX_MS)
+    : Math.min(BG_TASK_TRANSIENT_BASE_MS * 2 ** (bgTaskFailures - 1), BG_TASK_TRANSIENT_MAX_MS);
   bgTaskRetryAfter = Date.now() + backoff;
   debugLog("location", "warn", "background location task failed to start (direct watch still active)", {
-    error: describeError(err),
+    error,
+    class: bgTaskFailurePermanent ? "permanent (native NPE)" : "transient",
     consecutiveFailures: bgTaskFailures,
     nextRetryInSec: Math.round(backoff / 1000),
-    impact:
-      "JobScheduler/locked-screen delivery is degraded on this device — foreground tracking via the direct watch keeps working, but background fixes need the native TaskService fix (see patches/expo-task-manager).",
   });
+  // Transient failures self-heal: re-attempt shortly after the backoff expires
+  // while the app is foregrounded, instead of waiting for the next watchdog
+  // tick or app restart. One pending timer at a time.
+  if (!bgTaskFailurePermanent && !bgTaskRetryTimer) {
+    bgTaskRetryTimer = setTimeout(() => {
+      bgTaskRetryTimer = null;
+      if (AppState.currentState !== "active") return; // next foreground retries instead
+      if (!useSessionStore.getState().token) return;
+      debugLog("location", "info", "retrying background task start after transient failure");
+      void startLocationLoop();
+    }, backoff + 2_000);
+  }
 }
 
 function noteBgTaskSuccess(): void {
   if (bgTaskFailures > 0) debugLog("location", "info", "background location task recovered", { afterFailures: bgTaskFailures });
   bgTaskFailures = 0;
   bgTaskRetryAfter = 0;
+  bgTaskFailurePermanent = false;
+}
+
+/**
+ * The app just returned to the foreground: any TRANSIENT start failure was
+ * caused by conditions that no longer hold (foreground-service start is allowed
+ * again), so drop the backoff — the caller's ensureTrackingAlive() can retry
+ * immediately. The permanent NPE class keeps its long backoff; retrying it on
+ * every foreground would just relog native crashes.
+ */
+export function resetTransientTrackingBackoff(): void {
+  if (bgTaskFailurePermanent || bgTaskRetryAfter === 0) return;
+  bgTaskFailures = 0;
+  bgTaskRetryAfter = 0;
+  lastWatchdogRestartAt = 0; // let the foreground watchdog pass restart immediately
 }
 /** True while turn-by-turn navigation is active — shortens the update interval. */
 let navModeActive = false;
@@ -395,7 +437,7 @@ export async function startLocationLoop(): Promise<boolean> {
     promptedBatteryExemption = true;
     try {
       if (!(await isBatteryOptimizationIgnored())) {
-        const packageName = Constants.expoConfig?.android?.package ?? "com.a.atanasov.paramediceventapp";
+        const packageName = Constants.expoConfig?.android?.package ?? "com.academyfirstaid.racesafe";
         debugLog("location", "info", "requesting battery optimization exemption");
         await requestDisableBatteryOptimization(packageName);
       }
@@ -467,7 +509,7 @@ export async function startLocationLoop(): Promise<boolean> {
           deferredUpdatesDistance: 0,
           mayShowUserSettingsDialog: true,
           foregroundService: {
-            notificationTitle: "Medic Event App — live tracking",
+            notificationTitle: "RaceSafe — live tracking",
             notificationBody: isMedic
               ? "Sharing your location with the event command centre"
               : "Sharing location with event coordinators",

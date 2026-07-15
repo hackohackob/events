@@ -9,7 +9,7 @@ import { incidentQueue } from "./incidents/persistent-incident-queue";
 import { flushIncidentQueue } from "./incidents/flush-incidents";
 import { startIncidentReport } from "./incidents/start-report";
 import { useIncidentStore } from "./incidents/incident-store";
-import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive, flushLocationQueue } from "./location/location-tracker";
+import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive, flushLocationQueue, resetTransientTrackingBackoff } from "./location/location-tracker";
 import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
 import { MapScreen } from "./map/MapScreen";
@@ -125,6 +125,10 @@ export default function App() {
       if (next === "active") {
         void flushLocationQueue();
         void sendCurrentLocationNow();
+        // Foregrounding clears transient start failures (e.g. the Android 12+
+        // "foreground service start not allowed" hit while bounced to system
+        // settings), so the watchdog below can re-register tracking right away.
+        resetTransientTrackingBackoff();
         void ensureTrackingAlive();
       }
     });
