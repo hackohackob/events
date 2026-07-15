@@ -60,6 +60,16 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: false,
     icon: "./assets/icon.png",
+    bundleIdentifier: "com.a.atanasov.paramediceventapp",
+    infoPlist: {
+      // "location" comes from the expo-location plugin; "remote-notification"
+      // lets the data-only incident pushes wake the background-push task
+      // (backend must send them with content-available for iOS).
+      UIBackgroundModes: ["location", "remote-notification"],
+      // Standard HTTPS-only exemption — skips the export-compliance
+      // questionnaire on every App Store Connect upload.
+      ITSAppUsesNonExemptEncryption: false,
+    },
   },
   android: {
     package: "com.a.atanasov.paramediceventapp",
