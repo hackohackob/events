@@ -1,4 +1,4 @@
-package com.a.atanasov.paramediceventapp
+package com.academyfirstaid.racesafe
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

@@ -1,4 +1,4 @@
-package com.a.atanasov.paramediceventapp
+package com.academyfirstaid.racesafe
 
 import android.os.Build
 import android.os.Bundle

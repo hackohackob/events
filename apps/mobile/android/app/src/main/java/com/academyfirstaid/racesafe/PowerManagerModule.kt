@@ -1,4 +1,4 @@
-package com.a.atanasov.paramediceventapp
+package com.academyfirstaid.racesafe
 
 import android.content.Context
 import android.os.PowerManager

@@ -46,7 +46,9 @@ const appVersion = (
 ).version;
 
 const config: ExpoConfig = {
-  name: "Paramedic Event App",
+  // Display name is RaceSafe; the slug stays untouched because it pins the
+  // existing EAS project (updates URL + projectId above/below).
+  name: "RaceSafe",
   slug: "paramedic-event-app",
   version: appVersion,
   updates: {
@@ -60,7 +62,7 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: false,
     icon: "./assets/icon.png",
-    bundleIdentifier: "com.a.atanasov.paramediceventapp",
+    bundleIdentifier: "com.academyfirstaid.racesafe",
     infoPlist: {
       // "location" comes from the expo-location plugin; "remote-notification"
       // lets the data-only incident pushes wake the background-push task
@@ -72,7 +74,7 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    package: "com.a.atanasov.paramediceventapp",
+    package: "com.academyfirstaid.racesafe",
     ...(hasGoogleServices ? { googleServicesFile: "./google-services.json" } : {}),
     permissions: [
       "ACCESS_FINE_LOCATION",
@@ -109,11 +111,11 @@ const config: ExpoConfig = {
         isAndroidForegroundServiceEnabled: true,
         isIosBackgroundLocationEnabled: true,
         locationAlwaysAndWhenInUsePermission:
-          "Allow Paramedic Event App to share your location with event command while you are on duty.",
+          "Allow RaceSafe to share your location with event command while you are on duty.",
         locationAlwaysPermission:
-          "Allow Paramedic Event App to share your location with event command while you are on duty.",
+          "Allow RaceSafe to share your location with event command while you are on duty.",
         locationWhenInUsePermission:
-          "Allow Paramedic Event App to use your location while reporting incidents and viewing the event map.",
+          "Allow RaceSafe to use your location while reporting incidents and viewing the event map.",
       },
     ],
     "@maplibre/maplibre-react-native",
