@@ -120,6 +120,13 @@ input[type='date']::-webkit-calendar-picker-indicator {
   animation: shimmer 1.5s infinite;
 }
 
+/* Base maplibre popup: strip the default white card so popup content
+   can bring its own styling. */
+.maplibregl-popup-content {
+  background: transparent;
+  padding: 0;
+}
+
 /* POI map popup — dark, readable, themed to match the dashboard (the default
    maplibre popup is white, which made the light text unreadable). */
 .poi-popup .maplibregl-popup-content {
