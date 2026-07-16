@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "703187920734",
-    "project_id": "racesafe-4f68f",
-    "storage_bucket": "racesafe-4f68f.firebasestorage.app"
+    "project_number": "334444821774",
+    "project_id": "extreme-medics",
+    "storage_bucket": "extreme-medics.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:703187920734:android:5756d36012d83bca49d1cf",
+        "mobilesdk_app_id": "1:334444821774:android:7a3d62da10b31ef44c2b5f",
         "android_client_info": {
-          "package_name": "com.academyfirstaid.racesafe"
+          "package_name": "com.academyfirstaid.extrememedics"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBMDkYdcmBCx1lDhpYNpN7E9gaY7aHjo7s"
+          "current_key": "AIzaSyCOsxy5oQV0qHJf9q_XZzT28f7x0OtyWCQ"
         }
       ],
       "services": {
