@@ -121,8 +121,9 @@ input[type='date']::-webkit-calendar-picker-indicator {
 }
 
 /* Base maplibre popup: strip the default white card so popup content
-   can bring its own styling. */
-.maplibregl-popup-content {
+   can bring its own styling. Scoped under .maplibregl-popup to outrank
+   the library stylesheet, which can load after ours. */
+.maplibregl-popup .maplibregl-popup-content {
   background: transparent;
   padding: 0;
 }
