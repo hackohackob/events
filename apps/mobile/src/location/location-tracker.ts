@@ -437,7 +437,7 @@ export async function startLocationLoop(): Promise<boolean> {
     promptedBatteryExemption = true;
     try {
       if (!(await isBatteryOptimizationIgnored())) {
-        const packageName = Constants.expoConfig?.android?.package ?? "com.academyfirstaid.racesafe";
+        const packageName = Constants.expoConfig?.android?.package ?? "com.academyfirstaid.extrememedics";
         debugLog("location", "info", "requesting battery optimization exemption");
         await requestDisableBatteryOptimization(packageName);
       }
@@ -509,7 +509,7 @@ export async function startLocationLoop(): Promise<boolean> {
           deferredUpdatesDistance: 0,
           mayShowUserSettingsDialog: true,
           foregroundService: {
-            notificationTitle: "RaceSafe — live tracking",
+            notificationTitle: "Extreme Medics — live tracking",
             notificationBody: isMedic
               ? "Sharing your location with the event command centre"
               : "Sharing location with event coordinators",

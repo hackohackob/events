@@ -1,4 +1,4 @@
-package com.academyfirstaid.racesafe
+package com.academyfirstaid.extrememedics
 
 import android.app.Application
 import android.content.res.Configuration

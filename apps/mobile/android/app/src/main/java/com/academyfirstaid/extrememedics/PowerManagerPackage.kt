@@ -1,4 +1,4 @@
-package com.academyfirstaid.racesafe
+package com.academyfirstaid.extrememedics
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

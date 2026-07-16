@@ -95,13 +95,13 @@ android {
         abortOnError false
     }
 
-    namespace 'com.academyfirstaid.racesafe'
+    namespace 'com.academyfirstaid.extrememedics'
     defaultConfig {
-        applicationId 'com.academyfirstaid.racesafe'
+        applicationId 'com.academyfirstaid.extrememedics'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "2.2.0"
+        versionName "3.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

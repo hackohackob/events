@@ -46,9 +46,9 @@ const appVersion = (
 ).version;
 
 const config: ExpoConfig = {
-  // Display name is RaceSafe; the slug stays untouched because it pins the
+  // Display name is Extreme Medics; the slug stays untouched because it pins the
   // existing EAS project (updates URL + projectId above/below).
-  name: "RaceSafe",
+  name: "Extreme Medics",
   slug: "paramedic-event-app",
   version: appVersion,
   updates: {
@@ -62,7 +62,7 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: false,
     icon: "./assets/icon.png",
-    bundleIdentifier: "com.academyfirstaid.racesafe",
+    bundleIdentifier: "com.academyfirstaid.extrememedics",
     infoPlist: {
       // "location" comes from the expo-location plugin; "remote-notification"
       // lets the data-only incident pushes wake the background-push task
@@ -74,7 +74,7 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    package: "com.academyfirstaid.racesafe",
+    package: "com.academyfirstaid.extrememedics",
     ...(hasGoogleServices ? { googleServicesFile: "./google-services.json" } : {}),
     permissions: [
       "ACCESS_FINE_LOCATION",
@@ -111,11 +111,11 @@ const config: ExpoConfig = {
         isAndroidForegroundServiceEnabled: true,
         isIosBackgroundLocationEnabled: true,
         locationAlwaysAndWhenInUsePermission:
-          "Allow RaceSafe to share your location with event command while you are on duty.",
+          "Allow Extreme Medics to share your location with event command while you are on duty.",
         locationAlwaysPermission:
-          "Allow RaceSafe to share your location with event command while you are on duty.",
+          "Allow Extreme Medics to share your location with event command while you are on duty.",
         locationWhenInUsePermission:
-          "Allow RaceSafe to use your location while reporting incidents and viewing the event map.",
+          "Allow Extreme Medics to use your location while reporting incidents and viewing the event map.",
       },
     ],
     "@maplibre/maplibre-react-native",

@@ -1,4 +1,4 @@
-package com.academyfirstaid.racesafe
+package com.academyfirstaid.extrememedics
 
 import android.content.Context
 import android.os.PowerManager
