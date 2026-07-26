@@ -2,8 +2,10 @@ import { BadGatewayException, BadRequestException, Injectable, Logger } from "@n
 import { EventsService } from "../events/events.service";
 import { RESCUE_4X4_CUSTOM_MODEL } from "./rescue-custom-model";
 import { buildCorridorModel, mergeCustomModel, type CorridorModel } from "./race-corridor";
-import { buildSegments, classifyPoints, type PathDetails } from "./surface-classification";
+import { buildSegments, classifyPoints, firstPavedPointIndex, roadClassAtPoint, type PathDetails } from "./surface-classification";
 import type {
+  AsphaltAccessPoint,
+  ClosestAsphaltResponse,
   LngLat,
   ManeuverKind,
   RouteInstruction,
@@ -65,6 +67,35 @@ function maneuverFromSign(sign: number): ManeuverKind {
   }
 }
 
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Destination point `[lng, lat]` at `bearingDeg` / `distanceM` from origin. */
+function offsetPoint(origin: LngLat, bearingDeg: number, distanceM: number): LngLat {
+  const R = 6371000;
+  const bearing = (bearingDeg * Math.PI) / 180;
+  const lat1 = (origin[1] * Math.PI) / 180;
+  const lng1 = (origin[0] * Math.PI) / 180;
+  const angular = distanceM / R;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angular) + Math.cos(lat1) * Math.sin(angular) * Math.cos(bearing),
+  );
+  const lng2 =
+    lng1 +
+    Math.atan2(
+      Math.sin(bearing) * Math.sin(angular) * Math.cos(lat1),
+      Math.cos(angular) - Math.sin(lat1) * Math.sin(lat2),
+    );
+  return [(lng2 * 180) / Math.PI, (lat2 * 180) / Math.PI];
+}
+
 interface GraphHopperPath {
   distance: number;
   time: number;
@@ -124,6 +155,85 @@ export class RoutingService {
       waypoints: points,
       routes: variants.map((variant, index) => ({ ...variant, id: String.fromCharCode(65 + index) })),
     };
+  }
+
+  /**
+   * Find the nearest paved-road access points around an incident.
+   *
+   * Fully offline (self-hosted GraphHopper): probe car-profile routes from the
+   * incident towards 8 compass bearings, take the FIRST paved point along each
+   * probe path (surface details), dedupe nearby candidates, then foot-route to
+   * each survivor for a precise on-foot distance/time. Returns up to 5 points
+   * sorted by travel time.
+   */
+  async closestAsphalt(origin: LngLat): Promise<ClosestAsphaltResponse> {
+    const PROBE_RADIUS_M = 4000;
+    const BEARINGS = [0, 45, 90, 135, 180, 225, 270, 315];
+    const DEDUPE_M = 250;
+    const MAX_POINTS = 5;
+
+    // 1. Probe outward with the car profile — its snapping + routable ways are
+    //    exactly the roads a vehicle could stage on.
+    const candidates: Array<{ point: LngLat; roadHint?: string }> = [];
+    await Promise.allSettled(
+      BEARINGS.map(async (bearing) => {
+        const target = offsetPoint(origin, bearing, PROBE_RADIUS_M);
+        const body = this.baseRequest("car", [origin, target]);
+        body["instructions"] = false;
+        body["elevation"] = false;
+        const paths = await this.callGraphHopper(body);
+        const path = paths[0];
+        if (!path) return;
+        const geometry: LngLat[] = (path.points?.coordinates ?? []).map((c) => [c[0], c[1]]);
+        const index = firstPavedPointIndex(geometry.length, path.details);
+        if (index === null || !geometry[index]) return;
+        candidates.push({
+          point: geometry[index],
+          roadHint: roadClassAtPoint(index, geometry.length, path.details),
+        });
+      }),
+    );
+    if (candidates.length === 0) {
+      throw new BadGatewayException("No paved road reachable around this point.");
+    }
+
+    // 2. Dedupe candidates that landed on (nearly) the same spot.
+    const unique: Array<{ point: LngLat; roadHint?: string }> = [];
+    for (const candidate of candidates) {
+      const dupe = unique.some(
+        (u) => haversineMeters(u.point[1], u.point[0], candidate.point[1], candidate.point[0]) < DEDUPE_M,
+      );
+      if (!dupe) unique.push(candidate);
+    }
+
+    // 3. Precise on-foot leg to each survivor (best-effort per candidate).
+    const measured = await Promise.allSettled(
+      unique.map(async (candidate): Promise<AsphaltAccessPoint> => {
+        const body = this.baseRequest("foot", [origin, candidate.point]);
+        body["instructions"] = false;
+        body["elevation"] = false;
+        const paths = await this.callGraphHopper(body);
+        const path = paths[0];
+        return {
+          lat: candidate.point[1],
+          lng: candidate.point[0],
+          distanceMeters: Math.round(path.distance),
+          durationMs: Math.round(path.time),
+          roadHint: candidate.roadHint,
+        };
+      }),
+    );
+
+    const points = measured
+      .filter((r): r is PromiseFulfilledResult<AsphaltAccessPoint> => r.status === "fulfilled")
+      .map((r) => r.value)
+      .sort((a, b) => a.durationMs - b.durationMs)
+      .slice(0, MAX_POINTS);
+
+    if (points.length === 0) {
+      throw new BadGatewayException("No walkable path to a paved road was found.");
+    }
+    return { origin: { lat: origin[1], lng: origin[0] }, points };
   }
 
   /**

@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse, Move, Archive } from 'lucide-react'
+import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse, Move, Archive, Eye, Route } from 'lucide-react'
 import VoiceMessage from './VoiceMessage'
+import { closestAsphalt, type AsphaltAccessPoint } from '@/api/routing'
 import type { IncidentMessage } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
 import { apiUrl } from '@/env'
@@ -61,12 +62,14 @@ interface Props {
   onMoveLocation?: (incidentId: string) => void
   /** Archive the incident — removes it from the active board for everyone. */
   onArchive?: (incidentId: string) => Promise<void>
+  /** Fly the map to a point (temporary highlight pin). */
+  onViewOnMap?: (point: { lat: number; lng: number; label: string }) => void
 }
 
 export default function IncidentDrawer({
   incident, messages, onClose, onResolve, onCloseIncident, onSendMessage, loadMessages,
   availableMedics = [], onAssignResponder, onUnassignResponder, medicNameById = {}, onUpdateNotes,
-  onMoveLocation, onArchive,
+  onMoveLocation, onArchive, onViewOnMap,
 }: Props) {
   const [tab, setTab] = useState<'details' | 'chat'>('details')
   const [showAssign, setShowAssign] = useState(false)
@@ -80,6 +83,23 @@ export default function IncidentDrawer({
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesDraft, setNotesDraft] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
+  const [asphalt, setAsphalt] = useState<AsphaltAccessPoint[] | null>(null)
+  const [asphaltLoading, setAsphaltLoading] = useState(false)
+  const [asphaltError, setAsphaltError] = useState<string | null>(null)
+
+  async function findAsphalt() {
+    if (asphaltLoading) return
+    if (asphalt) { setAsphalt(null); return }
+    setAsphaltLoading(true)
+    setAsphaltError(null)
+    try {
+      setAsphalt(await closestAsphalt(incident.lat, incident.lng))
+    } catch {
+      setAsphaltError('No reachable paved road found around this incident.')
+    } finally {
+      setAsphaltLoading(false)
+    }
+  }
   const chatScrollRef = useRef<HTMLDivElement>(null)
 
   async function saveNotes() {
@@ -288,6 +308,47 @@ export default function IncidentDrawer({
                 )}
                 {incident.responders && incident.responders.length > 0 && (
                   <span className="ml-auto">{incident.responders.length} responder{incident.responders.length > 1 ? 's' : ''}</span>
+                )}
+              </div>
+
+              {/* Closest asphalt — nearest paved-road access points */}
+              <div>
+                <button
+                  onClick={() => void findAsphalt()}
+                  disabled={asphaltLoading}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-60"
+                  style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(129,140,248,0.3)', color: '#a5b4fc' }}
+                >
+                  <Route className="w-3.5 h-3.5" />
+                  {asphaltLoading ? 'Scanning roads…' : asphalt ? 'Hide closest asphalt' : 'Closest asphalt'}
+                </button>
+                {asphaltError && <div className="text-xs mt-1.5" style={{ color: '#f87171' }}>{asphaltError}</div>}
+                {asphalt && (
+                  <div className="mt-2 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(129,140,248,0.22)', background: 'rgba(99,102,241,0.05)' }}>
+                    {asphalt.map((p, i) => {
+                      const minutes = Math.max(1, Math.round(p.durationMs / 60000))
+                      const dist = p.distanceMeters >= 1000 ? `${(p.distanceMeters / 1000).toFixed(1)} km` : `${p.distanceMeters} m`
+                      return (
+                        <div key={`${p.lat}-${p.lng}`} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: i > 0 ? '1px solid rgba(129,140,248,0.16)' : 'none' }}>
+                          <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ background: 'rgba(129,140,248,0.18)', color: '#a5b4fc' }}>{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-slate-200">{minutes} min · {dist}</div>
+                            <div className="text-[10px] capitalize" style={{ color: '#64748b' }}>{p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}</div>
+                          </div>
+                          {onViewOnMap && (
+                            <button
+                              onClick={() => onViewOnMap({ lat: p.lat, lng: p.lng, label: `Asphalt ${i + 1}` })}
+                              title="View on map"
+                              className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg"
+                              style={{ background: 'rgba(147,197,253,0.12)', color: '#93c5fd' }}
+                            >
+                              <Eye className="w-3 h-3" /> View
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
 

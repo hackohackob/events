@@ -83,3 +83,20 @@ export interface RouteResponse {
   /** Echo of the waypoints the route was built through, `[lng, lat]`. */
   waypoints: LngLat[];
 }
+
+/** One reachable paved-road access point near an incident. */
+export interface AsphaltAccessPoint {
+  lat: number;
+  lng: number;
+  /** On-foot distance from the incident, metres. */
+  distanceMeters: number;
+  /** On-foot travel time from the incident, ms. */
+  durationMs: number;
+  /** Road name/class when GraphHopper knows it (e.g. "residential"). */
+  roadHint?: string;
+}
+
+export interface ClosestAsphaltResponse {
+  origin: { lat: number; lng: number };
+  points: AsphaltAccessPoint[];
+}

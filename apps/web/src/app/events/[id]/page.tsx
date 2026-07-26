@@ -1372,6 +1372,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             setSelectedIncidentId(null)
           }}
           onArchive={archiveIncident}
+          onViewOnMap={(point) => setParticipantFocus({ lng: point.lng, lat: point.lat, nonce: Date.now() })}
         />
       )}
 

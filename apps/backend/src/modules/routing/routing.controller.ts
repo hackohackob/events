@@ -24,6 +24,13 @@ export class RoutingController {
       avoidIncomingTraffic: dto.avoidIncomingTraffic,
     });
   }
+
+  /** Nearest paved-road access points around a location (e.g. an incident). */
+  @Post("closest-asphalt")
+  async closestAsphalt(@Body() body: { lat: number; lng: number }) {
+    const point = validatePoint([Number(body.lng), Number(body.lat)], 0);
+    return this.routingService.closestAsphalt(point);
+  }
 }
 
 /** Guard against malformed `[lng, lat]` pairs the class-validator tuple can't reach. */

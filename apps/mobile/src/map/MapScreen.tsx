@@ -1595,6 +1595,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [movingPoi, setMovingPoi] = useState<{ id: string; label: string } | null>(null);
   // Coordinator "move incident" mode — the next map tap repositions the pin.
   const [movingIncident, setMovingIncident] = useState<{ id: string; label: string } | null>(null);
+  // Temporary preview pin (e.g. a closest-asphalt point being inspected).
+  const [previewPoint, setPreviewPoint] = useState<{ lat: number; lng: number; label: string } | null>(null);
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
@@ -2795,6 +2797,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   const closeSelection = () => {
     setSelectedMarkerId(null);
+    setPreviewPoint(null);
   };
 
   // Starting navigation (e.g. "Navigate" from a marker sheet) opens the transport
@@ -3728,6 +3731,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
+        {/* Temporary preview pin (closest-asphalt candidate); tap to dismiss. */}
+        {previewPoint ? (
+          <Marker key="preview-point" lngLat={[previewPoint.lng, previewPoint.lat]}>
+            <Pressable onPress={() => setPreviewPoint(null)} style={styles.previewPinWrap}>
+              <View style={styles.previewPin}>
+                <Text style={styles.previewPinIcon} allowFontScaling={false}>🛣</Text>
+              </View>
+              <View style={styles.previewPinLabel}>
+                <Text style={styles.previewPinLabelText} numberOfLines={1}>{previewPoint.label}</Text>
+              </View>
+            </Pressable>
+          </Marker>
+        ) : null}
+
         {locatedParticipant ? (
           <Marker key="participant-focus" lngLat={[locatedParticipant.lng, locatedParticipant.lat]}>
             <Pressable onPress={() => setLocatedParticipant(null)} style={styles.participantFocusWrap}>
@@ -4486,6 +4503,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 label: selectedIncident.name ?? selectedIncident.label,
               });
               closeSelection();
+            }}
+            onViewLocation={(point) => {
+              setPreviewPoint(point);
+              // Keep the sheet open (collapsed) so the medic can hop between
+              // candidates; the pin lands in the visible upper half.
+              markerSheetRef.current?.snapToIndex(0);
+              cameraRef.current?.easeTo({
+                center: [point.lng, point.lat],
+                zoom: Math.max(mapZoom, 14.5),
+                padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.42), left: 0, right: 0 },
+                duration: 520,
+              });
             }}
           />
         ) : selectedMarker?.type === "paramedic" ? (
@@ -5939,6 +5968,34 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "rgba(245, 158, 11, 0.98)",
   },
+  // Temporary preview pin (closest-asphalt candidate)
+  previewPinWrap: { alignItems: "center", gap: 3 },
+  previewPin: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#6366f1",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#6366f1",
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  previewPinIcon: { fontSize: 14, lineHeight: 17, includeFontPadding: false },
+  previewPinLabel: {
+    maxWidth: 150,
+    backgroundColor: "rgba(8,15,28,0.92)",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(129,140,248,0.4)",
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+  },
+  previewPinLabelText: { color: "#c7d2fe", fontSize: 10.5, fontWeight: "800" },
+
   participantFocusWrap: { alignItems: "center" },
   participantFocusPin: {
     minWidth: 30,

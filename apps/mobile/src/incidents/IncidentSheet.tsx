@@ -16,7 +16,8 @@ import {
   useAudioRecorder,
 } from "expo-audio";
 import { getSocket } from "../realtime/socket-client";
-import { resolveMediaUrl } from "../ui/api-client";
+import { apiFetch, resolveMediaUrl } from "../ui/api-client";
+import { useNavStore } from "../navigation/nav-store";
 import {
   archiveIncident,
   assignIncidentResponder,
@@ -106,6 +107,17 @@ interface Props {
   onOpenPhoto: (url: string) => void;
   /** Coordinator-only: arm tap-the-map incident relocation (parent handles the flow). */
   onMoveLocation?: () => void;
+  /** Fly the map to a point and drop a temporary preview pin. */
+  onViewLocation?: (point: { lat: number; lng: number; label: string }) => void;
+}
+
+/** One paved-road access point from /routing/closest-asphalt. */
+interface AsphaltPoint {
+  lat: number;
+  lng: number;
+  distanceMeters: number;
+  durationMs: number;
+  roadHint?: string;
 }
 
 /**
@@ -114,7 +126,7 @@ interface Props {
  * with coordinator assign/unassign, live team chat, and the close/archive flow.
  * Rendered inside the map screen's marker BottomSheet.
  */
-export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation }: Props) {
+export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onViewLocation }: Props) {
   const myId = useSessionStore((s) => s.userId);
   const amCoordinator = useRosterStore((s) => s.amCoordinator);
   const rosterMedics = useRosterStore((s) => s.medics);
@@ -131,6 +143,34 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
   const [transport, setTransport] = useState("");
   const [closing, setClosing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+
+  // ── Closest asphalt ──────────────────────────────────────────────────────
+  const [asphaltPoints, setAsphaltPoints] = useState<AsphaltPoint[] | null>(null);
+  const [asphaltLoading, setAsphaltLoading] = useState(false);
+  const [asphaltOpen, setAsphaltOpen] = useState(false);
+
+  const loadClosestAsphalt = async () => {
+    if (asphaltLoading) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (asphaltPoints) {
+      setAsphaltOpen((v) => !v);
+      return;
+    }
+    setAsphaltLoading(true);
+    try {
+      const res = await apiFetch<{ points: AsphaltPoint[] }>("/routing/closest-asphalt", {
+        method: "POST",
+        body: JSON.stringify({ lat: incident.lat, lng: incident.lng }),
+      });
+      setAsphaltPoints(res.points);
+      setAsphaltOpen(true);
+    } catch (err) {
+      debugLog("api", "error", "closest asphalt failed", String(err));
+      Alert.alert("No asphalt found", "Couldn't find a reachable paved road around this incident.");
+    } finally {
+      setAsphaltLoading(false);
+    }
+  };
 
   // ── Voice notes ───────────────────────────────────────────────────────────
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -493,6 +533,71 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             <Feather name="move" size={14} color="#7dd3fc" />
             <Text style={styles.moveLocationBtnText}>Move location (tap the new spot)</Text>
           </Pressable>
+        ) : null}
+
+        {/* ── Closest asphalt: nearest paved-road access points ── */}
+        {!isClosed ? (
+          <Pressable style={styles.asphaltBtn} onPress={() => void loadClosestAsphalt()} disabled={asphaltLoading}>
+            {asphaltLoading ? (
+              <ActivityIndicator size="small" color="#a5b4fc" />
+            ) : (
+              <Text style={styles.asphaltBtnIcon} allowFontScaling={false}>🛣</Text>
+            )}
+            <Text style={styles.asphaltBtnText}>
+              {asphaltLoading ? "Scanning roads…" : "Closest asphalt"}
+            </Text>
+            {asphaltPoints ? (
+              <Feather name={asphaltOpen ? "chevron-up" : "chevron-down"} size={15} color="#a5b4fc" />
+            ) : null}
+          </Pressable>
+        ) : null}
+        {!isClosed && asphaltOpen && asphaltPoints ? (
+          <View style={styles.asphaltList}>
+            {asphaltPoints.map((point, index) => {
+              const minutes = Math.max(1, Math.round(point.durationMs / 60000));
+              const distance =
+                point.distanceMeters >= 1000
+                  ? `${(point.distanceMeters / 1000).toFixed(1)} km`
+                  : `${point.distanceMeters} m`;
+              const label = `Asphalt ${index + 1}${point.roadHint ? ` · ${point.roadHint}` : ""}`;
+              return (
+                <View key={`${point.lat}-${point.lng}`} style={[styles.asphaltRow, index > 0 && styles.asphaltRowBorder]}>
+                  <View style={styles.asphaltIndex}>
+                    <Text style={styles.asphaltIndexText} allowFontScaling={false}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.asphaltInfo}>
+                    <Text style={styles.asphaltTime}>{minutes} min · {distance}</Text>
+                    <Text style={styles.asphaltHint} numberOfLines={1}>
+                      {point.roadHint ? point.roadHint.replace(/_/g, " ") : "paved road"}
+                    </Text>
+                  </View>
+                  {onViewLocation ? (
+                    <Pressable
+                      style={styles.asphaltAction}
+                      hitSlop={4}
+                      onPress={() => {
+                        void Haptics.selectionAsync();
+                        onViewLocation({ lat: point.lat, lng: point.lng, label });
+                      }}
+                    >
+                      <Feather name="eye" size={15} color="#93c5fd" />
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    style={[styles.asphaltAction, styles.asphaltNavAction]}
+                    hitSlop={4}
+                    onPress={() => {
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onClose();
+                      useNavStore.getState().openTransport({ lat: point.lat, lng: point.lng, label });
+                    }}
+                  >
+                    <Feather name="navigation" size={15} color="#04121f" />
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
         ) : null}
 
         {/* ── Category (prominent) + who reported it ── */}
@@ -1159,6 +1264,59 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(56,189,248,0.08)",
   },
   moveLocationBtnText: { color: "#7dd3fc", fontSize: 13, fontWeight: "800" },
+
+  // Closest asphalt
+  asphaltBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 11,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(129,140,248,0.3)",
+    backgroundColor: "rgba(99,102,241,0.09)",
+  },
+  asphaltBtnIcon: { fontSize: 14, lineHeight: 17, includeFontPadding: false },
+  asphaltBtnText: { color: "#a5b4fc", fontSize: 13, fontWeight: "800" },
+  asphaltList: {
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(129,140,248,0.2)",
+    backgroundColor: "rgba(99,102,241,0.05)",
+    overflow: "hidden",
+  },
+  asphaltRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  asphaltRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(129,140,248,0.25)" },
+  asphaltIndex: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(129,140,248,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  asphaltIndexText: { color: "#a5b4fc", fontSize: 11, fontWeight: "900" },
+  asphaltInfo: { flex: 1, minWidth: 0 },
+  asphaltTime: { color: "#e2e8f0", fontSize: 13.5, fontWeight: "800" },
+  asphaltHint: { color: "#64748b", fontSize: 11, fontWeight: "600", marginTop: 1, textTransform: "capitalize" },
+  asphaltAction: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(147,197,253,0.12)",
+  },
+  asphaltNavAction: { backgroundColor: "#34d399" },
 
   // Assign modal
   modalBackdrop: {

@@ -126,6 +126,48 @@ function classifyPoint(tags: PointTags): SurfaceClass {
   return "road";
 }
 
+/** Road classes that are asphalt in practice unless the surface tag disagrees. */
+const IMPLICITLY_PAVED_ROAD_CLASSES = new Set([
+  "motorway",
+  "trunk",
+  "primary",
+  "secondary",
+  "tertiary",
+  "residential",
+  "living_street",
+]);
+
+/**
+ * Index of the first route point that sits on a paved road, or null when the
+ * whole path stays off asphalt. A point counts as paved when its surface tag is
+ * explicitly paved, or when it is a road class that is asphalt in practice
+ * (primary…residential) and the surface tag doesn't say otherwise.
+ */
+export function firstPavedPointIndex(pointCount: number, details: PathDetails | undefined): number | null {
+  const tags: PointTags[] = Array.from({ length: pointCount }, () => ({ isHike: false, isMtbTrail: false }));
+  if (details) {
+    applyInterval(tags, details.road_class, (t, v) => (t.roadClass = lower(v)));
+    applyInterval(tags, details.surface, (t, v) => (t.surface = lower(v)));
+    applyInterval(tags, details.track_type, (t, v) => (t.trackType = lower(v)));
+  }
+  for (let index = 0; index < tags.length; index += 1) {
+    const { surface, roadClass, trackType } = tags[index];
+    if (surface && UNPAVED_SURFACES.has(surface)) continue;
+    if (surface && PAVED_SURFACES.has(surface)) return index;
+    if (roadClass && IMPLICITLY_PAVED_ROAD_CLASSES.has(roadClass) && !trackType) return index;
+  }
+  return null;
+}
+
+/** Human hint for a paved point — the road class GraphHopper reported there. */
+export function roadClassAtPoint(pointIndex: number, pointCount: number, details: PathDetails | undefined): string | undefined {
+  if (!details?.road_class) return undefined;
+  for (const [from, to, value] of details.road_class) {
+    if (pointIndex >= from && pointIndex <= to) return lower(value);
+  }
+  return undefined;
+}
+
 /** Build per-point surface classes from raw path_details. */
 export function classifyPoints(pointCount: number, details: PathDetails | undefined): SurfaceClass[] {
   const tags: PointTags[] = Array.from({ length: pointCount }, () => ({ isHike: false, isMtbTrail: false }));
