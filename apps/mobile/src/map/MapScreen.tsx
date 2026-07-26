@@ -64,7 +64,7 @@ import { ParticipantsScreen } from "../participants/ParticipantsScreen";
 import { useSettingsStore } from "../settings/settings-store";
 import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
-import { archivePoi, assignDestination, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
+import { archivePoi, assignDestination, moveIncidentLocation, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
 import { OfflineControlButton } from "./OfflineControlButton";
 import type { EventZone } from "@events/contracts";
@@ -319,7 +319,10 @@ const BASE_LAYERS: Record<BaseLayer, { label: string; icon: keyof typeof Feather
     icon: "globe",
     tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     tileSize: 256,
-    maxZoom: 19,
+    // Esri z19 coverage is patchy outside cities; claiming 19 makes deep zooms
+    // request tiles that don't exist (blank map + tile errors). 18 exists
+    // nearly everywhere and the renderer overzooms it beyond that.
+    maxZoom: 18,
   },
 };
 
@@ -1543,6 +1546,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Move-POI mode: set from the POI sheet; the next map tap becomes the point's
   // new position (confirmed to the server via PATCH + broadcast to everyone).
   const [movingPoi, setMovingPoi] = useState<{ id: string; label: string } | null>(null);
+  // Coordinator "move incident" mode — the next map tap repositions the pin.
+  const [movingIncident, setMovingIncident] = useState<{ id: string; label: string } | null>(null);
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
@@ -3071,6 +3076,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         onPress={(event: any) => {
           const lngLat = event?.nativeEvent?.lngLat;
           if (!Array.isArray(lngLat) || lngLat.length < 2) return;
+          // Move-incident mode: this tap is the incident's new position.
+          if (movingIncident) {
+            const incidentId = movingIncident.id;
+            setMovingIncident(null);
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Optimistic: reposition locally; the incident.updated broadcast
+            // confirms it for everyone else (and the move lands in the log).
+            const existing = useMapStore.getState().markers;
+            setMarkers(existing.map((m) => (m.id === incidentId ? { ...m, lat: lngLat[1], lng: lngLat[0] } : m)));
+            void moveIncidentLocation(incidentId, lngLat[1], lngLat[0]).catch((err) =>
+              debugLog("api", "error", "move incident failed", String(err)),
+            );
+            return;
+          }
           // Move-POI mode: this tap is the point's new position.
           if (movingPoi) {
             const poiId = movingPoi.id;
@@ -3660,6 +3679,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             📍 Tap the map to move “{movingPoi.label}”
           </Text>
           <Pressable style={styles.poiMoveBannerCancel} onPress={() => setMovingPoi(null)}>
+            <Text style={styles.poiMoveBannerCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Move-incident helper: the next tap relocates the incident pin. */}
+      {movingIncident ? (
+        <View style={styles.poiMoveBanner}>
+          <Text style={styles.poiMoveBannerText} numberOfLines={1}>
+            🚨 Tap the map to move “{movingIncident.label}”
+          </Text>
+          <Pressable style={styles.poiMoveBannerCancel} onPress={() => setMovingIncident(null)}>
             <Text style={styles.poiMoveBannerCancelText}>Cancel</Text>
           </Pressable>
         </View>
@@ -4364,6 +4395,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             markerById={markerById}
             onClose={closeSelection}
             onOpenPhoto={(url) => setPhotoViewerUrl(url)}
+            onMoveLocation={() => {
+              setMovingIncident({
+                id: selectedIncident.id,
+                label: selectedIncident.name ?? selectedIncident.label,
+              });
+              closeSelection();
+            }}
           />
         ) : selectedMarker?.type === "paramedic" ? (
           <MedicSheet

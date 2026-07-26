@@ -18,11 +18,14 @@ const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 export type BaseLayer = 'streets' | 'satellite' | 'terrain'
 
 /** Minimal single-source raster style (no glyphs needed — all overlays are line/
- *  heatmap layers or DOM markers). */
-function rasterStyle(tiles: string, attribution: string): StyleSpecification {
+ *  heatmap layers or DOM markers). `maxzoom` is the source's DATA max zoom:
+ *  past it maplibre overzooms (upscales) the last available tiles instead of
+ *  requesting levels the server doesn't have — without it, deep zooming turns
+ *  satellite/terrain into blank error tiles. */
+function rasterStyle(tiles: string, attribution: string, maxzoom: number): StyleSpecification {
   return {
     version: 8,
-    sources: { base: { type: 'raster', tiles: [tiles], tileSize: 256, attribution } },
+    sources: { base: { type: 'raster', tiles: [tiles], tileSize: 256, attribution, maxzoom } },
     layers: [{ id: 'base', type: 'raster', source: 'base' }],
   }
 }
@@ -63,10 +66,12 @@ function with3d(style: StyleSpecification): StyleSpecification {
 const SATELLITE_STYLE = rasterStyle(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   '© Esri, Maxar',
+  18,
 )
 const TERRAIN_STYLE = rasterStyle(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
   '© Esri',
+  17,
 )
 const SATELLITE_3D_STYLE = with3d(SATELLITE_STYLE)
 const TERRAIN_3D_STYLE = with3d(TERRAIN_STYLE)
@@ -175,6 +180,10 @@ interface MapClientProps {
   zoneDrawActive?: boolean
   /** The smoothed polygon of a finished sketch ([lng, lat] ring). */
   onZoneDrawn?: (polygon: [number, number][]) => void
+  /** Pick-a-location mode (e.g. moving an incident): the next plain map click
+   *  fires `onPickLocation` instead of any other click behaviour. */
+  pickLocationActive?: boolean
+  onPickLocation?: (coords: [number, number]) => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1260,6 +1269,8 @@ export default function MapClient({
   zones = [],
   zoneDrawActive = false,
   onZoneDrawn,
+  pickLocationActive = false,
+  onPickLocation,
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
@@ -1408,10 +1419,14 @@ export default function MapClient({
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
+      if (pickLocationActive && onPickLocation) {
+        onPickLocation([e.lngLat.lng, e.lngLat.lat])
+        return
+      }
       if (!interactivePOI || !selectedPOIType || !onMapClick) return
       onMapClick([e.lngLat.lng, e.lngLat.lat])
     },
-    [interactivePOI, selectedPOIType, onMapClick]
+    [pickLocationActive, onPickLocation, interactivePOI, selectedPOIType, onMapClick]
   )
 
   const applyFitBounds = useCallback(() => {

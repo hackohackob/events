@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse } from 'lucide-react'
+import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse, Move, Archive } from 'lucide-react'
 import VoiceMessage from './VoiceMessage'
 import type { IncidentMessage } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
@@ -57,11 +57,16 @@ interface Props {
   medicNameById?: Record<string, string>
   /** Save edited incident notes (description). */
   onUpdateNotes?: (incidentId: string, description: string) => Promise<void>
+  /** Arm pick-on-map incident relocation (parent handles the flow). */
+  onMoveLocation?: (incidentId: string) => void
+  /** Archive the incident — removes it from the active board for everyone. */
+  onArchive?: (incidentId: string) => Promise<void>
 }
 
 export default function IncidentDrawer({
   incident, messages, onClose, onResolve, onCloseIncident, onSendMessage, loadMessages,
   availableMedics = [], onAssignResponder, onUnassignResponder, medicNameById = {}, onUpdateNotes,
+  onMoveLocation, onArchive,
 }: Props) {
   const [tab, setTab] = useState<'details' | 'chat'>('details')
   const [showAssign, setShowAssign] = useState(false)
@@ -271,6 +276,16 @@ export default function IncidentDrawer({
               <div className="flex items-center gap-2 text-xs" style={{ color: '#64748b' }}>
                 <MapPin className="w-3.5 h-3.5" />
                 {incident.lat.toFixed(5)}, {incident.lng.toFixed(5)}
+                {onMoveLocation && !isClosed && (
+                  <button
+                    onClick={() => onMoveLocation(incident.id)}
+                    className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ color: '#7dd3fc', background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.3)' }}
+                    title="Click the map to move this incident (logged in the timeline)"
+                  >
+                    <Move className="w-3 h-3" /> Move
+                  </button>
+                )}
                 {incident.responders && incident.responders.length > 0 && (
                   <span className="ml-auto">{incident.responders.length} responder{incident.responders.length > 1 ? 's' : ''}</span>
                 )}
@@ -445,6 +460,22 @@ export default function IncidentDrawer({
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Archive — hides the incident from the live board for everyone. */}
+              {onArchive && (
+                <button
+                  onClick={() => {
+                    if (!window.confirm('Archive this incident? It will disappear from the live map for everyone.')) return
+                    setBusy(true)
+                    void onArchive(incident.id).then(onClose).finally(() => setBusy(false))
+                  }}
+                  disabled={busy}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                  style={{ background: 'rgba(148,163,184,0.06)', border: '1px solid rgba(148,163,184,0.18)', color: '#94a3b8' }}
+                >
+                  <Archive className="w-4 h-4" /> Archive incident
+                </button>
               )}
             </div>
           ) : (

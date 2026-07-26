@@ -328,7 +328,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     medics, incidents: liveIncidents, incidentMessages, connected,
     alarmSignal, broadcasts, dismissBroadcast,
     assignDestination, removeActiveMedic, assignIncident, unassignIncident,
-    resolveIncident, closeIncident, updateIncidentNotes, loadMessages, sendMessage,
+    resolveIncident, closeIncident, updateIncidentNotes, moveIncident, archiveIncident,
+    loadMessages, sendMessage,
   } = useLiveMap({ eventId: id, enabled: isActive })
 
   // Runner heatmap from one aggregated, polled snapshot (not per-participant WS).
@@ -352,6 +353,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
   const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
+  // "Move incident" mode: the next map click repositions this incident's pin.
+  const [movingIncident, setMovingIncident] = useState<{ id: string; name: string } | null>(null)
   // Locating a participant from the roster: fly the map there + drop a pin.
   const [participantFocus, setParticipantFocus] = useState<{ lng: number; lat: number; nonce: number } | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
@@ -1128,6 +1131,13 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               setZoneDraw(false)
               setPendingZonePolygon(polygon)
             }}
+            pickLocationActive={!!movingIncident}
+            onPickLocation={([lng, lat]) => {
+              if (!movingIncident) return
+              const incidentId = movingIncident.id
+              setMovingIncident(null)
+              void moveIncident(incidentId, lat, lng)
+            }}
           />
 
           {/* Layer toggles — top right */}
@@ -1316,7 +1326,32 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           onUnassignResponder={unassignIncident}
           medicNameById={Object.fromEntries(medics.map(m => [m.medicId, m.name]))}
           onUpdateNotes={updateIncidentNotes}
+          onMoveLocation={(incidentId) => {
+            const inc = liveIncidents.find(i => i.id === incidentId)
+            setMovingIncident({ id: incidentId, name: inc?.name ?? 'Incident' })
+            setSelectedIncidentId(null)
+          }}
+          onArchive={archiveIncident}
         />
+      )}
+
+      {/* Move-incident helper: the next map click relocates the pin. */}
+      {movingIncident && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2.5 rounded-2xl pointer-events-auto"
+          style={{ top: 18, zIndex: 80, background: 'rgba(8,15,28,0.97)', border: '1px solid rgba(56,189,248,0.4)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+        >
+          <span className="text-sm font-semibold" style={{ color: '#7dd3fc' }}>
+            📍 Click the map to move “{movingIncident.name}”
+          </span>
+          <button
+            onClick={() => setMovingIncident(null)}
+            className="text-xs font-bold px-2.5 py-1 rounded-lg"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8' }}
+          >
+            Cancel
+          </button>
+        </div>
       )}
 
       {selectedMedic && (

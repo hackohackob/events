@@ -104,6 +104,8 @@ interface Props {
   onClose: () => void;
   /** Receives a fully-resolved (absolute) media URL. */
   onOpenPhoto: (url: string) => void;
+  /** Coordinator-only: arm tap-the-map incident relocation (parent handles the flow). */
+  onMoveLocation?: () => void;
 }
 
 /**
@@ -112,7 +114,7 @@ interface Props {
  * with coordinator assign/unassign, live team chat, and the close/archive flow.
  * Rendered inside the map screen's marker BottomSheet.
  */
-export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto }: Props) {
+export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation }: Props) {
   const myId = useSessionStore((s) => s.userId);
   const amCoordinator = useRosterStore((s) => s.amCoordinator);
   const rosterMedics = useRosterStore((s) => s.medics);
@@ -477,6 +479,20 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             destination={{ lat: incident.lat, lng: incident.lng, label: incident.name ?? incident.label }}
             incidentId={incident.id}
           />
+        ) : null}
+
+        {/* Coordinator-only: relocate the incident pin (logged in the timeline). */}
+        {amCoordinator && !isClosed && onMoveLocation ? (
+          <Pressable
+            style={styles.moveLocationBtn}
+            onPress={() => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              onMoveLocation();
+            }}
+          >
+            <Feather name="move" size={14} color="#7dd3fc" />
+            <Text style={styles.moveLocationBtnText}>Move location (tap the new spot)</Text>
+          </Pressable>
         ) : null}
 
         {/* ── Category (prominent) + who reported it ── */}
@@ -1129,6 +1145,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.02)",
   },
   archiveText: { color: "#94a3b8", fontSize: 13, fontWeight: "800" },
+
+  moveLocationBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 11,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.28)",
+    backgroundColor: "rgba(56,189,248,0.08)",
+  },
+  moveLocationBtnText: { color: "#7dd3fc", fontSize: 13, fontWeight: "800" },
 
   // Assign modal
   modalBackdrop: {

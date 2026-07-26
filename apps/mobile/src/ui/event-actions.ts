@@ -107,6 +107,14 @@ export async function archiveIncident(incidentId: string) {
   return patchIncident(incidentId, { status: "archived" });
 }
 
+/** Move an incident's pin (coordinator only; logged in the incident timeline). */
+export async function moveIncidentLocation(incidentId: string, lat: number, lng: number) {
+  return apiFetch(`/incidents/${incidentId}/location`, {
+    method: "PATCH",
+    body: JSON.stringify({ lat, lng }),
+  });
+}
+
 /** Register myself as a responder heading to an incident. */
 export async function respondToIncident(incidentId: string) {
   return apiFetch(`/incidents/${incidentId}/action`, {

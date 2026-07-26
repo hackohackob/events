@@ -67,6 +67,18 @@ export async function updateIncidentDetails(
   return res.data;
 }
 
+/** Move an incident's pin (coordinator only; logged in the incident timeline). */
+export async function moveIncidentLocation(incidentId: string, lat: number, lng: number, eventId?: string) {
+  const res = await client.patch(`/incidents/${incidentId}/location`, { lat, lng }, { headers: eventHeaders(eventId) });
+  return res.data;
+}
+
+/** Archive an incident — removes it from the active board for everyone. */
+export async function archiveIncident(incidentId: string, eventId?: string) {
+  const res = await client.patch(`/incidents/${incidentId}`, { status: "archived" }, { headers: eventHeaders(eventId) });
+  return res.data;
+}
+
 export async function closeIncident(incidentId: string, payload: CloseIncidentRequest, eventId?: string) {
   const res = await client.patch(`/incidents/${incidentId}/close`, payload, { headers: eventHeaders(eventId) });
   return res.data;

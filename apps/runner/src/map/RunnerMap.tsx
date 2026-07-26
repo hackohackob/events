@@ -74,6 +74,9 @@ const MAP_STYLE: StyleSpecification = {
       tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
       tileSize: 256,
       attribution: "© Esri",
+      // Data max zoom — past it maplibre overzooms the z18 imagery instead of
+      // requesting tiles Esri doesn't serve here (which render as blanks).
+      maxzoom: 18,
     },
     // Shaded topo base shown while in 3D — reads much better draped over the
     // relief than the flat OSM cartography.
@@ -82,6 +85,7 @@ const MAP_STYLE: StyleSpecification = {
       tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"],
       tileSize: 256,
       attribution: "© Esri",
+      maxzoom: 17,
     },
     // Keyless AWS Terrain Tiles (Terrarium encoding) for the 3D elevation mesh.
     "terrain-dem": {

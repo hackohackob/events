@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { ForbiddenException, Inject, Injectable, NotFoundException, OnModuleInit, forwardRef } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, OnModuleInit, forwardRef } from "@nestjs/common";
 import { IncidentStatus, UserRole, IncidentCategory, INCIDENT_CATEGORY_SEVERITY } from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { EventChatService } from "../event-chat/event-chat.service";
@@ -684,6 +684,74 @@ export class IncidentsService implements OnModuleInit {
     await this.redisService.publish(`event:${eventId}:incidents`, {
       type: "incident.updated",
       payload: { ...incident, nearbyParamedics: [] },
+    });
+
+    return incident;
+  }
+
+  /** True when the caller is a coordinator — dashboard sessions carry the
+   *  "coordinator" role directly; mobile roster coordinators are resolved live
+   *  from users.role (the app session role header says "medic" even for them). */
+  private async isCallerCoordinator(eventId: string, caller: { userId: string; role: UserRole }): Promise<boolean> {
+    if (caller.role === "coordinator") return true;
+    const { rows } = await this.db.query<{ role: string | null }>(
+      `SELECT u.role
+       FROM event_medics em
+       LEFT JOIN users u ON u.name = em.name
+       WHERE em.id::text = $1 AND em.event_id = $2`,
+      [caller.userId, eventId],
+    );
+    return rows[0]?.role === "coordinator";
+  }
+
+  /**
+   * Move an incident's location (coordinator only). The move is recorded in the
+   * incident's event log (system chat message) with who moved it and how far.
+   */
+  async moveLocation(
+    eventId: string,
+    incidentId: string,
+    caller: { userId: string; role: UserRole },
+    input: { lat: number; lng: number },
+  ): Promise<IncidentRecord> {
+    if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
+      throw new BadRequestException("lat/lng must be finite numbers");
+    }
+    if (!(await this.isCallerCoordinator(eventId, caller))) {
+      throw new ForbiddenException("Only coordinators can move an incident's location");
+    }
+
+    const { rows: existing } = await this.db.query<IncidentRow>(
+      `SELECT * FROM incidents WHERE id = $1 AND event_id = $2`,
+      [incidentId, eventId],
+    );
+    if (!existing[0]) {
+      throw new NotFoundException("Incident not found");
+    }
+    const current = rowToRecord(existing[0]);
+
+    const now = new Date().toISOString();
+    const { rows: updated } = await this.db.query<IncidentRow>(
+      `UPDATE incidents
+       SET lat = $1, lng = $2, updated_at = $3
+       WHERE id = $4 AND event_id = $5
+       RETURNING *`,
+      [input.lat, input.lng, now, incidentId, eventId],
+    );
+    const incident = rowToRecord(updated[0]);
+
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "incident.updated",
+      payload: { ...incident, nearbyParamedics: [] },
+    });
+
+    const movedMeters = Math.round(haversineMeters(current.lat, current.lng, input.lat, input.lng));
+    void this.resolveReporterName(eventId, caller.userId).then((actorName) => {
+      void this.systemMessage(
+        eventId,
+        incidentId,
+        `📍 Location moved ${movedMeters >= 1000 ? `${(movedMeters / 1000).toFixed(1)} km` : `${movedMeters} m`} by ${actorName} (${input.lat.toFixed(5)}, ${input.lng.toFixed(5)})`,
+      );
     });
 
     return incident;

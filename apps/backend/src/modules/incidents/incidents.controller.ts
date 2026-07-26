@@ -120,6 +120,23 @@ export class IncidentsController {
     return this.incidentsService.addMessage(user.eventId, incidentId, user.userId, body);
   }
 
+  /** Move an incident's pin (coordinator only — enforced in the service, since
+   *  roster coordinators carry x-role "medic" from the app session). */
+  @Patch(":incidentId/location")
+  @Roles("coordinator", "medic", "paramedic")
+  moveLocation(
+    @CurrentUser() user: RequestUser,
+    @Param("incidentId") incidentId: string,
+    @Body() body: { lat: number; lng: number },
+  ) {
+    return this.incidentsService.moveLocation(
+      user.eventId,
+      incidentId,
+      { userId: user.userId, role: user.role },
+      { lat: Number(body.lat), lng: Number(body.lng) },
+    );
+  }
+
   @Patch(":incidentId")
   // Participants (runners) append notes to their own incident from the PWA.
   @Roles("paramedic", "coordinator", "medic", "runner")

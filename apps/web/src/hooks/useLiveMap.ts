@@ -326,6 +326,29 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     [eventId, scheduleSync],
   )
 
+  const moveIncident = useCallback(
+    async (incidentId: string, lat: number, lng: number) => {
+      const { moveIncidentLocation } = await import('@/api/incidents')
+      const updated = await moveIncidentLocation(incidentId, lat, lng, eventId ?? undefined)
+      incidentsRef.current.set(incidentId, toLiveIncident(updated))
+      scheduleSync()
+    },
+    [eventId, scheduleSync],
+  )
+
+  const archiveIncident = useCallback(
+    async (incidentId: string) => {
+      const { archiveIncident: apiArchiveIncident } = await import('@/api/incidents')
+      await apiArchiveIncident(incidentId, eventId ?? undefined)
+      const existing = incidentsRef.current.get(incidentId)
+      if (existing) {
+        incidentsRef.current.set(incidentId, { ...existing, status: 'archived' })
+        scheduleSync()
+      }
+    },
+    [eventId, scheduleSync],
+  )
+
   const loadMessages = useCallback(
     async (incidentId: string) => {
       const list = await listIncidentMessages(incidentId, eventId ?? undefined)
@@ -368,6 +391,8 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
     resolveIncident,
     closeIncident,
     updateIncidentNotes,
+    moveIncident,
+    archiveIncident,
     loadMessages,
     sendMessage,
   }
