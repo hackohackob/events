@@ -48,6 +48,8 @@ import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
 import { MedicDot } from "./MedicDot";
 import { MedicSheet } from "./MedicSheet";
+import { SearchOverlay, type SearchTarget } from "../search/SearchOverlay";
+import { usePlacesStore } from "../search/places-store";
 import { SelectionPulse } from "./SelectionPulse";
 import { ScaleBar } from "./ScaleBar";
 import { EventChatScreen } from "../chat/EventChatScreen";
@@ -1597,6 +1599,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [movingIncident, setMovingIncident] = useState<{ id: string; label: string } | null>(null);
   // Temporary preview pin (e.g. a closest-asphalt point being inspected).
   const [previewPoint, setPreviewPoint] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  // Universal search overlay (places / coordinates / bibs).
+  const [searchOpen, setSearchOpen] = useState(false);
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
@@ -2169,6 +2173,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       void resetNorth();
     }
   }, [resetNorthRequestId]);
+
+  // Download the event's offline place pack (searchable places within 10 km of
+  // the tracks) once per session, so search works without coverage later.
+  useEffect(() => {
+    void usePlacesStore.getState().ensureLoaded();
+  }, []);
 
   useEffect(() => {
     if (didInitialEventFitRef.current) {
@@ -3873,6 +3883,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         {!selectedMarker && !trackModeActive ? (
           <View style={styles.headerActions} pointerEvents="box-none">
             <Pressable
+              style={styles.headerActionButton}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setMenuOpen(false);
+                setLayersOpen(false);
+                setSearchOpen(true);
+              }}
+            >
+              <Feather name="search" size={20} color="#ecf4ff" />
+            </Pressable>
+
+            <Pressable
               style={[styles.headerActionButton, layersOpen && styles.headerActionButtonActive]}
               onPress={() => {
                 setLayersOpen((open) => !open);
@@ -4694,6 +4716,27 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
       {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
       <ReportIncidentSheet />
+
+      {/* Universal search: places / coordinates in any format / bibs. */}
+      <SearchOverlay
+        visible={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onView={(target: SearchTarget) => {
+          setSearchOpen(false);
+          setActiveTab("map");
+          setPreviewPoint(target);
+          cameraRef.current?.easeTo({
+            center: [target.lng, target.lat],
+            zoom: Math.max(mapZoom, 13.5),
+            duration: 600,
+          });
+        }}
+        onNavigate={(target: SearchTarget) => {
+          setSearchOpen(false);
+          setActiveTab("map");
+          useNavStore.getState().openTransport({ lat: target.lat, lng: target.lng, label: target.label });
+        }}
+      />
 
       {/* Hospitals directory drawer (opened from the Menu). "Navigate" hands the
           hospital off to the regular transport → route-variants flow. */}
