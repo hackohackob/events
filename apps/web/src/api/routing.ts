@@ -1,13 +1,15 @@
 import client from "./client";
 
 export interface AsphaltAccessPoint {
+  /** 1-based exit number — routed points first (fastest first), then direct. */
+  index: number;
   lat: number;
   lng: number;
-  /** On-foot distance from the incident, metres. */
-  distanceMeters: number;
-  /** On-foot travel time from the incident, ms. */
-  durationMs: number;
   roadHint?: string;
+  /** Incident → point leg. `direct` = no walkable route; straight distance, no time. */
+  incident: { distanceMeters: number; durationMs?: number; direct: boolean };
+  /** Caller → point by car (when a caller position was sent). */
+  fromMe?: { distanceMeters: number; durationMs: number };
 }
 
 /** Nearest paved-road access points around a location (e.g. an incident). */

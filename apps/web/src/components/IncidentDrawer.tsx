@@ -326,18 +326,30 @@ export default function IncidentDrawer({
                 {asphalt && (
                   <div className="mt-2 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(129,140,248,0.22)', background: 'rgba(99,102,241,0.05)' }}>
                     {asphalt.map((p, i) => {
-                      const minutes = Math.max(1, Math.round(p.durationMs / 60000))
-                      const dist = p.distanceMeters >= 1000 ? `${(p.distanceMeters / 1000).toFixed(1)} km` : `${p.distanceMeters} m`
+                      const direct = p.incident.direct
+                      const dist = p.incident.distanceMeters >= 1000
+                        ? `${(p.incident.distanceMeters / 1000).toFixed(1)} km`
+                        : `${p.incident.distanceMeters} m`
+                      const timing = direct
+                        ? `${dist} direct — no path`
+                        : `${Math.max(1, Math.round((p.incident.durationMs ?? 0) / 60000))} min · ${dist}`
                       return (
-                        <div key={`${p.lat}-${p.lng}`} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: i > 0 ? '1px solid rgba(129,140,248,0.16)' : 'none' }}>
-                          <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ background: 'rgba(129,140,248,0.18)', color: '#a5b4fc' }}>{i + 1}</span>
+                        <div key={p.index} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: i > 0 ? '1px solid rgba(129,140,248,0.16)' : 'none' }}>
+                          <span
+                            className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                            style={{ background: direct ? 'rgba(245,158,11,0.22)' : 'rgba(129,140,248,0.18)', color: direct ? '#fbbf24' : '#a5b4fc' }}
+                          >
+                            {p.index}
+                          </span>
                           <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold text-slate-200">{minutes} min · {dist}</div>
-                            <div className="text-[10px] capitalize" style={{ color: '#64748b' }}>{p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}</div>
+                            <div className="text-xs font-bold" style={{ color: direct ? '#fcd34d' : '#e2e8f0' }}>{timing}</div>
+                            <div className="text-[10px] capitalize" style={{ color: '#64748b' }}>
+                              {p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}{direct ? ' · no road' : ''}
+                            </div>
                           </div>
                           {onViewOnMap && (
                             <button
-                              onClick={() => onViewOnMap({ lat: p.lat, lng: p.lng, label: `Asphalt ${i + 1}` })}
+                              onClick={() => onViewOnMap({ lat: p.lat, lng: p.lng, label: `Exit ${p.index}` })}
                               title="View on map"
                               className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg"
                               style={{ background: 'rgba(147,197,253,0.12)', color: '#93c5fd' }}

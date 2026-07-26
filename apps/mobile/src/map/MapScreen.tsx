@@ -57,7 +57,7 @@ import { ChatTabBadge } from "../chat/ChatTabBadge";
 import { useEventChatStore } from "../chat/event-chat-store";
 import type { EventMessageDto } from "../chat/event-chat-api";
 import { AssignDestinationBar } from "./AssignDestinationBar";
-import { IncidentSheet } from "../incidents/IncidentSheet";
+import { IncidentSheet, type AsphaltPoint } from "../incidents/IncidentSheet";
 import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
 import { SettingsScreen } from "../settings/SettingsScreen";
@@ -1597,10 +1597,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [movingPoi, setMovingPoi] = useState<{ id: string; label: string } | null>(null);
   // Coordinator "move incident" mode — the next map tap repositions the pin.
   const [movingIncident, setMovingIncident] = useState<{ id: string; label: string } | null>(null);
-  // Temporary preview pin (e.g. a closest-asphalt point being inspected).
-  const [previewPoint, setPreviewPoint] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  // Temporary preview pin (e.g. a search result being inspected).
+  const [previewPoint, setPreviewPoint] = useState<{ lat: number; lng: number; label: string; icon?: string } | null>(null);
   // Universal search overlay (places / coordinates / bibs).
   const [searchOpen, setSearchOpen] = useState(false);
+  // Numbered "closest asphalt" exit pins (shown while the in-drawer view is open).
+  const [asphaltPins, setAsphaltPins] = useState<AsphaltPoint[] | null>(null);
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
@@ -1763,12 +1765,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   // Bounding box around all current markers + tracks, for caching the event area offline.
   const computeOfflineBounds = useCallback((): [number, number, number, number] | null => {
+    // Tracks ONLY — a medic driving home or a far-away POI used to blow the
+    // box up to a huge area and the pack size with it.
     const points: Array<{ lat: number; lng: number }> = [];
-    for (const marker of useMapStore.getState().markers) {
-      if (Number.isFinite(marker.lat) && Number.isFinite(marker.lng)) {
-        points.push({ lat: marker.lat, lng: marker.lng });
-      }
-    }
     for (const track of useMapStore.getState().tracks) {
       for (const point of track.points) points.push(point);
     }
@@ -2559,8 +2558,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     () => (kmMarkersEnabled ? computeTrackKmMarks(renderedTrackVisuals, kmMarkerIntervalKm) : []),
     [kmMarkersEnabled, kmMarkerIntervalKm, renderedTrackVisuals],
   );
-  // Unreadable clutter when the whole event fits on screen — show from z9 up.
-  const kmMarksVisible = kmMarkersEnabled && mapZoom >= 9;
+  // Unreadable clutter when the whole event fits on screen — show from z10 up.
+  const kmMarksVisible = kmMarkersEnabled && mapZoom >= 10;
   const trackRenderOffsetOverride = trackModeActive || !trackOffsetEnabled ? 0 : null;
   const trackLineOffsetValue = (lineOffset: number): any => {
     if (trackRenderOffsetOverride !== null) {
@@ -2808,6 +2807,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const closeSelection = () => {
     setSelectedMarkerId(null);
     setPreviewPoint(null);
+    setAsphaltPins(null);
   };
 
   // Starting navigation (e.g. "Navigate" from a marker sheet) opens the transport
@@ -3741,12 +3741,31 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
-        {/* Temporary preview pin (closest-asphalt candidate); tap to dismiss. */}
+        {/* Numbered "closest asphalt" exit pins — visible while the incident
+            sheet's exit-points view is open. Direct (no-road) points are amber. */}
+        {asphaltPins?.map((pin) => (
+          <Marker key={`asphalt-${pin.index}`} lngLat={[pin.lng, pin.lat]} pointerEvents="none">
+            <View style={styles.exitPinWrap} pointerEvents="none">
+              <View style={[styles.exitPin, pin.incident.direct && styles.exitPinDirect]}>
+                <Text style={styles.exitPinText} allowFontScaling={false}>{pin.index}</Text>
+              </View>
+              <View style={styles.exitPinLabel}>
+                <Text style={styles.exitPinLabelText} allowFontScaling={false} numberOfLines={1}>
+                  {pin.incident.direct
+                    ? `${pin.incident.distanceMeters >= 1000 ? `${(pin.incident.distanceMeters / 1000).toFixed(1)} km` : `${pin.incident.distanceMeters} m`} direct`
+                    : `${Math.max(1, Math.round((pin.incident.durationMs ?? 0) / 60000))} min`}
+                </Text>
+              </View>
+            </View>
+          </Marker>
+        ))}
+
+        {/* Temporary preview pin (search result / inspected point); tap to dismiss. */}
         {previewPoint ? (
           <Marker key="preview-point" lngLat={[previewPoint.lng, previewPoint.lat]}>
             <Pressable onPress={() => setPreviewPoint(null)} style={styles.previewPinWrap}>
               <View style={styles.previewPin}>
-                <Text style={styles.previewPinIcon} allowFontScaling={false}>🛣</Text>
+                <Text style={styles.previewPinIcon} allowFontScaling={false}>{previewPoint.icon ?? "📍"}</Text>
               </View>
               <View style={styles.previewPinLabel}>
                 <Text style={styles.previewPinLabelText} numberOfLines={1}>{previewPoint.label}</Text>
@@ -3880,20 +3899,24 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </View>
         </Pressable>
 
+        {/* Search sits in the header ROW (left of the layers column), so it
+            compresses the event title chip rather than growing the column. */}
+        {!selectedMarker && !trackModeActive ? (
+          <Pressable
+            style={styles.headerActionButton}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setMenuOpen(false);
+              setLayersOpen(false);
+              setSearchOpen(true);
+            }}
+          >
+            <Feather name="search" size={20} color="#ecf4ff" />
+          </Pressable>
+        ) : null}
+
         {!selectedMarker && !trackModeActive ? (
           <View style={styles.headerActions} pointerEvents="box-none">
-            <Pressable
-              style={styles.headerActionButton}
-              onPress={() => {
-                void Haptics.selectionAsync();
-                setMenuOpen(false);
-                setLayersOpen(false);
-                setSearchOpen(true);
-              }}
-            >
-              <Feather name="search" size={20} color="#ecf4ff" />
-            </Pressable>
-
             <Pressable
               style={[styles.headerActionButton, layersOpen && styles.headerActionButtonActive]}
               onPress={() => {
@@ -4526,16 +4549,33 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               });
               closeSelection();
             }}
-            onViewLocation={(point) => {
-              setPreviewPoint(point);
-              // Keep the sheet open (collapsed) so the medic can hop between
-              // candidates; the pin lands in the visible upper half.
+            onAsphaltPins={(pins) => {
+              setAsphaltPins(pins);
+              if (!pins || pins.length === 0) return;
+              // Keep the sheet at the collapsed snap and fit every exit pin +
+              // the incident into the visible upper half of the map.
               markerSheetRef.current?.snapToIndex(0);
+              let minLat = selectedIncident.lat;
+              let maxLat = selectedIncident.lat;
+              let minLng = selectedIncident.lng;
+              let maxLng = selectedIncident.lng;
+              for (const pin of pins) {
+                minLat = Math.min(minLat, pin.lat);
+                maxLat = Math.max(maxLat, pin.lat);
+                minLng = Math.min(minLng, pin.lng);
+                maxLng = Math.max(maxLng, pin.lng);
+              }
+              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                padding: { top: 90, right: 44, bottom: Math.round(SCREEN_HEIGHT * 0.46), left: 44 },
+                duration: 620,
+              });
+            }}
+            onFocusPoint={(point) => {
               cameraRef.current?.easeTo({
                 center: [point.lng, point.lat],
-                zoom: Math.max(mapZoom, 14.5),
+                zoom: Math.max(mapZoom, 14),
                 padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.42), left: 0, right: 0 },
-                duration: 520,
+                duration: 480,
               });
             }}
           />
@@ -6011,7 +6051,36 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "rgba(245, 158, 11, 0.98)",
   },
-  // Temporary preview pin (closest-asphalt candidate)
+  // Numbered closest-asphalt exit pins
+  exitPinWrap: { alignItems: "center", gap: 2 },
+  exitPin: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#6366f1",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#6366f1",
+    shadowOpacity: 0.6,
+    shadowRadius: 7,
+    elevation: 8,
+  },
+  exitPinDirect: { backgroundColor: "#d97706", shadowColor: "#d97706" },
+  exitPinText: { color: "#ffffff", fontSize: 13, fontWeight: "900", includeFontPadding: false },
+  exitPinLabel: {
+    backgroundColor: "rgba(8,15,28,0.9)",
+    borderRadius: 6,
+    paddingVertical: 1.5,
+    paddingHorizontal: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(129,140,248,0.45)",
+    maxWidth: 90,
+  },
+  exitPinLabelText: { color: "#c7d2fe", fontSize: 9.5, fontWeight: "800" },
+
+  // Temporary preview pin (search result)
   previewPinWrap: { alignItems: "center", gap: 3 },
   previewPin: {
     width: 30,

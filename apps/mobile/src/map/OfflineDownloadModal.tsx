@@ -70,8 +70,8 @@ export function OfflineDownloadModal({ visible, bounds, tileSize, onClose, onCon
             <Feather name="map" size={15} color="#94a3b8" />
             <Text style={styles.areaText}>
               {span
-                ? `Event area — ~${span.widthKm.toFixed(1)} × ${span.heightKm.toFixed(1)} km around all medics, POIs & tracks`
-                : "Open the map with some markers first."}
+                ? `Event area — ~${span.widthKm.toFixed(1)} × ${span.heightKm.toFixed(1)} km around the tracks`
+                : "Open the map with the event tracks loaded first."}
             </Text>
           </View>
 

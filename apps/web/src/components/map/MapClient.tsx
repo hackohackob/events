@@ -1524,7 +1524,7 @@ export default function MapClient({
     [showKmMarks, kmMarkIntervalKm, tracks, visibleTrackIds],
   )
   // Chips are unreadable (and noisy) when the whole event fits the screen.
-  const kmMarksVisible = showKmMarks && liveZoom >= 9
+  const kmMarksVisible = showKmMarks && liveZoom >= 10
 
   // Build GeoJSON lines for "going_to" medics
   // Medics assigned/responding to an open incident — they get the curved

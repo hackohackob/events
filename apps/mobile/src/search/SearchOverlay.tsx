@@ -26,6 +26,8 @@ export interface SearchTarget {
   lat: number;
   lng: number;
   label: string;
+  /** Emoji for the map preview pin (category-specific). */
+  icon?: string;
 }
 
 interface OnlinePlace {
@@ -253,7 +255,7 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
               {coordinates.map((coord, index) => {
                 const label = formatCoordinate(coord.lat, coord.lng);
                 const dist = distanceLabel(coord.lat, coord.lng);
-                const target = { lat: coord.lat, lng: coord.lng, label };
+                const target = { lat: coord.lat, lng: coord.lng, label, icon: "🎯" };
                 return (
                   <Pressable
                     key={`${coord.lat}-${coord.lng}-${index}`}
@@ -288,7 +290,7 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
               {packMatches.map((place) => {
                 const meta = CATEGORY_META[place.category] ?? CATEGORY_META.other;
                 const dist = distanceLabel(place.lat, place.lng);
-                const target = { lat: place.lat, lng: place.lng, label: place.name };
+                const target = { lat: place.lat, lng: place.lng, label: place.name, icon: meta.icon };
                 return (
                   <Pressable key={place.id} style={[styles.row, styles.packRow]} onPress={() => view(target)}>
                     <View style={[styles.rowIcon, styles.packIcon]}>
@@ -319,6 +321,7 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
                   lat: runner.lastLat,
                   lng: runner.lastLng,
                   label: `${runner.name} · #${runner.bibNumber}`,
+                  icon: "🏃",
                 };
                 return (
                   <Pressable key={runner.userId} style={styles.row} onPress={() => view(target)}>
@@ -351,7 +354,7 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
               {onlineResults.map((place) => {
                 const meta = CATEGORY_META[place.category] ?? CATEGORY_META.other;
                 const dist = distanceLabel(place.lat, place.lng);
-                const target = { lat: place.lat, lng: place.lng, label: place.name };
+                const target = { lat: place.lat, lng: place.lng, label: place.name, icon: meta.icon };
                 return (
                   <Pressable key={place.id} style={styles.row} onPress={() => view(target)}>
                     <View style={styles.rowIcon}>

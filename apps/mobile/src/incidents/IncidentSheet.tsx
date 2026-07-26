@@ -32,6 +32,7 @@ import { useMapStore, type MapMarker } from "../map/map-store";
 import { useSessionStore } from "../security/session-store";
 import { useRosterStore } from "../security/roster-store";
 import { freshnessBucket, freshnessColor, freshnessLabel } from "../map/freshness";
+import { useLocationStatus } from "../debug/location-status";
 import { uploadIncidentPhoto, uploadIncidentVoice } from "./incident-api";
 import { debugLog } from "../debug/debug-log";
 import { useIncidentReadsStore } from "./incident-reads-store";
@@ -107,17 +108,28 @@ interface Props {
   onOpenPhoto: (url: string) => void;
   /** Coordinator-only: arm tap-the-map incident relocation (parent handles the flow). */
   onMoveLocation?: () => void;
-  /** Fly the map to a point and drop a temporary preview pin. */
-  onViewLocation?: (point: { lat: number; lng: number; label: string }) => void;
+  /** Show (or clear with null) the numbered asphalt exit pins on the map. */
+  onAsphaltPins?: (pins: AsphaltPoint[] | null) => void;
+  /** Ease the camera onto one exit point (pins stay up). */
+  onFocusPoint?: (point: { lat: number; lng: number }) => void;
 }
 
-/** One paved-road access point from /routing/closest-asphalt. */
-interface AsphaltPoint {
+/** One paved-road access ("exit") point from /routing/closest-asphalt. */
+export interface AsphaltPoint {
+  index: number;
   lat: number;
   lng: number;
-  distanceMeters: number;
-  durationMs: number;
   roadHint?: string;
+  incident: { distanceMeters: number; durationMs?: number; direct: boolean };
+  fromMe?: { distanceMeters: number; durationMs: number };
+}
+
+function formatDistance(meters: number): string {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
+}
+
+function formatMinutes(ms: number): string {
+  return `${Math.max(1, Math.round(ms / 60000))} min`;
 }
 
 /**
@@ -126,7 +138,7 @@ interface AsphaltPoint {
  * with coordinator assign/unassign, live team chat, and the close/archive flow.
  * Rendered inside the map screen's marker BottomSheet.
  */
-export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onViewLocation }: Props) {
+export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onAsphaltPins, onFocusPoint }: Props) {
   const myId = useSessionStore((s) => s.userId);
   const amCoordinator = useRosterStore((s) => s.amCoordinator);
   const rosterMedics = useRosterStore((s) => s.medics);
@@ -144,26 +156,47 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
   const [closing, setClosing] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
-  // ── Closest asphalt ──────────────────────────────────────────────────────
+  // ── Closest asphalt (in-drawer "exit points" view) ────────────────────────
   const [asphaltPoints, setAsphaltPoints] = useState<AsphaltPoint[] | null>(null);
   const [asphaltLoading, setAsphaltLoading] = useState(false);
-  const [asphaltOpen, setAsphaltOpen] = useState(false);
+  const [asphaltView, setAsphaltView] = useState(false);
+
+  // Never leave orphaned exit pins on the map when this sheet goes away.
+  useEffect(() => {
+    return () => onAsphaltPins?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const openAsphaltView = (points: AsphaltPoint[]) => {
+    setAsphaltView(true);
+    onAsphaltPins?.(points);
+  };
+
+  const closeAsphaltView = () => {
+    setAsphaltView(false);
+    onAsphaltPins?.(null);
+  };
 
   const loadClosestAsphalt = async () => {
     if (asphaltLoading) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (asphaltPoints) {
-      setAsphaltOpen((v) => !v);
+      openAsphaltView(asphaltPoints);
       return;
     }
     setAsphaltLoading(true);
     try {
+      const myFix = useLocationStatus.getState().lastFix;
       const res = await apiFetch<{ points: AsphaltPoint[] }>("/routing/closest-asphalt", {
         method: "POST",
-        body: JSON.stringify({ lat: incident.lat, lng: incident.lng }),
+        body: JSON.stringify({
+          lat: incident.lat,
+          lng: incident.lng,
+          from: myFix ? { lat: myFix.lat, lng: myFix.lng } : undefined,
+        }),
       });
       setAsphaltPoints(res.points);
-      setAsphaltOpen(true);
+      openAsphaltView(res.points);
     } catch (err) {
       debugLog("api", "error", "closest asphalt failed", String(err));
       Alert.alert("No asphalt found", "Couldn't find a reachable paved road around this incident.");
@@ -465,6 +498,89 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
     ]);
   };
 
+  // ── In-drawer "exit points" view: numbered asphalt access points, mirrored
+  //    as numbered pins on the map above the drawer. ──
+  if (asphaltView && asphaltPoints) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.asphaltViewHeader}>
+          <Pressable style={styles.asphaltBackBtn} onPress={closeAsphaltView} hitSlop={8}>
+            <Feather name="arrow-left" size={19} color="#cbd5e1" />
+          </Pressable>
+          <View style={styles.headerText}>
+            <Text style={styles.asphaltViewTitle}>Closest asphalt</Text>
+            <Text style={styles.asphaltViewSub} numberOfLines={1}>
+              {asphaltPoints.length} exit point{asphaltPoints.length > 1 ? "s" : ""} around “{incident.name ?? incident.label}”
+            </Text>
+          </View>
+          <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
+            <Feather name="x" size={18} color="#94a3b8" />
+          </Pressable>
+        </View>
+
+        <BottomSheetScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
+          {asphaltPoints.map((point) => {
+            const direct = point.incident.direct;
+            const label = `Exit ${point.index}${point.roadHint ? ` · ${point.roadHint.replace(/_/g, " ")}` : ""}`;
+            return (
+              <Pressable
+                key={point.index}
+                style={[styles.exitCard, direct && styles.exitCardDirect]}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onFocusPoint?.({ lat: point.lat, lng: point.lng });
+                }}
+              >
+                <View style={[styles.exitBadge, direct && styles.exitBadgeDirect]}>
+                  <Text style={styles.exitBadgeText} allowFontScaling={false}>{point.index}</Text>
+                </View>
+                <View style={styles.exitInfo}>
+                  <Text style={styles.exitTitle} numberOfLines={1}>
+                    {point.roadHint ? point.roadHint.replace(/_/g, " ") : "Paved road"}
+                    {direct ? "  ·  no road" : ""}
+                  </Text>
+                  {/* Incident → point */}
+                  <View style={styles.exitMetricRow}>
+                    <Feather name={direct ? "arrow-up-right" : "trending-up"} size={11} color={direct ? "#fbbf24" : "#94a3b8"} />
+                    <Text style={[styles.exitMetric, direct && { color: "#fcd34d" }]} numberOfLines={1}>
+                      {direct
+                        ? `${formatDistance(point.incident.distanceMeters)} direct — no path from incident`
+                        : `From incident: ${formatMinutes(point.incident.durationMs ?? 0)} · ${formatDistance(point.incident.distanceMeters)}`}
+                    </Text>
+                  </View>
+                  {/* Me → point (car) */}
+                  {point.fromMe ? (
+                    <View style={styles.exitMetricRow}>
+                      <Feather name="truck" size={11} color="#94a3b8" />
+                      <Text style={styles.exitMetric} numberOfLines={1}>
+                        You by car: {formatMinutes(point.fromMe.durationMs)} · {formatDistance(point.fromMe.distanceMeters)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Pressable
+                  style={styles.exitNavBtn}
+                  hitSlop={4}
+                  onPress={() => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    closeAsphaltView();
+                    onClose();
+                    useNavStore.getState().openTransport({ lat: point.lat, lng: point.lng, label });
+                  }}
+                >
+                  <Feather name="navigation" size={16} color="#04121f" />
+                </Pressable>
+              </Pressable>
+            );
+          })}
+          <Text style={styles.exitFootnote}>
+            From-incident times are a foot/bike blend; tap a card to centre its pin.
+          </Text>
+        </BottomSheetScrollView>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       {/* ── Hero header ── */}
@@ -535,7 +651,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
           </Pressable>
         ) : null}
 
-        {/* ── Closest asphalt: nearest paved-road access points ── */}
+        {/* ── Closest asphalt: opens the in-drawer exit-points view ── */}
         {!isClosed ? (
           <Pressable style={styles.asphaltBtn} onPress={() => void loadClosestAsphalt()} disabled={asphaltLoading}>
             {asphaltLoading ? (
@@ -546,58 +662,8 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             <Text style={styles.asphaltBtnText}>
               {asphaltLoading ? "Scanning roads…" : "Closest asphalt"}
             </Text>
-            {asphaltPoints ? (
-              <Feather name={asphaltOpen ? "chevron-up" : "chevron-down"} size={15} color="#a5b4fc" />
-            ) : null}
+            <Feather name="chevron-right" size={15} color="#a5b4fc" />
           </Pressable>
-        ) : null}
-        {!isClosed && asphaltOpen && asphaltPoints ? (
-          <View style={styles.asphaltList}>
-            {asphaltPoints.map((point, index) => {
-              const minutes = Math.max(1, Math.round(point.durationMs / 60000));
-              const distance =
-                point.distanceMeters >= 1000
-                  ? `${(point.distanceMeters / 1000).toFixed(1)} km`
-                  : `${point.distanceMeters} m`;
-              const label = `Asphalt ${index + 1}${point.roadHint ? ` · ${point.roadHint}` : ""}`;
-              return (
-                <View key={`${point.lat}-${point.lng}`} style={[styles.asphaltRow, index > 0 && styles.asphaltRowBorder]}>
-                  <View style={styles.asphaltIndex}>
-                    <Text style={styles.asphaltIndexText} allowFontScaling={false}>{index + 1}</Text>
-                  </View>
-                  <View style={styles.asphaltInfo}>
-                    <Text style={styles.asphaltTime}>{minutes} min · {distance}</Text>
-                    <Text style={styles.asphaltHint} numberOfLines={1}>
-                      {point.roadHint ? point.roadHint.replace(/_/g, " ") : "paved road"}
-                    </Text>
-                  </View>
-                  {onViewLocation ? (
-                    <Pressable
-                      style={styles.asphaltAction}
-                      hitSlop={4}
-                      onPress={() => {
-                        void Haptics.selectionAsync();
-                        onViewLocation({ lat: point.lat, lng: point.lng, label });
-                      }}
-                    >
-                      <Feather name="eye" size={15} color="#93c5fd" />
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    style={[styles.asphaltAction, styles.asphaltNavAction]}
-                    hitSlop={4}
-                    onPress={() => {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      onClose();
-                      useNavStore.getState().openTransport({ lat: point.lat, lng: point.lng, label });
-                    }}
-                  >
-                    <Feather name="navigation" size={15} color="#04121f" />
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
         ) : null}
 
         {/* ── Category (prominent) + who reported it ── */}
@@ -1280,43 +1346,67 @@ const styles = StyleSheet.create({
   },
   asphaltBtnIcon: { fontSize: 14, lineHeight: 17, includeFontPadding: false },
   asphaltBtnText: { color: "#a5b4fc", fontSize: 13, fontWeight: "800" },
-  asphaltList: {
-    marginTop: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(129,140,248,0.2)",
-    backgroundColor: "rgba(99,102,241,0.05)",
-    overflow: "hidden",
-  },
-  asphaltRow: {
+  // ── In-drawer exit-points view ──
+  asphaltViewHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingBottom: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(148,163,184,0.18)",
   },
-  asphaltRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(129,140,248,0.25)" },
-  asphaltIndex: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "rgba(129,140,248,0.18)",
+  asphaltBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  asphaltViewTitle: { color: "#EFF6FF", fontSize: 17, fontWeight: "900", letterSpacing: 0.2 },
+  asphaltViewSub: { color: "#64748b", fontSize: 11.5, fontWeight: "600" },
+  exitCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(99,102,241,0.06)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(129,140,248,0.25)",
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+  },
+  exitCardDirect: {
+    backgroundColor: "rgba(245,158,11,0.06)",
+    borderColor: "rgba(245,158,11,0.3)",
+    borderStyle: "dashed",
+  },
+  exitBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#6366f1",
+    borderWidth: 2,
+    borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
-  asphaltIndexText: { color: "#a5b4fc", fontSize: 11, fontWeight: "900" },
-  asphaltInfo: { flex: 1, minWidth: 0 },
-  asphaltTime: { color: "#e2e8f0", fontSize: 13.5, fontWeight: "800" },
-  asphaltHint: { color: "#64748b", fontSize: 11, fontWeight: "600", marginTop: 1, textTransform: "capitalize" },
-  asphaltAction: {
-    width: 32,
-    height: 32,
-    borderRadius: 11,
+  exitBadgeDirect: { backgroundColor: "#d97706" },
+  exitBadgeText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
+  exitInfo: { flex: 1, minWidth: 0, gap: 3 },
+  exitTitle: { color: "#E9F1FA", fontSize: 14, fontWeight: "800", textTransform: "capitalize" },
+  exitMetricRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  exitMetric: { color: "#94a3b8", fontSize: 12, fontWeight: "600", flex: 1 },
+  exitNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: "#34d399",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(147,197,253,0.12)",
   },
-  asphaltNavAction: { backgroundColor: "#34d399" },
+  exitFootnote: { color: "#475569", fontSize: 11, fontWeight: "500", textAlign: "center", marginTop: 4 },
 
   // Assign modal
   modalBackdrop: {

@@ -158,19 +158,24 @@ export class RoutingService {
   }
 
   /**
-   * Find the nearest paved-road access points around an incident.
+   * Find the nearest paved-road access ("exit") points around an incident.
    *
    * Fully offline (self-hosted GraphHopper): probe car-profile routes from the
-   * incident towards 8 compass bearings, take the FIRST paved point along each
-   * probe path (surface details), dedupe nearby candidates, then foot-route to
-   * each survivor for a precise on-foot distance/time. Returns up to 5 points
-   * sorted by travel time.
+   * incident towards 8 compass bearings and take the FIRST paved point along
+   * each probe path (surface details), deduped. Each surviving point gets:
+   *   - an incident leg: foot + mtb routes, duration = their average (a
+   *     "carrying gear cross-country" pace between walking and cycling); when
+   *     neither profile can route there it's kept as a DIRECT point (straight
+   *     distance, no time) — max 2 of those;
+   *   - an optional caller leg: car route from `from` (the medic's position).
+   * Points come back numbered: routed ones first (fastest first), then direct.
    */
-  async closestAsphalt(origin: LngLat): Promise<ClosestAsphaltResponse> {
+  async closestAsphalt(origin: LngLat, from?: LngLat): Promise<ClosestAsphaltResponse> {
     const PROBE_RADIUS_M = 4000;
     const BEARINGS = [0, 45, 90, 135, 180, 225, 270, 315];
     const DEDUPE_M = 250;
-    const MAX_POINTS = 5;
+    const MAX_ROUTED = 5;
+    const MAX_DIRECT = 2;
 
     // 1. Probe outward with the car profile — its snapping + routable ways are
     //    exactly the roads a vehicle could stage on.
@@ -206,32 +211,72 @@ export class RoutingService {
       if (!dupe) unique.push(candidate);
     }
 
-    // 3. Precise on-foot leg to each survivor (best-effort per candidate).
-    const measured = await Promise.allSettled(
-      unique.map(async (candidate): Promise<AsphaltAccessPoint> => {
-        const body = this.baseRequest("foot", [origin, candidate.point]);
-        body["instructions"] = false;
-        body["elevation"] = false;
+    // 3. Measure both legs per candidate (all best-effort, in parallel).
+    type Measured = Omit<AsphaltAccessPoint, "index">;
+    const quickRoute = async (profile: RouteProfile, points: LngLat[]): Promise<GraphHopperPath | null> => {
+      const body = this.baseRequest(profile, points);
+      body["instructions"] = false;
+      body["elevation"] = false;
+      try {
         const paths = await this.callGraphHopper(body);
-        const path = paths[0];
+        return paths[0] ?? null;
+      } catch {
+        return null;
+      }
+    };
+
+    const measured: Measured[] = await Promise.all(
+      unique.map(async (candidate): Promise<Measured> => {
+        const [footPath, mtbPath, carPath] = await Promise.all([
+          quickRoute("foot", [origin, candidate.point]),
+          quickRoute("mtb", [origin, candidate.point]),
+          from ? quickRoute("car", [from, candidate.point]) : Promise.resolve(null),
+        ]);
+
+        const routed = footPath ?? mtbPath;
+        const incident = routed
+          ? {
+              distanceMeters: Math.round(routed.distance),
+              // Foot/bike blend: average when both profiles route, else the one that did.
+              durationMs: Math.round(
+                footPath && mtbPath ? (footPath.time + mtbPath.time) / 2 : (routed.time as number),
+              ),
+              direct: false,
+            }
+          : {
+              distanceMeters: Math.round(
+                haversineMeters(origin[1], origin[0], candidate.point[1], candidate.point[0]),
+              ),
+              direct: true,
+            };
+
         return {
           lat: candidate.point[1],
           lng: candidate.point[0],
-          distanceMeters: Math.round(path.distance),
-          durationMs: Math.round(path.time),
           roadHint: candidate.roadHint,
+          incident,
+          fromMe: carPath
+            ? { distanceMeters: Math.round(carPath.distance), durationMs: Math.round(carPath.time) }
+            : undefined,
         };
       }),
     );
 
-    const points = measured
-      .filter((r): r is PromiseFulfilledResult<AsphaltAccessPoint> => r.status === "fulfilled")
-      .map((r) => r.value)
-      .sort((a, b) => a.durationMs - b.durationMs)
-      .slice(0, MAX_POINTS);
+    const routedPoints = measured
+      .filter((p) => !p.incident.direct)
+      .sort((a, b) => (a.incident.durationMs ?? 0) - (b.incident.durationMs ?? 0))
+      .slice(0, MAX_ROUTED);
+    const directPoints = measured
+      .filter((p) => p.incident.direct)
+      .sort((a, b) => a.incident.distanceMeters - b.incident.distanceMeters)
+      .slice(0, MAX_DIRECT);
 
+    const points: AsphaltAccessPoint[] = [...routedPoints, ...directPoints].map((p, i) => ({
+      ...p,
+      index: i + 1,
+    }));
     if (points.length === 0) {
-      throw new BadGatewayException("No walkable path to a paved road was found.");
+      throw new BadGatewayException("No paved road access could be measured around this point.");
     }
     return { origin: { lat: origin[1], lng: origin[0] }, points };
   }

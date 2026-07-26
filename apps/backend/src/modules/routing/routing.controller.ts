@@ -25,11 +25,18 @@ export class RoutingController {
     });
   }
 
-  /** Nearest paved-road access points around a location (e.g. an incident). */
+  /** Nearest paved-road access points around a location (e.g. an incident).
+   *  `from` (the caller's position) adds a by-car leg per point. */
   @Post("closest-asphalt")
-  async closestAsphalt(@Body() body: { lat: number; lng: number }) {
+  async closestAsphalt(
+    @Body() body: { lat: number; lng: number; from?: { lat: number; lng: number } },
+  ) {
     const point = validatePoint([Number(body.lng), Number(body.lat)], 0);
-    return this.routingService.closestAsphalt(point);
+    const from =
+      body.from && Number.isFinite(Number(body.from.lat)) && Number.isFinite(Number(body.from.lng))
+        ? validatePoint([Number(body.from.lng), Number(body.from.lat)], 1)
+        : undefined;
+    return this.routingService.closestAsphalt(point, from);
   }
 }
 

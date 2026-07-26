@@ -84,16 +84,20 @@ export interface RouteResponse {
   waypoints: LngLat[];
 }
 
-/** One reachable paved-road access point near an incident. */
+/** One paved-road access ("exit") point near an incident. */
 export interface AsphaltAccessPoint {
+  /** 1-based exit number — routed points first (fastest first), then direct ones. */
+  index: number;
   lat: number;
   lng: number;
-  /** On-foot distance from the incident, metres. */
-  distanceMeters: number;
-  /** On-foot travel time from the incident, ms. */
-  durationMs: number;
-  /** Road name/class when GraphHopper knows it (e.g. "residential"). */
+  /** Road class when GraphHopper knows it (e.g. "residential"). */
   roadHint?: string;
+  /** Incident → point leg. `direct` = no walkable route found; distance is
+   *  then the straight line and there is no duration. Routed duration is a
+   *  foot/bike blend (average of the two profiles). */
+  incident: { distanceMeters: number; durationMs?: number; direct: boolean };
+  /** Caller → point by car, when the caller's position was provided and routable. */
+  fromMe?: { distanceMeters: number; durationMs: number };
 }
 
 export interface ClosestAsphaltResponse {
