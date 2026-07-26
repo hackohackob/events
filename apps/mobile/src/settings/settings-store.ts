@@ -13,6 +13,9 @@ export const LOCATION_INTERVAL_OPTIONS: Array<{ label: string; ms: number }> = [
   { label: "40 min", ms: 2_400_000 },
 ];
 
+/** Selectable spacing for the km chips drawn along tracks. */
+export const KM_MARKER_INTERVAL_OPTIONS = [1, 3, 5, 10, 20] as const;
+
 interface SettingsState {
   /** How often to send a location fix to the server (ms). */
   locationIntervalMs: number;
@@ -20,11 +23,17 @@ interface SettingsState {
   trackOffsetEnabled: boolean;
   /** When true, tracks are shaded by gradient/slope rather than flat colour. */
   trackGradientEnabled: boolean;
+  /** Show km distance chips along tracks (toggled from the map layers menu). */
+  kmMarkersEnabled: boolean;
+  /** Spacing between km chips, in km. */
+  kmMarkerIntervalKm: number;
   hydrated: boolean;
 
   setLocationIntervalMs: (ms: number) => void;
   setTrackOffsetEnabled: (enabled: boolean) => void;
   setTrackGradientEnabled: (enabled: boolean) => void;
+  setKmMarkersEnabled: (enabled: boolean) => void;
+  setKmMarkerIntervalKm: (km: number) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -34,15 +43,24 @@ const DEFAULTS = {
   // user explicitly asks for the side-by-side spread.
   trackOffsetEnabled: false,
   trackGradientEnabled: true,
+  kmMarkersEnabled: true,
+  kmMarkerIntervalKm: 5,
 };
 
-function persist(state: Pick<SettingsState, "locationIntervalMs" | "trackOffsetEnabled" | "trackGradientEnabled">) {
+function persist(
+  state: Pick<
+    SettingsState,
+    "locationIntervalMs" | "trackOffsetEnabled" | "trackGradientEnabled" | "kmMarkersEnabled" | "kmMarkerIntervalKm"
+  >,
+) {
   void AsyncStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
       locationIntervalMs: state.locationIntervalMs,
       trackOffsetEnabled: state.trackOffsetEnabled,
       trackGradientEnabled: state.trackGradientEnabled,
+      kmMarkersEnabled: state.kmMarkersEnabled,
+      kmMarkerIntervalKm: state.kmMarkerIntervalKm,
     }),
   );
 }
@@ -51,6 +69,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   locationIntervalMs: DEFAULTS.locationIntervalMs,
   trackOffsetEnabled: DEFAULTS.trackOffsetEnabled,
   trackGradientEnabled: DEFAULTS.trackGradientEnabled,
+  kmMarkersEnabled: DEFAULTS.kmMarkersEnabled,
+  kmMarkerIntervalKm: DEFAULTS.kmMarkerIntervalKm,
   hydrated: false,
 
   setLocationIntervalMs: (locationIntervalMs) => {
@@ -65,6 +85,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ trackGradientEnabled });
     persist({ ...get(), trackGradientEnabled });
   },
+  setKmMarkersEnabled: (kmMarkersEnabled) => {
+    set({ kmMarkersEnabled });
+    persist({ ...get(), kmMarkersEnabled });
+  },
+  setKmMarkerIntervalKm: (kmMarkerIntervalKm) => {
+    set({ kmMarkerIntervalKm });
+    persist({ ...get(), kmMarkerIntervalKm });
+  },
 
   hydrate: async () => {
     try {
@@ -78,6 +106,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             typeof parsed.trackOffsetEnabled === "boolean" ? parsed.trackOffsetEnabled : DEFAULTS.trackOffsetEnabled,
           trackGradientEnabled:
             typeof parsed.trackGradientEnabled === "boolean" ? parsed.trackGradientEnabled : DEFAULTS.trackGradientEnabled,
+          kmMarkersEnabled:
+            typeof parsed.kmMarkersEnabled === "boolean" ? parsed.kmMarkersEnabled : DEFAULTS.kmMarkersEnabled,
+          kmMarkerIntervalKm:
+            typeof parsed.kmMarkerIntervalKm === "number" ? parsed.kmMarkerIntervalKm : DEFAULTS.kmMarkerIntervalKm,
         });
       }
     } catch {

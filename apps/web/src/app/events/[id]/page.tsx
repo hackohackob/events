@@ -291,6 +291,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const deactivate = useDeactivateEvent()
   const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents' | 'participants'>('info')
   const [showTracks, setShowTracks] = useState(true)
+  // Km distance chips along tracks + their spacing (km).
+  const [showKmMarks, setShowKmMarks] = useState(true)
+  const [kmMarkInterval, setKmMarkInterval] = useState(5)
   const [showMedics, setShowMedics] = useState(true)
   const [showPois, setShowPois] = useState(true)
   const [showParticipants, setShowParticipants] = useState(false)
@@ -1138,6 +1141,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               setMovingIncident(null)
               void moveIncident(incidentId, lat, lng)
             }}
+            showKmMarks={showTracks && showKmMarks}
+            kmMarkIntervalKm={kmMarkInterval}
           />
 
           {/* Layer toggles — top right */}
@@ -1262,6 +1267,41 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   ) : null}
                 </button>
               ))}
+
+              {/* Km marks along tracks: toggle + spacing */}
+              <div
+                className="rounded-lg px-2.5 py-1.5"
+                style={{
+                  background: showKmMarks ? 'rgba(59,130,246,0.09)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${showKmMarks ? 'rgba(59,130,246,0.25)' : 'rgba(148,163,184,0.08)'}`,
+                }}
+              >
+                <button onClick={() => setShowKmMarks(v => !v)} className="flex items-center gap-2.5 w-full text-left">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: showKmMarks ? '#3b82f6' : '#334155' }} />
+                  <span className="flex-1 text-xs font-medium" style={{ color: showKmMarks ? '#e2e8f0' : '#475569' }}>
+                    Km marks
+                  </span>
+                  {showKmMarks && <span className="text-[10px] font-bold" style={{ color: '#3b82f6' }}>every {kmMarkInterval} km</span>}
+                </button>
+                {showKmMarks && (
+                  <div className="flex gap-1 mt-1.5">
+                    {[1, 3, 5, 10, 20].map(v => (
+                      <button
+                        key={v}
+                        onClick={() => setKmMarkInterval(v)}
+                        className="flex-1 text-[10px] font-bold py-1 rounded-md transition-all"
+                        style={{
+                          background: kmMarkInterval === v ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.04)',
+                          color: kmMarkInterval === v ? '#93c5fd' : '#64748b',
+                          border: `1px solid ${kmMarkInterval === v ? 'rgba(59,130,246,0.4)' : 'transparent'}`,
+                        }}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Team zones — collapsible section within the Layers panel. */}
               <ZonesPanel

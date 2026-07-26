@@ -112,6 +112,62 @@ export interface TrackLayer {
   color: string
 }
 
+// ─── Km marks along tracks ────────────────────────────────────────────────────
+
+function kmMarkSegmentMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLng = ((lng2 - lng1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+export interface KmMarkPoint {
+  id: string
+  lng: number
+  lat: number
+  km: number
+  color: string
+}
+
+/** Distance chips every `intervalKm` along each track. Capped: the interval is
+ *  doubled until the total stays modest, so a 1 km setting on a 160 km course
+ *  can't flood the map. */
+export function computeKmMarks(tracks: TrackLayer[], intervalKm: number): KmMarkPoint[] {
+  const MAX_MARKS = 150
+  let interval = Math.max(1, intervalKm)
+  for (;;) {
+    const marks: KmMarkPoint[] = []
+    for (const t of tracks) {
+      if (t.coordinates.length < 2) continue
+      let cum = 0
+      let nextMark = interval * 1000
+      for (let i = 1; i < t.coordinates.length; i++) {
+        const [lng0, lat0] = t.coordinates[i - 1]
+        const [lng1, lat1] = t.coordinates[i]
+        const seg = kmMarkSegmentMeters(lat0, lng0, lat1, lng1)
+        if (seg <= 0) continue
+        while (cum + seg >= nextMark) {
+          const f = (nextMark - cum) / seg
+          marks.push({
+            id: `${t.id}-${nextMark}`,
+            lng: lng0 + (lng1 - lng0) * f,
+            lat: lat0 + (lat1 - lat0) * f,
+            km: nextMark / 1000,
+            color: t.color,
+          })
+          nextMark += interval * 1000
+        }
+        cum += seg
+      }
+    }
+    if (marks.length <= MAX_MARKS || interval >= 40) return marks
+    interval *= 2
+  }
+}
+
 export interface MedicMarker {
   id: string
   longitude: number
@@ -184,6 +240,10 @@ interface MapClientProps {
    *  fires `onPickLocation` instead of any other click behaviour. */
   pickLocationActive?: boolean
   onPickLocation?: (coords: [number, number]) => void
+  /** Show subtle distance chips (5, 10, …) along the visible tracks. */
+  showKmMarks?: boolean
+  /** Spacing between km chips, in km (default 5). */
+  kmMarkIntervalKm?: number
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1271,6 +1331,8 @@ export default function MapClient({
   onZoneDrawn,
   pickLocationActive = false,
   onPickLocation,
+  showKmMarks = false,
+  kmMarkIntervalKm = 5,
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
@@ -1455,6 +1517,15 @@ export default function MapClient({
     ? tracks.filter(t => visibleTrackIds.has(t.id))
     : tracks
 
+  // Distance chips along the visible tracks (subtle, under all live markers).
+  const kmMarks = useMemo(
+    () => (showKmMarks ? computeKmMarks(visibleTracks, kmMarkIntervalKm) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [showKmMarks, kmMarkIntervalKm, tracks, visibleTrackIds],
+  )
+  // Chips are unreadable (and noisy) when the whole event fits the screen.
+  const kmMarksVisible = showKmMarks && liveZoom >= 9
+
   // Build GeoJSON lines for "going_to" medics
   // Medics assigned/responding to an open incident — they get the curved
   // "Assigned" line, so suppress the straight going-to dashed line for them.
@@ -1572,6 +1643,33 @@ export default function MapClient({
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
           />
         </Source>
+      ))}
+
+      {/* Km distance chips — above the track lines, below every live marker. */}
+      {kmMarksVisible && kmMarks.map(mark => (
+        <Marker key={`km-${mark.id}`} longitude={mark.lng} latitude={mark.lat}>
+          <div
+            style={{
+              pointerEvents: 'none',
+              minWidth: 17,
+              height: 17,
+              padding: '0 3px',
+              borderRadius: 9,
+              background: 'rgba(8,15,28,0.82)',
+              border: `1.5px solid ${mark.color}`,
+              color: mark.color,
+              fontSize: 9,
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              lineHeight: 1,
+              opacity: 0.85,
+            }}
+          >
+            {mark.km}
+          </div>
+        </Marker>
       ))}
 
       {/* Going-to lines */}

@@ -899,6 +899,53 @@ function distanceKm(latA: number, lngA: number, latB: number, lngB: number): num
   return earthRadiusKm * c;
 }
 
+interface TrackKmMark {
+  id: string;
+  lat: number;
+  lng: number;
+  km: number;
+  color: string;
+}
+
+/** Distance chips every `intervalKm` along each rendered track. Capped: the
+ *  interval doubles until the total stays modest, so a 1 km setting on a
+ *  160 km course can't flood the map with native marker views. */
+function computeTrackKmMarks(
+  tracks: Array<{ id: string; color: string; coordinates: Array<{ latitude: number; longitude: number }> }>,
+  intervalKm: number,
+): TrackKmMark[] {
+  const MAX_MARKS = 80;
+  let interval = Math.max(1, intervalKm);
+  for (;;) {
+    const marks: TrackKmMark[] = [];
+    for (const track of tracks) {
+      if (track.coordinates.length < 2) continue;
+      let cumKm = 0;
+      let nextMark = interval;
+      for (let i = 1; i < track.coordinates.length; i++) {
+        const a = track.coordinates[i - 1];
+        const b = track.coordinates[i];
+        const seg = distanceKm(a.latitude, a.longitude, b.latitude, b.longitude);
+        if (seg <= 0) continue;
+        while (cumKm + seg >= nextMark) {
+          const f = (nextMark - cumKm) / seg;
+          marks.push({
+            id: `${track.id}-${nextMark}`,
+            lat: a.latitude + (b.latitude - a.latitude) * f,
+            lng: a.longitude + (b.longitude - a.longitude) * f,
+            km: nextMark,
+            color: track.color,
+          });
+          nextMark += interval;
+        }
+        cumKm += seg;
+      }
+    }
+    if (marks.length <= MAX_MARKS || interval >= 40) return marks;
+    interval *= 2;
+  }
+}
+
 function pointDistanceMeters(
   pointA: { lat: number; lng: number },
   pointB: { lat: number; lng: number },
@@ -2491,6 +2538,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // each other (offset 0) instead of side by side.
   const trackOffsetEnabled = useSettingsStore((s) => s.trackOffsetEnabled);
   const trackGradientEnabled = useSettingsStore((s) => s.trackGradientEnabled);
+  const kmMarkersEnabled = useSettingsStore((s) => s.kmMarkersEnabled);
+  const setKmMarkersEnabled = useSettingsStore((s) => s.setKmMarkersEnabled);
+  const kmMarkerIntervalKm = useSettingsStore((s) => s.kmMarkerIntervalKm);
+
+  // Km distance chips along the rendered tracks (subtle, under all live markers).
+  const trackKmMarks = useMemo(
+    () => (kmMarkersEnabled ? computeTrackKmMarks(renderedTrackVisuals, kmMarkerIntervalKm) : []),
+    [kmMarkersEnabled, kmMarkerIntervalKm, renderedTrackVisuals],
+  );
+  // Unreadable clutter when the whole event fits on screen — show from z9 up.
+  const kmMarksVisible = kmMarkersEnabled && mapZoom >= 9;
   const trackRenderOffsetOverride = trackModeActive || !trackOffsetEnabled ? 0 : null;
   const trackLineOffsetValue = (lineOffset: number): any => {
     if (trackRenderOffsetOverride !== null) {
@@ -3233,6 +3291,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             )}
           </React.Fragment>
         ))}
+
+        {/* Km distance chips — mounted before all live markers so they stack
+            beneath medics/incidents; non-interactive by design. */}
+        {kmMarksVisible
+          ? trackKmMarks.map((mark) => (
+              <Marker key={`km-${mark.id}`} lngLat={[mark.lng, mark.lat]} pointerEvents="none">
+                <View style={[styles.kmMarkChip, { borderColor: mark.color }]} pointerEvents="none">
+                  <Text style={[styles.kmMarkText, { color: mark.color }]} allowFontScaling={false}>
+                    {mark.km}
+                  </Text>
+                </View>
+              </Marker>
+            ))
+          : null}
 
         {trackModeActive && focusedTrackScrubSegmentFeature ? (
           <GeoJSONSource id="track-scrub-segment-source" data={focusedTrackScrubSegmentFeature}>
@@ -4028,6 +4100,19 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             <Text style={styles.layerLabel}>Points of interest</Text>
             <View style={[styles.switchTrack, layerVisibility.pois ? styles.switchTrackOn : null]}>
               <View style={[styles.switchKnob, layerVisibility.pois ? styles.switchKnobOn : null]} />
+            </View>
+          </Pressable>
+
+          <Pressable
+            style={styles.layerRow}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setKmMarkersEnabled(!kmMarkersEnabled);
+            }}
+          >
+            <Text style={styles.layerLabel}>Km marks{kmMarkersEnabled ? `  ·  every ${kmMarkerIntervalKm} km` : ""}</Text>
+            <View style={[styles.switchTrack, kmMarkersEnabled ? styles.switchTrackOn : null]}>
+              <View style={[styles.switchKnob, kmMarkersEnabled ? styles.switchKnobOn : null]} />
             </View>
           </Pressable>
 
@@ -5413,6 +5498,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ffffff",
   },
+  // Km distance chips along tracks — deliberately small and low-contrast.
+  kmMarkChip: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 3,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    backgroundColor: "rgba(8,15,28,0.82)",
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0.85,
+  },
+  kmMarkText: { fontSize: 9, fontWeight: "800", lineHeight: 11, includeFontPadding: false },
   runnerDotHighlighted: {
     width: 15,
     height: 15,

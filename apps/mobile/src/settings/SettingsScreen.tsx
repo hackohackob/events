@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { AppState, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { LOCATION_INTERVAL_OPTIONS, useSettingsStore } from "./settings-store";
+import { KM_MARKER_INTERVAL_OPTIONS, LOCATION_INTERVAL_OPTIONS, useSettingsStore } from "./settings-store";
 import { startLocationLoop } from "../location/location-tracker";
 import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
 
@@ -14,6 +14,8 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
   const setTrackOffsetEnabled = useSettingsStore((s) => s.setTrackOffsetEnabled);
   const trackGradientEnabled = useSettingsStore((s) => s.trackGradientEnabled);
   const setTrackGradientEnabled = useSettingsStore((s) => s.setTrackGradientEnabled);
+  const kmMarkerIntervalKm = useSettingsStore((s) => s.kmMarkerIntervalKm);
+  const setKmMarkerIntervalKm = useSettingsStore((s) => s.setKmMarkerIntervalKm);
 
   const pickInterval = (ms: number) => {
     if (ms === locationIntervalMs) return;
@@ -85,6 +87,32 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
               trackColor={{ false: "#1e293b", true: "#16a34a" }}
               thumbColor="#f1f5f9"
             />
+          </View>
+          <View style={styles.rowDivider}>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Km marker spacing</Text>
+              <Text style={styles.rowSub}>
+                How far apart the km chips are drawn along tracks. Toggle the chips themselves from the map layers menu.
+              </Text>
+            </View>
+            <View style={[styles.optionsWrap, { marginTop: 10 }]}>
+              {KM_MARKER_INTERVAL_OPTIONS.map((km) => {
+                const active = km === kmMarkerIntervalKm;
+                return (
+                  <Pressable
+                    key={km}
+                    style={[styles.optionPill, active && styles.optionPillActive]}
+                    onPress={() => {
+                      if (active) return;
+                      setKmMarkerIntervalKm(km);
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                  >
+                    <Text style={[styles.optionText, active && styles.optionTextActive]}>{km} km</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         </View>
 
