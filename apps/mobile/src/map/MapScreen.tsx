@@ -47,6 +47,7 @@ import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
 import { MedicDot } from "./MedicDot";
+import { MedicSheet } from "./MedicSheet";
 import { SelectionPulse } from "./SelectionPulse";
 import { ScaleBar } from "./ScaleBar";
 import { EventChatScreen } from "../chat/EventChatScreen";
@@ -183,6 +184,7 @@ interface MedicActiveResponse {
   lng: number;
   accuracy?: number;
   battery?: number;
+  charging?: boolean;
   status?: string;
   destination?: { lat: number; lng: number; label: string } | null;
   route?: MedicMarkerRoute | null;
@@ -1668,6 +1670,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           lng: medic.lng,
           accuracy: medic.accuracy,
           battery: medic.battery,
+          charging: medic.charging,
           staleState: freshnessBucket(ageMs),
           lastSeenAt: medic.lastSeenAt,
           status: medic.status,
@@ -1801,6 +1804,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             lng: medic.lng,
             accuracy: medic.accuracy,
             battery: medic.battery,
+            charging: medic.charging,
             staleState: freshnessBucket(ageMs),
             lastSeenAt: medic.lastSeenAt,
             status: medic.status,
@@ -1888,7 +1892,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     // and apply them in ONE store write: immediately when the map is quiet,
     // otherwise at most once per window.
     const LOCATION_APPLY_INTERVAL_MS = 30_000;
-    type MedicLocationPayload = { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null };
+    type MedicLocationPayload = { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; charging?: boolean; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null };
     type RunnerLocationPayload = { userId: string; lat: number; lng: number; freshness?: "fresh" | "warning" | "stale" | "offline" };
     const pendingRunners = new Map<string, RunnerLocationPayload>();
     const pendingMedics = new Map<string, MedicLocationPayload>();
@@ -1924,6 +1928,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           lng: payload.lng,
           accuracy: payload.accuracy ?? previous?.accuracy,
           battery: payload.battery ?? previous?.battery,
+          charging: payload.charging ?? previous?.charging,
           staleState: "fresh" as const,
           lastSeenAt: payload.lastSeenAt ?? new Date().toISOString(),
           status: payload.status ?? previous?.status,
@@ -4360,19 +4365,38 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             onClose={closeSelection}
             onOpenPhoto={(url) => setPhotoViewerUrl(url)}
           />
+        ) : selectedMarker?.type === "paramedic" ? (
+          <MedicSheet
+            marker={selectedMarker}
+            rosterEntry={rosterMedics.find((m) => m.id === selectedMarker.id)}
+            onClose={closeSelection}
+            onClearDestination={() => {
+              const medicId = selectedMarker.id;
+              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              // Optimistic: drop the destination/route locally; the server
+              // broadcast confirms it for everyone else.
+              const existing = useMapStore.getState().markers;
+              setMarkers(
+                existing.map((m) =>
+                  m.id === medicId ? { ...m, destination: null, route: null, status: "available" } : m,
+                ),
+              );
+              void assignDestination(null, medicId).catch((err) =>
+                debugLog("api", "error", "clear destination failed", String(err)),
+              );
+            }}
+          />
         ) : selectedMarker ? (
           <>
             <View style={styles.sheetHeader}>
               <View
                 style={[
                   styles.incidentIconWrap,
-                  selectedMarker.type === "paramedic"
-                    ? styles.sheetParamedicIconBg
-                    : selectedMarker.type === "runner"
-                      ? styles.sheetParticipantIconBg
-                      : selectedMarker.type === "infrastructure"
-                        ? { backgroundColor: `${poiConfig(selectedMarker.poiType).color}26` }
-                        : null,
+                  selectedMarker.type === "runner"
+                    ? styles.sheetParticipantIconBg
+                    : selectedMarker.type === "infrastructure"
+                      ? { backgroundColor: `${poiConfig(selectedMarker.poiType).color}26` }
+                      : null,
                 ]}
               >
                 {selectedMarker.type === "infrastructure" ? (
@@ -4391,9 +4415,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   >
                     {selectedMarker.type === "incident"
                       ? "!"
-                      : selectedMarker.type === "paramedic"
-                        ? markerInitials(selectedMarker.label)
-                        : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
+                      : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
                   </Text>
                 )}
               </View>
@@ -4402,22 +4424,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 <Text style={styles.sheetMetaText}>
                   {selectedMarker.type === "incident"
                     ? `${incidentTypeLabel(selectedIncident?.incidentType)} · ${incidentStatusLabel(selectedIncident?.status)}`
-                    : selectedMarker.type === "paramedic"
-                      ? "Medical unit"
-                      : selectedMarker.type === "infrastructure"
-                        ? poiTypeLabel(selectedMarker.poiType)
-                        : "Participant"}
+                    : selectedMarker.type === "infrastructure"
+                      ? poiTypeLabel(selectedMarker.poiType)
+                      : "Participant"}
                 </Text>
                 <Text style={styles.sheetMetaText}>
                   {selectedMarker.type === "incident"
                     ? incidentDistance != null
                       ? `${incidentDistance.toFixed(1)} km from your location`
                       : "Locating you…"
-                    : selectedMarker.type === "paramedic"
-                      ? selectedMarker.vehicle ?? "Mobile Unit"
-                      : selectedMarker.type === "infrastructure"
-                        ? `${selectedMarker.lat.toFixed(5)}, ${selectedMarker.lng.toFixed(5)}`
-                        : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
+                    : selectedMarker.type === "infrastructure"
+                      ? `${selectedMarker.lat.toFixed(5)}, ${selectedMarker.lng.toFixed(5)}`
+                      : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
                 </Text>
               </View>
 
@@ -4475,33 +4493,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 </>
               ) : (
                 <>
-                  {(() => {
-                    const rosterEntry =
-                      selectedMarker.type === "paramedic"
-                        ? rosterMedics.find((m) => m.id === selectedMarker.id)
-                        : undefined;
-                    const skills = [...(rosterEntry?.skills ?? []), ...(rosterEntry?.capabilities ?? [])];
-                    return (
-                      <>
-                        <View style={styles.sheetInfoRow}>
-                          <Text style={styles.sheetInfoLabel}>Role</Text>
-                          <Text style={styles.sheetInfoValue}>
-                            {rosterEntry?.type === "coordinator"
-                              ? "Coordinator"
-                              : selectedMarker.type === "paramedic"
-                                ? "Medic"
-                                : "Participant"}
-                          </Text>
-                        </View>
-                        {skills.length > 0 ? (
-                          <View style={styles.sheetInfoRow}>
-                            <Text style={styles.sheetInfoLabel}>Skills</Text>
-                            <Text style={[styles.sheetInfoValue, { flex: 1, textAlign: "right" }]}>{skills.join(" · ")}</Text>
-                          </View>
-                        ) : null}
-                      </>
-                    );
-                  })()}
+                  <View style={styles.sheetInfoRow}>
+                    <Text style={styles.sheetInfoLabel}>Role</Text>
+                    <Text style={styles.sheetInfoValue}>Participant</Text>
+                  </View>
                   <View style={styles.sheetInfoRow}>
                     <Text style={styles.sheetInfoLabel}>Identifier</Text>
                     <Text style={styles.sheetInfoValue}>{selectedMarker.bibNumber ?? selectedMarker.id}</Text>
@@ -4528,39 +4523,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   {selectedMarker.battery != null ? (
                     <View style={styles.sheetInfoRow}>
                       <Text style={styles.sheetInfoLabel}>Battery</Text>
-                      <Text style={styles.sheetInfoValue}>{Math.round(selectedMarker.battery * 100)}%</Text>
+                      <Text style={styles.sheetInfoValue}>
+                        {Math.round(selectedMarker.battery * 100)}%{selectedMarker.charging ? " ⚡" : ""}
+                      </Text>
                     </View>
-                  ) : null}
-                  {selectedMarker.type === "paramedic" && (selectedMarker.destination || selectedMarker.route) ? (
-                    <>
-                      {selectedMarker.destination?.label ? (
-                        <View style={styles.sheetInfoRow}>
-                          <Text style={styles.sheetInfoLabel}>Heading to</Text>
-                          <Text style={styles.sheetInfoValue} numberOfLines={1}>{selectedMarker.destination.label}</Text>
-                        </View>
-                      ) : null}
-                      <Pressable
-                        style={styles.clearDestBtn}
-                        onPress={() => {
-                          const medicId = selectedMarker.id;
-                          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                          // Optimistic: drop the destination/route locally; the
-                          // server broadcast confirms it for everyone else.
-                          const existing = useMapStore.getState().markers;
-                          setMarkers(
-                            existing.map((m) =>
-                              m.id === medicId ? { ...m, destination: null, route: null, status: "available" } : m,
-                            ),
-                          );
-                          void assignDestination(null, medicId).catch((err) =>
-                            debugLog("api", "error", "clear destination failed", String(err)),
-                          );
-                        }}
-                      >
-                        <Feather name="x-circle" size={15} color="#fca5a5" />
-                        <Text style={styles.clearDestBtnText}>Clear destination</Text>
-                      </Pressable>
-                    </>
                   ) : null}
                 </>
               )}

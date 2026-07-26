@@ -62,7 +62,7 @@ export class MedicsController {
   async postMedicLocation(
     @Param("eventId") eventId: string,
     @Param("medicId") medicId: string,
-    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number; timestamp?: string; name?: string },
+    @Body() body: { lat: number; lng: number; accuracy?: number; speed?: number; heading?: number; battery?: number; charging?: boolean; timestamp?: string; name?: string },
   ) {
     // External guests aren't on the roster, so getMedicById returns null for
     // them — fall back to the name the app sends, then to a humanised form of
@@ -79,6 +79,7 @@ export class MedicsController {
       speed: body.speed,
       heading: body.heading,
       battery: body.battery,
+      charging: body.charging,
       timestamp: body.timestamp,
     });
     await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, body.lat, body.lng);

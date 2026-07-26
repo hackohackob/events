@@ -42,6 +42,7 @@ export interface UpsertMedicLocationParams {
   speed?: number;
   accuracy?: number;
   battery?: number;
+  charging?: boolean;
   /** Client-side fix time (ISO). Falls back to server time when absent. */
   timestamp?: string;
 }
@@ -78,6 +79,7 @@ export class MedicsService implements OnModuleInit {
     // Idempotent column additions — safe to run on every boot
     const alterations = [
       `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
+      `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS charging BOOLEAN`,
       `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS nav_route JSONB`,
       `ALTER TABLE participant_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
       `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS type TEXT`,
@@ -220,6 +222,7 @@ export class MedicsService implements OnModuleInit {
       speed: params.speed,
       accuracy: params.accuracy,
       battery: params.battery,
+      charging: params.charging,
       status: existing?.status ?? "available",
       destination: existing?.destination ?? null,
       route: existing?.route ?? null,
@@ -229,8 +232,8 @@ export class MedicsService implements OnModuleInit {
 
     await this.db.query(
       `INSERT INTO medic_last_location
-         (medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, status, destination, nav_route, recorded_at, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         (medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, charging, status, destination, nav_route, recorded_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (event_id, medic_id) DO UPDATE SET
          name        = EXCLUDED.name,
          lat         = EXCLUDED.lat,
@@ -239,12 +242,14 @@ export class MedicsService implements OnModuleInit {
          speed       = EXCLUDED.speed,
          accuracy    = EXCLUDED.accuracy,
          battery     = EXCLUDED.battery,
+         charging    = EXCLUDED.charging,
          recorded_at = EXCLUDED.recorded_at,
          last_seen_at = EXCLUDED.last_seen_at`,
       [
         params.medicId, params.eventId, params.name,
         params.lat, params.lng, params.heading ?? null,
         params.speed ?? null, params.accuracy ?? null, params.battery ?? null,
+        params.charging ?? null,
         state.status, state.destination ? JSON.stringify(state.destination) : null,
         state.route ? JSON.stringify(state.route) : null,
         recordedAt, now,
@@ -410,13 +415,14 @@ export class MedicsService implements OnModuleInit {
       speed: number | null;
       accuracy: number | null;
       battery: number | null;
+      charging: boolean | null;
       status: string;
       destination: unknown;
       nav_route: unknown;
       recorded_at: string;
       last_seen_at: string;
     }>(
-      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery,
+      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, charging,
               status, destination, nav_route, recorded_at, last_seen_at
        FROM medic_last_location
        WHERE event_id = $1
@@ -434,6 +440,7 @@ export class MedicsService implements OnModuleInit {
       speed: r.speed ?? undefined,
       accuracy: r.accuracy ?? undefined,
       battery: r.battery ?? undefined,
+      charging: r.charging ?? undefined,
       status: r.status as MedicStatus,
       destination: this.sanitizeDestination(r.destination),
       route: (r.nav_route as MedicState["route"]) ?? null,
@@ -472,13 +479,14 @@ export class MedicsService implements OnModuleInit {
       speed: number | null;
       accuracy: number | null;
       battery: number | null;
+      charging: boolean | null;
       status: string;
       destination: unknown;
       nav_route: unknown;
       recorded_at: string;
       last_seen_at: string;
     }>(
-      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery,
+      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, charging,
               status, destination, nav_route, recorded_at, last_seen_at
        FROM medic_last_location
        WHERE event_id = $1 AND medic_id = $2`,
@@ -496,6 +504,7 @@ export class MedicsService implements OnModuleInit {
       speed: r.speed ?? undefined,
       accuracy: r.accuracy ?? undefined,
       battery: r.battery ?? undefined,
+      charging: r.charging ?? undefined,
       status: r.status as MedicStatus,
       destination: this.sanitizeDestination(r.destination),
       route: (r.nav_route as MedicState["route"]) ?? null,

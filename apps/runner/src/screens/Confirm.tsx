@@ -4,7 +4,6 @@ import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { ALL_CATEGORIES } from "../lib/types";
 import { RunnerMap } from "../map/RunnerMap";
-import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 import { AttachmentEditor } from "../components/AttachmentEditor";
 import { LOW_ACCURACY_METERS } from "../hooks/useGeolocation";
 
@@ -14,7 +13,6 @@ export function Confirm() {
   const { t } = useT();
   const [confirming, setConfirming] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
-  const voice = useVoiceRecorder();
   // Clamp centre for dragging: the originally captured fix, stored on the
   // draft itself (immutable) so the allowed radius — and the "moved N m" note
   // — are both measured from the real GPS point, not wherever `fix` has since
@@ -43,15 +41,6 @@ export function Confirm() {
   // Once the runner has placed the pin themselves, they've provided a location
   // they vouch for — the raw GPS accuracy no longer matters for the send gate.
   const lowAccuracy = !!draft.fix && draft.fix.accuracy > LOW_ACCURACY_METERS && !draft.manuallyMoved;
-
-  async function toggleVoice() {
-    if (voice.recording) {
-      const res = await voice.stop();
-      if (res) patchDraft({ voice: res.blob });
-    } else {
-      await voice.start().catch(() => undefined);
-    }
-  }
 
   return (
     <div className="screen" style={{ padding: "44px 16px 28px", maxWidth: 460, margin: "0 auto" }}>
@@ -110,7 +99,7 @@ export function Confirm() {
         )}
       </div>
 
-      {/* Add details — note / photo / voice */}
+      {/* Add details — note only at this stage (photo & voice come after send) */}
       <div style={{ display: "flex", justifyContent: "space-between", margin: "20px 0 10px" }}>
         <span className="section-label">{t("sent.addDetails")}</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)" }}>{t("confirm.helpsMedics")}</span>
@@ -119,11 +108,6 @@ export function Confirm() {
         note={draft.description}
         onNoteChange={(v) => patchDraft({ description: v })}
         notePlaceholder={t("confirm.description")}
-        voice={draft.voice}
-        voiceSupported={voice.supported}
-        recording={voice.recording}
-        onToggleRecord={toggleVoice}
-        onRemoveVoice={() => patchDraft({ voice: null })}
       />
       <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -2 }}>{t("confirm.photoAfter")}</p>
 

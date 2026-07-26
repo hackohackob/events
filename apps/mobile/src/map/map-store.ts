@@ -26,6 +26,8 @@ interface Marker {
   lastSeenAt?: string;
   accuracy?: number;
   battery?: number;
+  /** Whether the medic's device was charging at the last update. */
+  charging?: boolean;
   poiType?: string;
   /** Custom glyph key for a "custom" POI; overrides the type's default icon. */
   poiIcon?: string;

@@ -118,6 +118,8 @@ export interface MedicState {
   accuracy?: number;
   /** Device battery level 0–1 at the time of the last update */
   battery?: number;
+  /** Whether the device was charging at the time of the last update */
+  charging?: boolean;
   status: MedicStatus;
   destination?: MedicDestination | null;
   /** Active navigation path (set while navigating), or null. */
@@ -135,6 +137,8 @@ export interface WsMedicLocation {
   accuracy?: number;
   /** Device battery level 0–1 */
   battery?: number;
+  /** Whether the device is charging */
+  charging?: boolean;
 }
 
 export interface AssignMedicDestinationRequest {

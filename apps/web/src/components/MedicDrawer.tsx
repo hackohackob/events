@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, BatteryMedium, Navigation, MapPin, Crosshair, AlertCircle } from 'lucide-react'
+import { X, BatteryMedium, BatteryCharging, Navigation, MapPin, Crosshair, AlertCircle } from 'lucide-react'
 import type { MedicState } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
 
@@ -61,7 +61,13 @@ export default function MedicDrawer({ medic, incidents, onClose, onAssignToIncid
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {/* Telemetry */}
         <div className="grid grid-cols-2 gap-2">
-          <Stat icon={<BatteryMedium className="w-3.5 h-3.5" />} label="Battery" value={medic.battery != null ? `${Math.round(medic.battery * 100)}%` : '—'} />
+          <Stat
+            icon={medic.charging
+              ? <BatteryCharging className="w-3.5 h-3.5" style={{ color: '#22c55e' }} />
+              : <BatteryMedium className="w-3.5 h-3.5" />}
+            label={medic.charging ? 'Battery ⚡' : 'Battery'}
+            value={medic.battery != null ? `${Math.round(medic.battery * 100)}%${medic.charging ? ' · charging' : ''}` : '—'}
+          />
           <Stat icon={<Crosshair className="w-3.5 h-3.5" />} label="GPS" value={medic.accuracy != null ? `±${Math.round(medic.accuracy)} m` : '—'} />
           <Stat icon={<MapPin className="w-3.5 h-3.5" />} label="Position" value={`${medic.lat.toFixed(4)}, ${medic.lng.toFixed(4)}`} />
           <Stat icon={<Navigation className="w-3.5 h-3.5" />} label="Last seen" value={lastSeen(medic.lastSeenAt)} />

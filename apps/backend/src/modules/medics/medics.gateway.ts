@@ -47,6 +47,7 @@ export class MedicsGateway {
       speed: data.speed,
       accuracy: data.accuracy,
       battery: data.battery,
+      charging: data.charging,
     });
 
     await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, data.lat, data.lng);

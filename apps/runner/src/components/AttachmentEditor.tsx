@@ -10,10 +10,12 @@ interface Props {
   photos?: File[];
   onAddPhoto?: (file: File) => void;
   onRemovePhoto?: (index: number) => void;
-  voice: Blob | null;
-  voiceSupported: boolean;
-  recording: boolean;
-  onToggleRecord: () => void;
+  /** Omit `onToggleRecord` to hide the voice action entirely (e.g. the initial
+   *  report — voice notes can only be added once the incident exists). */
+  voice?: Blob | null;
+  voiceSupported?: boolean;
+  recording?: boolean;
+  onToggleRecord?: () => void;
   onRemoveVoice?: () => void;
   maxPhotos?: number;
   /** When provided, the note shows an explicit Send button (used after the SOS
@@ -84,7 +86,7 @@ export function AttachmentEditor({
             onClick={() => setPhotoChooser((o) => !o)}
           />
         )}
-        {voiceSupported && (
+        {voiceSupported && onToggleRecord && (
           <ActionButton
             glyph={recording ? "⏹" : "🎙️"}
             label={recording ? t("confirm.recording") : t("sent.addVoice")}

@@ -148,6 +148,17 @@ async function readBatteryLevel(): Promise<number | undefined> {
   }
 }
 
+/** Whether the device is currently plugged in (charging or already full). */
+async function readBatteryCharging(): Promise<boolean | undefined> {
+  try {
+    const state = await Battery.getBatteryStateAsync();
+    if (state === Battery.BatteryState.UNKNOWN) return undefined;
+    return state === Battery.BatteryState.CHARGING || state === Battery.BatteryState.FULL;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Send a single location fix to the server. Shared by the background task and
  * the one-shot send fired when the app launches. Records outcome to the debug
@@ -169,6 +180,7 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
   lastAcceptedAt = Date.now();
 
   const battery = await readBatteryLevel();
+  const charging = await readBatteryCharging();
   noteBatterySample(battery);
 
   useLocationStatus.getState().setFix({
@@ -190,6 +202,7 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
       speed: location.coords.speed ?? undefined,
       heading: location.coords.heading ?? undefined,
       battery,
+      charging,
       // Real fix time — without it the server stamps arrival time, so a fix
       // flushed after a Doze freeze masquerades as a live position.
       timestamp: new Date(location.timestamp).toISOString(),

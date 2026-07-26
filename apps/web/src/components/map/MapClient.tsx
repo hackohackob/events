@@ -619,15 +619,6 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
               {formatLastSeen(medic.lastSeenAt)}
             </div>
           )}
-          {/* Going-to indicator */}
-          {online && isGoingTo && (
-            <div
-              className="absolute -top-1 -right-1 flex items-center justify-center rounded-full"
-              style={{ width: 14, height: 14, background: '#f59e0b', border: '2px solid #0a1224', fontSize: 7, color: '#fff', fontWeight: 900 }}
-            >
-              →
-            </div>
-          )}
         </div>
       </Marker>
 
