@@ -28,6 +28,7 @@ export class PttMediaService {
   private readonly logger = new Logger(PttMediaService.name);
   private ffmpegChecked = false;
   private ffmpegAvailable = false;
+  private libopusProbe: Promise<boolean> | null = null;
 
   /** Probed once; the answer cannot change without a restart. */
   async hasFfmpeg(): Promise<boolean> {
@@ -40,6 +41,28 @@ export class PttMediaService {
       this.logger.warn("ffmpeg not found — PTT voice will fall back to transcripts");
     }
     return this.ffmpegAvailable;
+  }
+
+  /**
+   * Whether this ffmpeg can *decode* with libopus. Without it the only other
+   * option is ffmpeg's native Opus decoder, which corrupts handset SILK streams
+   * — so we serve the untouched .ogg instead. Delivering audible garbage is a
+   * worse failure than delivering a container iOS won't open.
+   */
+  private hasLibopusDecoder(): Promise<boolean> {
+    this.libopusProbe ??= run("ffmpeg", ["-hide_banner", "-decoders"])
+      .then((out) => /^\s*\S+\s+libopus\b/m.test(out))
+      .catch(() => false)
+      .then((ok) => {
+        if (!ok) {
+          this.logger.warn(
+            "ffmpeg has no libopus decoder — inbound PTT voice will be served as .ogg " +
+              "(playable on web/Android, not iOS). Install an ffmpeg built with libopus.",
+          );
+        }
+        return ok;
+      });
+    return this.libopusProbe;
   }
 
   async ensureUploadsDir(): Promise<void> {
@@ -60,29 +83,28 @@ export class PttMediaService {
   }
 
   /**
-   * Re-wrap an Ogg Opus buffer as m4a so every client can play it. Returns null
-   * when ffmpeg is unavailable — callers then serve the .ogg as-is.
+   * Re-wrap an Ogg Opus buffer as m4a so every client can play it (iOS cannot
+   * play Ogg Opus). Returns null when ffmpeg is unavailable — callers then serve
+   * the .ogg as-is, which is what browsers want anyway.
    *
-   * The limiter is not optional polish. PTT handsets run aggressive AGC, and the
-   * decoded Opus routinely peaks *above* full scale — measured at +3.8 dBFS on
-   * real traffic, with ~0.5% of samples over. Converting that straight to 16-bit
-   * hard-clips every one of them, which is heard as loud crackling over the
-   * voice. Limiting in the float domain before the integer stage keeps the peaks
-   * as signal instead of destroying them; 0.891 leaves ~1 dB of headroom for the
-   * AAC encoder's own overshoot.
+   * `-c:a libopus` on the **input** is load-bearing, not a preference. ffmpeg's
+   * built-in `opus` decoder mis-decodes the SILK-wideband streams PTT handsets
+   * produce (TOC config 7, 2x60 ms frames): measured against libopus on real
+   * traffic it returns a completely different signal — 0.0 dB SNR, ~5.6x the
+   * RMS, slammed into full scale — which is heard as loud crackling over the
+   * voice. libopus decodes the same file to a peak of 7509/32768 with no
+   * clipping at all. Forcing it takes the round trip from 16.6 dB to 39.4 dB.
    */
   async oggToM4a(ogg: Buffer): Promise<Buffer | null> {
     if (!(await this.hasFfmpeg())) return null;
-    return this.transcode(ogg, "ogg", "m4a", [
-      "-af", "alimiter=level_in=1:level_out=1:limit=0.891:attack=5:release=50:level=disabled",
-      "-c:a", "aac",
-      // 96k rather than 64k: the source is already lossy, and a second lossy
-      // pass on a limited signal is where intelligibility gets lost.
-      "-b:a", "96k",
-      "-ar", "16000",
-      "-ac", "1",
-      "-movflags", "+faststart",
-    ]).catch((err) => {
+    if (!(await this.hasLibopusDecoder())) return null;
+    return this.transcode(
+      ogg,
+      "ogg",
+      "m4a",
+      ["-c:a", "aac", "-b:a", "64k", "-ar", "16000", "-ac", "1", "-movflags", "+faststart"],
+      ["-c:a", "libopus"],
+    ).catch((err) => {
       this.logger.warn(`ogg → m4a failed: ${(err as Error).message}`);
       return null;
     });
@@ -137,14 +159,27 @@ export class PttMediaService {
     return this.transcode(data, sourceExt.replace(/^\./, ""), "jpg", ["-q:v", "4"]).catch(() => null);
   }
 
-  private async transcode(input: Buffer, inExt: string, outExt: string, args: string[]): Promise<Buffer> {
+  /** `inputArgs` land before `-i` — that is the only place a decoder can be chosen. */
+  private async transcode(
+    input: Buffer,
+    inExt: string,
+    outExt: string,
+    args: string[],
+    inputArgs: string[] = [],
+  ): Promise<Buffer> {
     await this.ensureUploadsDir();
     const id = randomUUID();
     const inPath = join(UPLOADS_DIR, `tmp-${id}.${inExt}`);
     const outPath = join(UPLOADS_DIR, `tmp-${id}.out.${outExt}`);
     try {
       await writeFile(inPath, input);
-      await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", inPath, ...args, outPath]);
+      await run("ffmpeg", [
+        "-hide_banner", "-loglevel", "error", "-y",
+        ...inputArgs,
+        "-i", inPath,
+        ...args,
+        outPath,
+      ]);
       return await readFile(outPath);
     } finally {
       await Promise.all([unlink(inPath).catch(() => undefined), unlink(outPath).catch(() => undefined)]);
