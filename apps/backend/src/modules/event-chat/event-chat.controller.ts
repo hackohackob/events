@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFile } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, UseGuards, UseInterceptors, UploadedFile } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { extname, join } from "path";
 import { existsSync, mkdirSync } from "fs";
 /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment */
 const { diskStorage } = require("multer") as { diskStorage: (opts: any) => any };
 /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment */
-import type { EventMessage } from "@events/contracts";
+import type { EventMessage, SendEventLocationRequest } from "@events/contracts";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { AuthGuard } from "../common/guards/auth.guard";
@@ -68,5 +68,59 @@ export class EventChatController {
       audioDurationMs: Number.isFinite(parsedDuration) && parsedDuration > 0 ? Math.round(parsedDuration) : undefined,
       transcript: transcript ?? undefined,
     });
+  }
+
+  /** Photo into the team chat — relayed on to any bridge that carries images. */
+  @Post("image")
+  @Roles("paramedic", "coordinator", "medic", "runner")
+  @UseInterceptors(
+    FileInterceptor("image", {
+      storage: diskStorage({
+        destination: UPLOADS_DIR,
+        filename: (_req: any, file: any, cb: (err: null, name: string) => void) => {
+          const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+          cb(null, `photo-${unique}${extname(file.originalname as string) || ".jpg"}`);
+        },
+      }),
+      limits: { fileSize: 25 * 1024 * 1024 },
+    }),
+  )
+  async image(
+    @CurrentUser() user: RequestUser,
+    @UploadedFile() file: { filename: string },
+    @Body("text") text?: string,
+  ): Promise<EventMessage> {
+    const name = await this.chat.resolveAuthorName(user.eventId, user.userId);
+    return this.chat.addImage(user.eventId, user.userId, name, {
+      imageUrl: `/uploads/event-chat/${file.filename}`,
+      text: text?.trim() || undefined,
+    });
+  }
+
+  /** Drop a point into the team chat (and out over the bridges). */
+  @Post("location")
+  @Roles("paramedic", "coordinator", "medic", "runner")
+  async location(
+    @CurrentUser() user: RequestUser,
+    @Body() body: SendEventLocationRequest,
+  ): Promise<EventMessage> {
+    const lat = Number(body.lat);
+    const lng = Number(body.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new BadRequestException("lat and lng are required");
+    }
+    const name = await this.chat.resolveAuthorName(user.eventId, user.userId);
+    return this.chat.addLocation(
+      user.eventId,
+      user.userId,
+      name,
+      {
+        lat,
+        lng,
+        address: body.address?.trim() || undefined,
+        accuracyM: Number.isFinite(Number(body.accuracyM)) ? Math.round(Number(body.accuracyM)) : undefined,
+      },
+      body.text?.trim() || undefined,
+    );
   }
 }

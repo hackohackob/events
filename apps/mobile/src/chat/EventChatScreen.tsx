@@ -4,7 +4,9 @@ import {
   Animated,
   Easing,
   FlatList,
+  Image,
   Keyboard,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,6 +16,8 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -29,10 +33,13 @@ import { getSocket } from "../realtime/socket-client";
 import { debugLog } from "../debug/debug-log";
 import {
   listEventMessages,
+  sendEventLocation,
   sendEventMessage,
+  uploadEventPhoto,
   uploadEventVoice,
   type EventFeedType,
   type EventMessageDto,
+  type PttMessageOrigin,
 } from "./event-chat-api";
 
 const FEED_META: Record<EventFeedType, { icon: keyof typeof Feather.glyphMap; color: string; label: string }> = {
@@ -40,6 +47,16 @@ const FEED_META: Record<EventFeedType, { icon: keyof typeof Feather.glyphMap; co
   response: { icon: "navigation", color: "#60a5fa", label: "Responding" },
   poi: { icon: "map-pin", color: "#34d399", label: "New point" },
 };
+
+/** Messages relayed in from a PTT network are badged with their source. */
+const ORIGIN_META: Partial<Record<PttMessageOrigin, { color: string; label: string; icon: keyof typeof Feather.glyphMap }>> = {
+  zello: { color: "#f59e0b", label: "Zello", icon: "radio" },
+  radio: { color: "#38bdf8", label: "Radio", icon: "wifi" },
+};
+
+function originOf(msg: EventMessageDto) {
+  return msg.origin && msg.origin !== "app" ? ORIGIN_META[msg.origin] : undefined;
+}
 
 const AVATAR_COLORS = ["#0f6e56", "#185fa5", "#7c3aed", "#b45309", "#9d174d", "#0e7490", "#4d7c0f"];
 function avatarColor(name: string): string {
@@ -199,9 +216,13 @@ export function EventChatScreen({ onClose, bottomInset = 0 }: { onClose: () => v
         />
       )}
 
-      <Composer draft={draft} setDraft={setDraft} onSend={send} sending={sending} onVoice={(m) =>
-        setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]))
-      } />
+      <Composer
+        draft={draft}
+        setDraft={setDraft}
+        onSend={send}
+        sending={sending}
+        onAttachment={(m) => setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]))}
+      />
     </View>
   );
 }
@@ -267,22 +288,49 @@ function SystemCard({ msg }: { msg: EventMessageDto }) {
 function ChatBubble({ row }: { row: Row }) {
   const { msg, mine, showHeader } = row;
   const name = msg.authorName || "Team";
+  const origin = originOf(msg);
+
   return (
     <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : styles.bubbleRowOther]}>
       {!mine ? (
         <View style={styles.avatarSlot}>
           {showHeader ? (
-            <View style={[styles.avatar, { backgroundColor: avatarColor(name) }]}>
-              <Text style={styles.avatarText}>{initials(name)}</Text>
-            </View>
+            origin ? (
+              <View style={[styles.avatar, { backgroundColor: `${origin.color}22`, borderWidth: 1, borderColor: `${origin.color}66` }]}>
+                <Feather name={origin.icon} size={13} color={origin.color} />
+              </View>
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: avatarColor(name) }]}>
+                <Text style={styles.avatarText}>{initials(name)}</Text>
+              </View>
+            )
           ) : null}
         </View>
       ) : null}
       <View style={{ maxWidth: "78%" }}>
-        {showHeader && !mine ? <Text style={styles.author}>{name}</Text> : null}
-        <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
+        {showHeader && !mine ? (
+          <View style={styles.authorRow}>
+            <Text style={[styles.author, origin ? { color: origin.color } : null]}>{name}</Text>
+            {origin ? (
+              <View style={[styles.originTag, { backgroundColor: `${origin.color}1e` }]}>
+                <Text style={[styles.originTagText, { color: origin.color }]}>{origin.label}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+        <View
+          style={[
+            styles.bubble,
+            mine ? styles.bubbleMine : styles.bubbleOther,
+            origin && !mine ? { borderLeftWidth: 2, borderLeftColor: origin.color } : null,
+          ]}
+        >
           {msg.audioUrl ? (
             <VoiceContent msg={msg} mine={mine} />
+          ) : msg.imageUrl ? (
+            <PhotoContent msg={msg} mine={mine} />
+          ) : msg.location ? (
+            <LocationContent msg={msg} mine={mine} />
           ) : (
             <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{msg.text}</Text>
           )}
@@ -290,6 +338,56 @@ function ChatBubble({ row }: { row: Row }) {
         </View>
       </View>
     </View>
+  );
+}
+
+function PhotoContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
+  const uri = resolveMediaUrl(msg.thumbnailUrl ?? msg.imageUrl);
+  const full = resolveMediaUrl(msg.imageUrl);
+  return (
+    <Pressable
+      onPress={() => {
+        if (!full) return;
+        void Haptics.selectionAsync();
+        void Linking.openURL(full);
+      }}
+    >
+      {uri ? <Image source={{ uri }} style={styles.photo} resizeMode="cover" /> : null}
+      {msg.text ? (
+        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine, { marginTop: 6 }]}>{msg.text}</Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function LocationContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
+  const loc = msg.location!;
+  const label = loc.address ?? `${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}`;
+  return (
+    <Pressable
+      style={styles.locationRow}
+      onPress={() => {
+        void Haptics.selectionAsync();
+        // Hand off to the OS maps app rather than embedding a second map here.
+        const url = Platform.select({
+          ios: `maps://?ll=${loc.lat},${loc.lng}&q=${encodeURIComponent(label)}`,
+          default: `geo:${loc.lat},${loc.lng}?q=${loc.lat},${loc.lng}(${encodeURIComponent(label)})`,
+        });
+        void Linking.openURL(url!);
+      }}
+    >
+      <View style={[styles.locationIcon, { backgroundColor: mine ? "rgba(4,18,31,0.15)" : "rgba(52,211,153,0.16)" }]}>
+        <Feather name="map-pin" size={15} color={mine ? "#04121f" : "#34d399"} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.locationLabel, mine && { color: "#04121f" }]} numberOfLines={2}>
+          {label}
+        </Text>
+        <Text style={[styles.locationSub, mine && { color: "rgba(4,18,31,0.6)" }]}>
+          {msg.text || (loc.accuracyM ? `±${loc.accuracyM} m` : "Shared location")}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -375,13 +473,14 @@ function Composer({
   setDraft,
   onSend,
   sending,
-  onVoice,
+  onAttachment,
 }: {
   draft: string;
   setDraft: (v: string) => void;
   onSend: () => void;
   sending: boolean;
-  onVoice: (m: EventMessageDto) => void;
+  /** Voice note, photo or location that the server already stored. */
+  onAttachment: (m: EventMessageDto) => void;
 }) {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [recording, setRecording] = useState(false);
@@ -431,7 +530,7 @@ function Composer({
         if (!uri || durationMs < MIN_VOICE_MS) return;
         setVoiceSending(true);
         const msg = await uploadEventVoice(uri, durationMs);
-        onVoice(msg);
+        onAttachment(msg);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (err) {
         debugLog("api", "error", "event voice failed", String(err));
@@ -446,6 +545,59 @@ function Composer({
     else begin();
   };
 
+  // ── Attachments ────────────────────────────────────────────────────────────
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+
+  const attachPhoto = async (source: "camera" | "library") => {
+    setAttachOpen(false);
+    try {
+      const perm =
+        source === "camera"
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const result =
+        source === "camera"
+          ? await ImagePicker.launchCameraAsync({ quality: 0.8 })
+          : await ImagePicker.launchImageLibraryAsync({ quality: 0.8, mediaTypes: ["images"] });
+      const uri = result.canceled ? null : result.assets[0]?.uri;
+      if (!uri) return;
+      setAttaching(true);
+      onAttachment(await uploadEventPhoto(uri, draft.trim() || undefined));
+      setDraft("");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      debugLog("api", "error", "event photo failed", String(err));
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const attachLocation = async () => {
+    setAttachOpen(false);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (!perm.granted) return;
+      setAttaching(true);
+      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      onAttachment(
+        await sendEventLocation({
+          lat: fix.coords.latitude,
+          lng: fix.coords.longitude,
+          accuracyM: fix.coords.accuracy ? Math.round(fix.coords.accuracy) : undefined,
+          text: draft.trim() || undefined,
+        }),
+      );
+      setDraft("");
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      debugLog("api", "error", "event location failed", String(err));
+    } finally {
+      setAttaching(false);
+    }
+  };
+
   if (recording) {
     return (
       <Pressable style={styles.recordingBar} onPress={end}>
@@ -457,27 +609,73 @@ function Composer({
   }
 
   return (
-    <View style={styles.composer}>
-      <TextInput
-        style={styles.input}
-        placeholder="Message the team…"
-        placeholderTextColor="#54657c"
-        value={draft}
-        onChangeText={setDraft}
-        onSubmitEditing={onSend}
-        returnKeyType="send"
-        multiline
-      />
-      {draft.trim().length > 0 ? (
-        <Pressable style={[styles.sendBtn, sending && styles.sendBtnDisabled]} onPress={onSend} disabled={sending}>
-          {sending ? <ActivityIndicator size="small" color="#04121f" /> : <Feather name="send" size={18} color="#04121f" />}
+    <View>
+      {attachOpen ? (
+        <View style={styles.attachTray}>
+          <AttachButton icon="camera" label="Camera" color="#60a5fa" onPress={() => void attachPhoto("camera")} />
+          <AttachButton icon="image" label="Photo" color="#a78bfa" onPress={() => void attachPhoto("library")} />
+          <AttachButton icon="map-pin" label="Location" color="#34d399" onPress={() => void attachLocation()} />
+        </View>
+      ) : null}
+
+      <View style={styles.composer}>
+        <Pressable
+          style={[styles.attachBtn, attachOpen && styles.attachBtnOpen]}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            setAttachOpen((o) => !o);
+          }}
+          disabled={attaching}
+        >
+          {attaching ? (
+            <ActivityIndicator size="small" color="#94a3b8" />
+          ) : (
+            <Feather name={attachOpen ? "x" : "plus"} size={19} color={attachOpen ? "#34d399" : "#94a3b8"} />
+          )}
         </Pressable>
-      ) : (
-        <Pressable style={styles.micBtn} onPress={toggleVoice} disabled={voiceSending}>
-          {voiceSending ? <ActivityIndicator size="small" color="#34d399" /> : <Feather name="mic" size={19} color="#34d399" />}
-        </Pressable>
-      )}
+
+        <TextInput
+          style={styles.input}
+          placeholder="Message the team…"
+          placeholderTextColor="#54657c"
+          value={draft}
+          onChangeText={setDraft}
+          onSubmitEditing={onSend}
+          returnKeyType="send"
+          multiline
+        />
+        {draft.trim().length > 0 ? (
+          <Pressable style={[styles.sendBtn, sending && styles.sendBtnDisabled]} onPress={onSend} disabled={sending}>
+            {sending ? <ActivityIndicator size="small" color="#04121f" /> : <Feather name="send" size={18} color="#04121f" />}
+          </Pressable>
+        ) : (
+          <Pressable style={styles.micBtn} onPress={toggleVoice} disabled={voiceSending}>
+            {voiceSending ? <ActivityIndicator size="small" color="#34d399" /> : <Feather name="mic" size={19} color="#34d399" />}
+          </Pressable>
+        )}
+      </View>
     </View>
+  );
+}
+
+function AttachButton({
+  icon,
+  label,
+  color,
+  onPress,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  color: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={({ pressed }) => [styles.attachItem, pressed && { opacity: 0.7 }]} onPress={onPress}>
+      <View style={[styles.attachIcon, { backgroundColor: `${color}1c`, borderColor: `${color}55` }]}>
+        <Feather name={icon} size={19} color={color} />
+      </View>
+      <Text style={styles.attachLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -539,7 +737,10 @@ const styles = StyleSheet.create({
   avatarSlot: { width: 28 },
   avatar: { width: 28, height: 28, borderRadius: 9, alignItems: "center", justifyContent: "center" },
   avatarText: { color: "#fff", fontSize: 11, fontWeight: "900" },
-  author: { color: "#7e93ac", fontSize: 11, fontWeight: "800", marginBottom: 3, marginLeft: 4 },
+  authorRow: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 3, marginLeft: 4 },
+  author: { color: "#7e93ac", fontSize: 11, fontWeight: "800" },
+  originTag: { paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 5 },
+  originTagText: { fontSize: 8.5, fontWeight: "900", letterSpacing: 0.5, textTransform: "uppercase" },
   bubble: { borderRadius: 17, paddingVertical: 8, paddingHorizontal: 12 },
   bubbleOther: { backgroundColor: "#142235", borderTopLeftRadius: 5 },
   bubbleMine: { backgroundColor: "#34d399", borderTopRightRadius: 5 },
@@ -554,6 +755,41 @@ const styles = StyleSheet.create({
   waveBar: { width: 2.5, borderRadius: 2 },
   voiceDur: { fontSize: 11, fontWeight: "800", fontVariant: ["tabular-nums"] },
   transcript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic", marginTop: 6, maxWidth: 230 },
+
+  photo: { width: 216, height: 162, borderRadius: 12, backgroundColor: "#0b1626" },
+  locationRow: { flexDirection: "row", alignItems: "center", gap: 9, minWidth: 190, paddingVertical: 2 },
+  locationIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  locationLabel: { color: "#e6eef9", fontSize: 13.5, fontWeight: "700" },
+  locationSub: { color: "#7e93ac", fontSize: 11, fontWeight: "600", marginTop: 1 },
+
+  attachTray: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  attachItem: { alignItems: "center", gap: 5, width: 66 },
+  attachIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachLabel: { color: "#94a3b8", fontSize: 10.5, fontWeight: "800" },
+  attachBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "#101d31",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachBtnOpen: { borderColor: "rgba(52,211,153,0.45)", backgroundColor: "rgba(52,211,153,0.1)" },
 
   composer: {
     flexDirection: "row",

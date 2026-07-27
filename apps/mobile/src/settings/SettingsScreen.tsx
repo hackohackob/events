@@ -5,8 +5,12 @@ import * as Haptics from "expo-haptics";
 import { KM_MARKER_INTERVAL_OPTIONS, LOCATION_INTERVAL_OPTIONS, useSettingsStore } from "./settings-store";
 import { startLocationLoop } from "../location/location-tracker";
 import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
+import { PttBridgeSection } from "../ptt/PttBridgeSection";
+import { useSessionStore } from "../security/session-store";
 
 export function SettingsScreen({ onClose }: { onClose: () => void }) {
+  // Only coordinators change what the event puts on the air.
+  const isCoordinator = useSessionStore((s) => s.role) === "coordinator";
   const locationIntervalMs = useSettingsStore((s) => s.locationIntervalMs);
   const setLocationIntervalMs = useSettingsStore((s) => s.setLocationIntervalMs);
   const [intervalOpen, setIntervalOpen] = useState(false);
@@ -51,6 +55,14 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* ── Push-to-talk bridges ────────────────────────────── */}
+        {isCoordinator ? (
+          <>
+            <Text style={styles.sectionLabel}>PUSH-TO-TALK</Text>
+            <PttBridgeSection />
+          </>
+        ) : null}
+
         {/* ── Map ─────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>MAP</Text>
         <View style={styles.card}>

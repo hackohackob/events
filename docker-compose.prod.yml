@@ -16,6 +16,22 @@ services:
       # the fallback; absent keys → transcripts are simply skipped.
       SONIOX_API_KEY: "${SONIOX_API_KEY:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # Zello bridge. Optional here — the dashboard's Settings page stores the
+      # same values in the database, and anything set there wins. Provided so
+      # the bot credentials can stay in the host .env instead.
+      ZELLO_ENABLED: "${ZELLO_ENABLED:-}"
+      ZELLO_WS_URL: "${ZELLO_WS_URL:-}"
+      ZELLO_CHANNELS: "${ZELLO_CHANNELS:-}"
+      ZELLO_CHANNEL: "${ZELLO_CHANNEL:-}"
+      ZELLO_IGNORED_CHANNELS: "${ZELLO_IGNORED_CHANNELS:-}"
+      ZELLO_USERNAME: "${ZELLO_USERNAME:-}"
+      ZELLO_PASSWORD: "${ZELLO_PASSWORD:-}"
+      ZELLO_ISSUER: "${ZELLO_ISSUER:-}"
+      ZELLO_DEV_TOKEN: "${ZELLO_DEV_TOKEN:-}"
+      # Inline PEM (escaped newlines are accepted) rather than a file path —
+      # a bind mount would make Docker create a stray directory on hosts that
+      # do not have the key. Pasting it into the dashboard works too.
+      ZELLO_PRIVATE_KEY: "${ZELLO_PRIVATE_KEY:-}"
     depends_on:
       postgres:
         condition: service_healthy

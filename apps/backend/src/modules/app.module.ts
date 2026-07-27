@@ -17,6 +17,7 @@ import { LocationsModule } from "./locations/locations.module";
 import { MapModule } from "./map/map.module";
 import { MedicsModule } from "./medics/medics.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { PttModule } from "./ptt/ptt.module";
 import { RealtimeModule } from "./realtime/realtime.module";
 import { RoutingModule } from "./routing/routing.module";
 import { SearchModule } from "./search/search.module";
@@ -44,6 +45,7 @@ import { WeatherModule } from "./weather/weather.module";
     GuidanceModule,
     HospitalsModule,
     AssignmentsModule,
+    PttModule,
     RealtimeModule,
     RoutingModule,
     SearchModule,

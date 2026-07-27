@@ -448,13 +448,23 @@ export interface SendIncidentMessageRequest {
 }
 
 /** Event-wide team chat. `system` messages are the live feed (incident / response / POI). */
-export type EventMessageKind = "text" | "voice" | "system";
+export type EventMessageKind = "text" | "voice" | "system" | "image" | "location";
 export type EventFeedType = "incident" | "response" | "poi";
+
+/** A point shared into the chat (from the app, or relayed from a PTT channel). */
+export interface EventMessageLocation {
+  lat: number;
+  lng: number;
+  /** Reverse-geocoded street address when the sender provided one. */
+  address?: string;
+  /** Reported GPS accuracy in metres. */
+  accuracyM?: number;
+}
 
 export interface EventMessage {
   id: string;
   eventId: string;
-  /** Null for system feed messages. */
+  /** Null for system feed messages and for anything relayed from a PTT channel. */
   authorId: string | null;
   authorName: string;
   kind: EventMessageKind;
@@ -465,6 +475,15 @@ export interface EventMessage {
   audioUrl?: string;
   audioDurationMs?: number;
   transcript?: string;
+  /** Image attachment (server-relative URLs) for kind === "image". */
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  /** Shared point for kind === "location". */
+  location?: EventMessageLocation;
+  /** Where the message came from. Absent/"app" = written in the app itself. */
+  origin?: PttMessageOrigin;
+  /** The sender's handle on the external channel (Zello username, radio call sign). */
+  originUser?: string;
   /** Structured context for system feed messages (incidentId / poiId / coords / severity …). */
   meta?: Record<string, unknown>;
   createdAt: string;
@@ -472,6 +491,138 @@ export interface EventMessage {
 
 export interface SendEventMessageRequest {
   text: string;
+}
+
+export interface SendEventLocationRequest {
+  lat: number;
+  lng: number;
+  address?: string;
+  accuracyM?: number;
+  text?: string;
+}
+
+// ─── PTT bridges (Zello today, digital radio next) ───────────────────────────
+
+/**
+ * An external push-to-talk network the team chat can be bridged to. Everything
+ * downstream of this type is provider-agnostic on purpose: adding the digital
+ * radio gateway means implementing one provider and adding a member here.
+ */
+export type PttChannelKind = "zello" | "radio";
+
+export const PTT_CHANNEL_KINDS: PttChannelKind[] = ["zello", "radio"];
+
+/** Where a chat message entered the system. */
+export type PttMessageOrigin = "app" | PttChannelKind;
+
+/** The four media types a bridge may or may not carry. */
+export interface PttCapabilities {
+  text: boolean;
+  voice: boolean;
+  image: boolean;
+  location: boolean;
+}
+
+export type PttConnectionState = "disabled" | "offline" | "connecting" | "online" | "error";
+
+/**
+ * One connection config field a provider needs. The dashboard renders the form
+ * straight from this list, so a new provider needs no dashboard changes.
+ */
+export interface PttConfigField {
+  key: string;
+  label: string;
+  hint?: string;
+  /**
+   * `secret` values are never returned by the API — only whether they are set.
+   * `list` holds a comma-separated set the UI edits as chips.
+   */
+  type: "text" | "secret" | "multiline" | "list";
+  required: boolean;
+  placeholder?: string;
+  /**
+   * Render as a dropdown whose options are the entries of another `list` field
+   * — how the Zello channel is picked from the known-channels list. The Channel
+   * API has no "list my channels" command, so the set is operator-maintained.
+   */
+  optionsFrom?: string;
+}
+
+export interface PttProviderInfo {
+  kind: PttChannelKind;
+  label: string;
+  description: string;
+  /** False for providers that are scaffolded but not yet implemented. */
+  available: boolean;
+  capabilities: PttCapabilities;
+  fields: PttConfigField[];
+}
+
+export interface PttProviderSettings {
+  kind: PttChannelKind;
+  /** Master switch: whether the server holds a connection to this network at all. */
+  enabled: boolean;
+  /** Non-secret config values. Secrets appear in `secretsSet` instead. */
+  config: Record<string, string>;
+  /** Keys of secret fields that currently have a stored value. */
+  secretsSet: string[];
+  updatedAt: string;
+}
+
+export interface PttProviderStatus {
+  kind: PttChannelKind;
+  enabled: boolean;
+  /** All required fields have values. */
+  configured: boolean;
+  state: PttConnectionState;
+  /** Human-readable last error / current activity. */
+  detail?: string;
+  channel?: string;
+  usersOnline?: number;
+  connectedAt?: string;
+  lastInboundAt?: string;
+  lastOutboundAt?: string;
+  /** Rolling counters since the process started. */
+  inboundCount: number;
+  outboundCount: number;
+}
+
+export interface UpdatePttProviderRequest {
+  enabled?: boolean;
+  config?: Record<string, string>;
+  /** Secret keys to clear (sending an empty string in `config` keeps the old value). */
+  clearSecrets?: string[];
+}
+
+/**
+ * Per-event forwarding switches for one channel. The two directions are
+ * independent so a coordinator can, say, listen to radio traffic without the
+ * app's chatter going back out over the air.
+ */
+export interface PttRoute {
+  kind: PttChannelKind;
+  /** External channel → this event's team chat. */
+  inbound: boolean;
+  /** This event's team chat → external channel. */
+  outbound: boolean;
+}
+
+export interface PttEventRoutes {
+  eventId: string;
+  routes: PttRoute[];
+}
+
+export interface UpdatePttRouteRequest {
+  kind: PttChannelKind;
+  inbound?: boolean;
+  outbound?: boolean;
+}
+
+/** Everything the settings screens need in one round trip. */
+export interface PttOverview {
+  providers: PttProviderInfo[];
+  settings: PttProviderSettings[];
+  statuses: PttProviderStatus[];
 }
 
 export type IncidentActionType = "going" | "arrived" | "need_backup" | "resolved" | "stand_down";

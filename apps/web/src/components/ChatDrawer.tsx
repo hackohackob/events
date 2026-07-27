@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, Send, MessageCircle, AlertTriangle, Navigation, MapPin } from 'lucide-react'
-import type { EventMessage, EventFeedType } from '@events/contracts'
+import { X, Send, MessageCircle, AlertTriangle, Navigation, MapPin, Radio, ExternalLink } from 'lucide-react'
+import type { EventMessage, EventFeedType, PttMessageOrigin } from '@events/contracts'
 import { apiUrl } from '@/env'
 import VoiceMessage from './VoiceMessage'
 
@@ -27,6 +27,12 @@ const FEED: Record<EventFeedType, { icon: typeof AlertTriangle; color: string; l
   incident: { icon: AlertTriangle, color: '#f87171', label: 'Incident' },
   response: { icon: Navigation, color: '#60a5fa', label: 'Responding' },
   poi: { icon: MapPin, color: '#34d399', label: 'New point' },
+}
+
+/** Colour + label for messages relayed in from a PTT network. */
+const ORIGIN: Partial<Record<PttMessageOrigin, { color: string; label: string }>> = {
+  zello: { color: '#f59e0b', label: 'Zello' },
+  radio: { color: '#38bdf8', label: 'Radio' },
 }
 
 const AVATARS = ['#0f6e56', '#185fa5', '#7c3aed', '#b45309', '#9d174d', '#0e7490', '#4d7c0f']
@@ -189,29 +195,64 @@ function SystemCard({ msg }: { msg: EventMessage }) {
 
 function Bubble({ msg, mine, showHeader }: { msg: EventMessage; mine: boolean; showHeader: boolean }) {
   const name = msg.authorName || 'Team'
+  const origin = msg.origin && msg.origin !== 'app' ? ORIGIN[msg.origin] : undefined
   return (
     <div className={`flex items-end gap-2 my-0.5 ${mine ? 'justify-end' : 'justify-start'}`}>
       {!mine && (
         <div className="w-7 flex-shrink-0">
           {showHeader && (
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold text-white" style={{ background: avatarColor(name) }}>
-              {initials(name)}
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold text-white"
+              style={origin
+                ? { background: `${origin.color}22`, border: `1px solid ${origin.color}66`, color: origin.color }
+                : { background: avatarColor(name) }}
+            >
+              {origin ? <Radio className="w-3.5 h-3.5" /> : initials(name)}
             </div>
           )}
         </div>
       )}
       <div style={{ maxWidth: '78%' }}>
-        {showHeader && !mine && <div className="text-[11px] font-bold mb-0.5 ml-1" style={{ color: '#7e93ac' }}>{name}</div>}
+        {showHeader && !mine && (
+          <div className="flex items-center gap-1.5 mb-0.5 ml-1">
+            <span className="text-[11px] font-bold" style={{ color: origin ? origin.color : '#7e93ac' }}>{name}</span>
+            {origin && (
+              <span
+                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                style={{ background: `${origin.color}1e`, color: origin.color }}
+              >
+                {origin.label}
+              </span>
+            )}
+          </div>
+        )}
         <div
           className="rounded-2xl px-3 py-2"
           style={mine
             ? { background: '#34d399', borderTopRightRadius: 5 }
-            : { background: '#142235', borderTopLeftRadius: 5 }}
+            : origin
+              ? { background: '#142235', borderTopLeftRadius: 5, borderLeft: `2px solid ${origin.color}` }
+              : { background: '#142235', borderTopLeftRadius: 5 }}
         >
           {msg.audioUrl ? (
             <div style={{ minWidth: 180 }}>
               <VoiceMessage src={mediaSrc(msg.audioUrl)} durationMs={msg.audioDurationMs} transcript={msg.transcript} mine={mine} />
             </div>
+          ) : msg.imageUrl ? (
+            <a href={mediaSrc(msg.imageUrl)} target="_blank" rel="noreferrer" className="block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={mediaSrc(msg.thumbnailUrl ?? msg.imageUrl)}
+                alt={msg.text || 'Shared photo'}
+                className="rounded-xl max-w-full"
+                style={{ maxHeight: 240 }}
+              />
+              {msg.text && (
+                <div className="text-sm leading-snug mt-1.5" style={{ color: mine ? '#04121f' : '#e6eef9' }}>{msg.text}</div>
+              )}
+            </a>
+          ) : msg.location ? (
+            <LocationCard location={msg.location} text={msg.text} mine={mine} />
           ) : (
             <div className="text-sm leading-snug" style={{ color: mine ? '#04121f' : '#e6eef9', fontWeight: mine ? 500 : 400 }}>{msg.text}</div>
           )}
@@ -219,5 +260,37 @@ function Bubble({ msg, mine, showHeader }: { msg: EventMessage; mine: boolean; s
         </div>
       </div>
     </div>
+  )
+}
+
+/** Coordinates stay local until clicked — the link is the only thing that leaves. */
+function LocationCard({
+  location, text, mine,
+}: { location: NonNullable<EventMessage['location']>; text?: string; mine: boolean }) {
+  const label = location.address ?? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
+  return (
+    <a
+      href={`https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lng}#map=17/${location.lat}/${location.lng}`}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-start gap-2.5"
+      style={{ minWidth: 190 }}
+    >
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ background: mine ? 'rgba(4,18,31,0.15)' : 'rgba(52,211,153,0.15)' }}
+      >
+        <MapPin className="w-4 h-4" style={{ color: mine ? '#04121f' : '#34d399' }} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[13px] font-semibold flex items-center gap-1" style={{ color: mine ? '#04121f' : '#e6eef9' }}>
+          {label}
+          <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
+        </div>
+        <div className="text-[11px]" style={{ color: mine ? 'rgba(4,18,31,0.6)' : '#5f7088' }}>
+          {text || (location.accuracyM ? `±${location.accuracyM} m` : 'Shared location')}
+        </div>
+      </div>
+    </a>
   )
 }

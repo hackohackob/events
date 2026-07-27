@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -15,10 +15,15 @@ COPY scripts ./scripts
 
 RUN npm run build -w @events/contracts && npm run build -w @events/backend
 
-FROM node:20-alpine AS runtime
+# Node 22: the Zello bridge uses the global WebSocket, which Node 20 does not
+# expose. ffmpeg transcodes PTT audio/images (Opus <-> m4a, JPEG thumbnails);
+# without it the bridge degrades to relaying transcripts instead of voice.
+FROM node:22-alpine AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
+
+RUN apk add --no-cache ffmpeg
 
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/package.json
@@ -37,6 +42,7 @@ COPY apps/backend/data/hospitals.bg.json ./example-data/hospitals.bg.json
 
 RUN addgroup -S app && adduser -S app -G app && \
     mkdir -p /app/apps/backend/uploads/incidents \
+             /app/apps/backend/uploads/event-chat \
              /app/apps/backend/data && \
     chown -R app:app /app/apps/backend/uploads \
                      /app/apps/backend/data

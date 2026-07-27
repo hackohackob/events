@@ -13,6 +13,10 @@ apps/backend/uploads/gpx/
 # Runtime uploads (persisted via Docker volume in prod)
 apps/backend/uploads/
 
+# Zello handoff doc — contains live account passwords and private keys.
+zello-integration.md
+*.pem
+
 # TS build info
 *.tsbuildinfo
 .DS_Store
