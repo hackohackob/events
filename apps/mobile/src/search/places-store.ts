@@ -13,6 +13,8 @@ import { debugLog } from "../debug/debug-log";
 export type PlaceCategory =
   | "settlement"
   | "locality"
+  | "area"
+  | "street"
   | "peak"
   | "pass"
   | "river"

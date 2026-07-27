@@ -84,20 +84,38 @@ export interface RouteResponse {
   waypoints: LngLat[];
 }
 
+/** Incident → exit-point walk/carry path, with an elevation series for the
+ *  client's profile preview. */
+export interface AsphaltAccessPath {
+  /** `[lng, lat]` polyline from the incident to the point. */
+  geometry: LngLat[];
+  /** Elevation (m) per geometry vertex, when GraphHopper returned it. */
+  elevations?: number[];
+  ascentMeters?: number;
+  descentMeters?: number;
+}
+
 /** One paved-road access ("exit") point near an incident. */
 export interface AsphaltAccessPoint {
-  /** 1-based exit number — routed points first (fastest first), then direct ones. */
+  /** 1-based exit number — routed points first (fastest first), then straight-line ones. */
   index: number;
   lat: number;
   lng: number;
   /** Road class when GraphHopper knows it (e.g. "residential"). */
   roadHint?: string;
-  /** Incident → point leg. `direct` = no walkable route found; distance is
-   *  then the straight line and there is no duration. Routed duration is a
-   *  foot/bike blend (average of the two profiles). */
-  incident: { distanceMeters: number; durationMs?: number; direct: boolean };
+  /**
+   * Incident → point leg.
+   * - routed (`direct: false`): distance/duration follow the walk path;
+   *   duration is a foot/bike blend (average of both profiles).
+   * - straight-line (`direct: true`): distance is the crow-flies distance and
+   *   the client draws a straight line. `noRoad` marks the ones where no
+   *   walkable route exists at all.
+   */
+  incident: { distanceMeters: number; durationMs?: number; direct: boolean; noRoad?: boolean };
   /** Caller → point by car, when the caller's position was provided and routable. */
   fromMe?: { distanceMeters: number; durationMs: number };
+  /** Drawable walk path — present for routed points only. */
+  path?: AsphaltAccessPath;
 }
 
 export interface ClosestAsphaltResponse {

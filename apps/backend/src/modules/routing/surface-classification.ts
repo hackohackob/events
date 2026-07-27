@@ -138,10 +138,16 @@ const IMPLICITLY_PAVED_ROAD_CLASSES = new Set([
 ]);
 
 /**
- * Index of the first route point that sits on a paved road, or null when the
- * whole path stays off asphalt. A point counts as paved when its surface tag is
- * explicitly paved, or when it is a road class that is asphalt in practice
- * (primary…residential) and the surface tag doesn't say otherwise.
+ * Index of the first route point that sits on a paved road a VEHICLE can use —
+ * the whole point of an extraction/exit point — or null when the path never
+ * reaches one.
+ *
+ * Two passes, because rural OSM data often omits `surface` entirely:
+ *   1. strict  — a drivable road class that is explicitly paved, or a class
+ *                that is asphalt in practice (primary…residential);
+ *   2. lenient — any drivable road class not explicitly tagged unpaved.
+ * Footways/paths/cycleways never qualify, even when they are asphalt: an
+ * ambulance cannot stage on a park alley.
  */
 export function firstPavedPointIndex(pointCount: number, details: PathDetails | undefined): number | null {
   const tags: PointTags[] = Array.from({ length: pointCount }, () => ({ isHike: false, isMtbTrail: false }));
@@ -150,22 +156,37 @@ export function firstPavedPointIndex(pointCount: number, details: PathDetails | 
     applyInterval(tags, details.surface, (t, v) => (t.surface = lower(v)));
     applyInterval(tags, details.track_type, (t, v) => (t.trackType = lower(v)));
   }
+
+  let lenient: number | null = null;
   for (let index = 0; index < tags.length; index += 1) {
     const { surface, roadClass, trackType } = tags[index];
+    // Must be a road for vehicles — ROAD_CLASSES excludes footway/path/track.
+    if (!roadClass || !ROAD_CLASSES.has(roadClass)) continue;
     if (surface && UNPAVED_SURFACES.has(surface)) continue;
+    if (trackType) continue; // graded forest track, not asphalt
     if (surface && PAVED_SURFACES.has(surface)) return index;
-    if (roadClass && IMPLICITLY_PAVED_ROAD_CLASSES.has(roadClass) && !trackType) return index;
+    if (IMPLICITLY_PAVED_ROAD_CLASSES.has(roadClass)) return index;
+    if (lenient === null) lenient = index; // service/unclassified, surface unknown
   }
-  return null;
+  return lenient;
 }
 
-/** Human hint for a paved point — the road class GraphHopper reported there. */
+/**
+ * Human hint for a paved point — the road class GraphHopper reported there.
+ *
+ * GraphHopper intervals are half-open (`to` of one == `from` of the next), so a
+ * point that starts a new run matches BOTH. Prefer the run that starts at the
+ * index — otherwise the road the medic is being sent to gets labelled with the
+ * previous segment's class (a "tertiary" exit reported as "track").
+ */
 export function roadClassAtPoint(pointIndex: number, pointCount: number, details: PathDetails | undefined): string | undefined {
   if (!details?.road_class) return undefined;
+  let fallback: string | undefined;
   for (const [from, to, value] of details.road_class) {
-    if (pointIndex >= from && pointIndex <= to) return lower(value);
+    if (pointIndex >= from && pointIndex < to) return lower(value);
+    if (pointIndex >= from && pointIndex <= to && fallback === undefined) fallback = lower(value);
   }
-  return undefined;
+  return fallback;
 }
 
 /** Build per-point surface classes from raw path_details. */

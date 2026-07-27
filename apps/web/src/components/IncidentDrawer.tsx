@@ -331,7 +331,7 @@ export default function IncidentDrawer({
                         ? `${(p.incident.distanceMeters / 1000).toFixed(1)} km`
                         : `${p.incident.distanceMeters} m`
                       const timing = direct
-                        ? `${dist} direct — no path`
+                        ? `${dist} straight line${p.incident.noRoad ? ' — no path' : ''}`
                         : `${Math.max(1, Math.round((p.incident.durationMs ?? 0) / 60000))} min · ${dist}`
                       return (
                         <div key={p.index} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: i > 0 ? '1px solid rgba(129,140,248,0.16)' : 'none' }}>
@@ -344,7 +344,7 @@ export default function IncidentDrawer({
                           <div className="flex-1 min-w-0">
                             <div className="text-xs font-bold" style={{ color: direct ? '#fcd34d' : '#e2e8f0' }}>{timing}</div>
                             <div className="text-[10px] capitalize" style={{ color: '#64748b' }}>
-                              {p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}{direct ? ' · no road' : ''}
+                              {p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}{p.incident.noRoad ? ' · no road' : ''}
                             </div>
                           </div>
                           {onViewOnMap && (

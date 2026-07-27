@@ -61,6 +61,8 @@ interface Props {
 const CATEGORY_META: Record<PlaceCategory, { icon: string; label: string }> = {
   settlement: { icon: "🏘️", label: "Settlement" },
   locality:   { icon: "🌿", label: "Locality" },
+  area:       { icon: "🗺️", label: "Area" },
+  street:     { icon: "🛣️", label: "Street" },
   peak:       { icon: "⛰️", label: "Peak" },
   pass:       { icon: "🚵", label: "Pass" },
   river:      { icon: "🌊", label: "River" },

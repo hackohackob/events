@@ -58,6 +58,7 @@ import { useEventChatStore } from "../chat/event-chat-store";
 import type { EventMessageDto } from "../chat/event-chat-api";
 import { AssignDestinationBar } from "./AssignDestinationBar";
 import { IncidentSheet, type AsphaltPoint } from "../incidents/IncidentSheet";
+import { ExitPointPreview } from "../incidents/ExitPointPreview";
 import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
 import { SettingsScreen } from "../settings/SettingsScreen";
@@ -119,6 +120,8 @@ const SHEET_EXPANDED_Y = 0;
 const SHEET_COLLAPSED_Y = Math.max(0, SHEET_HEIGHT - SHEET_PEEK_HEIGHT);
 const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
 const MARKER_SHEET_SNAP_POINTS = ["42%", "88%"];
+/** Closest-asphalt view: one stop only, so the drawer stays half-open. */
+const ASPHALT_SHEET_SNAP_POINTS = ["46%"];
 const TRACK_SHEET_SNAP_POINTS = ["46%", "84%"];
 const PARTICIPANTS_SHEET_SNAP_POINTS = ["48%", "88%"];
 const USE_MAPY_TILES = process.env.EXPO_PUBLIC_USE_MAPY_TILES === "true";
@@ -1601,8 +1604,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [previewPoint, setPreviewPoint] = useState<{ lat: number; lng: number; label: string; icon?: string } | null>(null);
   // Universal search overlay (places / coordinates / bibs).
   const [searchOpen, setSearchOpen] = useState(false);
-  // Numbered "closest asphalt" exit pins (shown while the in-drawer view is open).
+  // Numbered "closest asphalt" exit pins (shown while the in-drawer view is open)
+  // and the currently selected one (path + floating preview card).
   const [asphaltPins, setAsphaltPins] = useState<AsphaltPoint[] | null>(null);
+  const [selectedExitPoint, setSelectedExitPoint] = useState<AsphaltPoint | null>(null);
+  // The exit-points view is a half-height drawer that must NOT expand to full —
+  // a single snap point removes the expanded stop entirely (the preview card
+  // and the map both need the upper half of the screen).
+  const markerSheetSnapPoints = useMemo(
+    () => (asphaltPins ? ASPHALT_SHEET_SNAP_POINTS : MARKER_SHEET_SNAP_POINTS),
+    [asphaltPins],
+  );
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
   const navCameraMode = useNavStore((s) => s.navCameraMode);
@@ -2808,6 +2820,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     setSelectedMarkerId(null);
     setPreviewPoint(null);
     setAsphaltPins(null);
+    setSelectedExitPoint(null);
   };
 
   // Starting navigation (e.g. "Navigate" from a marker sheet) opens the transport
@@ -3040,7 +3053,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const snapFraction = (points: string[], index: number) =>
     Number((points[Math.max(0, Math.min(index, points.length - 1))] ?? "0%").replace("%", "")) / 100;
   const openDrawerFraction = Math.max(
-    selectedMarker ? snapFraction(MARKER_SHEET_SNAP_POINTS, markerSheetIndex) : 0,
+    selectedMarker ? snapFraction(markerSheetSnapPoints, markerSheetIndex) : 0,
     trackModeActive ? snapFraction(TRACK_SHEET_SNAP_POINTS, trackSheetIndex) : 0,
     participantsSheetIndex >= 0 ? snapFraction(PARTICIPANTS_SHEET_SNAP_POINTS, participantsSheetIndex) : 0,
     hospitalsSheetIndex >= 0 ? snapFraction(HOSPITALS_SHEET_SNAP_POINTS, hospitalsSheetIndex) : 0,
@@ -3741,12 +3754,59 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
+        {/* Selected exit-point leg: the real walk path for routed points, or a
+            dashed straight line for the straight-line (amber) ones. */}
+        {selectedExitPoint && selectedIncident ? (() => {
+          const routed = !selectedExitPoint.incident.direct && (selectedExitPoint.path?.geometry.length ?? 0) >= 2;
+          const coordinates: Array<[number, number]> = routed
+            ? (selectedExitPoint.path!.geometry as Array<[number, number]>)
+            : [
+                [selectedIncident.lng, selectedIncident.lat],
+                [selectedExitPoint.lng, selectedExitPoint.lat],
+              ];
+          const color = routed ? "#818cf8" : "#f59e0b";
+          return (
+            <GeoJSONSource
+              id="exit-leg-source"
+              data={{
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates },
+              }}
+            >
+              {/* Dark casing so the line reads over satellite imagery too. */}
+              <Layer
+                id="exit-leg-casing"
+                type="line"
+                layout={{ "line-join": "round", "line-cap": "round" }}
+                paint={{ "line-color": "rgba(4, 12, 24, 0.85)", "line-width": 8 }}
+              />
+              <Layer
+                id="exit-leg-line"
+                type="line"
+                layout={{ "line-join": "round", "line-cap": "round" }}
+                paint={{
+                  "line-color": color,
+                  "line-width": 4.5,
+                  ...(routed ? {} : { "line-dasharray": [2, 1.6] }),
+                }}
+              />
+            </GeoJSONSource>
+          );
+        })() : null}
+
         {/* Numbered "closest asphalt" exit pins — visible while the incident
             sheet's exit-points view is open. Direct (no-road) points are amber. */}
         {asphaltPins?.map((pin) => (
           <Marker key={`asphalt-${pin.index}`} lngLat={[pin.lng, pin.lat]} pointerEvents="none">
             <View style={styles.exitPinWrap} pointerEvents="none">
-              <View style={[styles.exitPin, pin.incident.direct && styles.exitPinDirect]}>
+              <View
+                style={[
+                  styles.exitPin,
+                  pin.incident.direct && styles.exitPinDirect,
+                  selectedExitPoint?.index === pin.index && styles.exitPinSelected,
+                ]}
+              >
                 <Text style={styles.exitPinText} allowFontScaling={false}>{pin.index}</Text>
               </View>
               <View style={styles.exitPinLabel}>
@@ -4519,7 +4579,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       <BottomSheet
         ref={markerSheetRef}
         index={-1}
-        snapPoints={MARKER_SHEET_SNAP_POINTS}
+        snapPoints={markerSheetSnapPoints}
         enableDynamicSizing={false}
         enablePanDownToClose
         // Only the top handle drags the sheet. Otherwise press-and-hold on the
@@ -4570,12 +4630,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 duration: 620,
               });
             }}
-            onFocusPoint={(point) => {
-              cameraRef.current?.easeTo({
-                center: [point.lng, point.lat],
-                zoom: Math.max(mapZoom, 14),
-                padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.42), left: 0, right: 0 },
-                duration: 480,
+            onSelectAsphaltPoint={(point) => {
+              setSelectedExitPoint(point);
+              if (!point) return;
+              // Frame the whole leg (incident → point) in the visible upper half.
+              const minLat = Math.min(point.lat, selectedIncident.lat);
+              const maxLat = Math.max(point.lat, selectedIncident.lat);
+              const minLng = Math.min(point.lng, selectedIncident.lng);
+              const maxLng = Math.max(point.lng, selectedIncident.lng);
+              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                padding: { top: 100, right: 56, bottom: Math.round(SCREEN_HEIGHT * 0.56), left: 56 },
+                duration: 560,
               });
             }}
           />
@@ -4750,6 +4815,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         ) : null}
         </View>
       </BottomSheet>
+
+      {/* Selected exit point preview — deliberately OUTSIDE the drawer, parked
+          just above it so the map, the path and the profile are all visible. */}
+      {selectedExitPoint ? (
+        <ExitPointPreview
+          point={selectedExitPoint}
+          bottom={Math.round(SCREEN_HEIGHT * snapFraction(markerSheetSnapPoints, markerSheetIndex)) + 10}
+          onClose={() => setSelectedExitPoint(null)}
+          onPoiCreated={(poi: PoiDto) => {
+            const existing = useMapStore.getState().markers;
+            setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+          }}
+        />
+      ) : null}
 
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
@@ -6068,6 +6147,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   exitPinDirect: { backgroundColor: "#d97706", shadowColor: "#d97706" },
+  exitPinSelected: { transform: [{ scale: 1.25 }], borderWidth: 3, shadowOpacity: 0.95, shadowRadius: 11 },
   exitPinText: { color: "#ffffff", fontSize: 13, fontWeight: "900", includeFontPadding: false },
   exitPinLabel: {
     backgroundColor: "rgba(8,15,28,0.9)",

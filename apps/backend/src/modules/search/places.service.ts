@@ -13,6 +13,8 @@ import { EventsService } from "../events/events.service";
 export type PlaceCategory =
   | "settlement"
   | "locality"
+  | "area"
+  | "street"
   | "peak"
   | "pass"
   | "river"
@@ -38,6 +40,18 @@ export interface PlaceResult {
 
 const PHOTON_URL = process.env.PHOTON_URL ?? "https://photon.komoot.io";
 const OVERPASS_URL = process.env.OVERPASS_URL ?? "https://overpass-api.de/api/interpreter";
+
+/**
+ * Search is scoped to Bulgaria: the geocoder gets this as a hard bbox and the
+ * results are re-checked on our side (country code + bbox), because a bbox is
+ * only a bias on some Photon builds. `[minLon, minLat, maxLon, maxLat]`.
+ */
+const BG_BBOX = { minLng: 22.33, minLat: 41.22, maxLng: 28.62, maxLat: 44.23 };
+const BG_COUNTRY_CODES = new Set(["bg"]);
+
+function insideBulgaria(lat: number, lng: number): boolean {
+  return lat >= BG_BBOX.minLat && lat <= BG_BBOX.maxLat && lng >= BG_BBOX.minLng && lng <= BG_BBOX.maxLng;
+}
 
 /** Offline pack radius around the tracks (NOT around the viewer). */
 const PACK_RADIUS_M = 10_000;
@@ -77,20 +91,38 @@ function categorize(tags: Record<string, string>): PlaceCategory {
   return "other";
 }
 
+/** Settlement-ish `place` values; the rest of `place` is an area or a locality. */
+const SETTLEMENT_PLACES = new Set([
+  "city", "town", "village", "hamlet", "suburb", "quarter", "neighbourhood", "borough", "isolated_dwelling",
+]);
+const AREA_PLACES = new Set(["region", "state", "county", "municipality", "province", "district", "island"]);
+/** Natural features that describe an area rather than a point (местности). */
+const AREA_NATURAL = new Set([
+  "wood", "forest", "scrub", "heath", "grassland", "ridge", "valley", "massif", "mountain_range", "bay", "plateau",
+]);
+
 /** Photon osm_key/osm_value → our category. */
 function categorizePhoton(osmKey?: string, osmValue?: string): PlaceCategory {
-  if (osmKey === "place") return osmValue === "locality" ? "locality" : "settlement";
+  if (osmKey === "place") {
+    if (osmValue && SETTLEMENT_PLACES.has(osmValue)) return "settlement";
+    if (osmValue && AREA_PLACES.has(osmValue)) return "area";
+    return "locality";
+  }
   if (osmKey === "natural") {
     if (osmValue === "peak" || osmValue === "saddle") return "peak";
-    if (osmValue === "water") return "lake";
-    if (osmValue === "spring") return "spring";
+    if (osmValue === "water" || osmValue === "lake") return "lake";
+    if (osmValue === "spring" || osmValue === "hot_spring") return "spring";
     if (osmValue === "cave_entrance") return "cave";
-    return "other";
+    if (osmValue === "waterfall") return "waterfall";
+    if (osmValue && AREA_NATURAL.has(osmValue)) return "area";
+    return "area";
   }
   if (osmKey === "waterway") return osmValue === "waterfall" ? "waterfall" : "river";
   if (osmKey === "mountain_pass") return "pass";
+  if (osmKey === "landuse" || osmKey === "boundary" || osmKey === "leisure") return "area";
+  if (osmKey === "highway") return "street";
   if (osmKey === "tourism") {
-    if (osmValue === "alpine_hut" || osmValue === "wilderness_hut") return "hut";
+    if (osmValue === "alpine_hut" || osmValue === "wilderness_hut" || osmValue === "chalet") return "hut";
     if (osmValue === "viewpoint") return "viewpoint";
   }
   return "other";
@@ -128,9 +160,10 @@ export class PlacesService implements OnModuleInit {
 
   // ─── Online geocoding (Photon proxy) ───────────────────────────────────────
 
-  /** Free-text place search, biased towards the event area when lat/lng given. */
+  /** Free-text place search inside Bulgaria, biased to the event area when lat/lng given. */
   async searchOnline(query: string, lat?: number, lng?: number): Promise<PlaceResult[]> {
-    const params = new URLSearchParams({ q: query, limit: "10", lang: "default" });
+    const params = new URLSearchParams({ q: query, limit: "15", lang: "default" });
+    params.set("bbox", `${BG_BBOX.minLng},${BG_BBOX.minLat},${BG_BBOX.maxLng},${BG_BBOX.maxLat}`);
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       params.set("lat", String(lat));
       params.set("lon", String(lng));
@@ -159,6 +192,10 @@ export class PlacesService implements OnModuleInit {
       const props = feature.properties ?? {};
       const name = typeof props.name === "string" ? props.name : undefined;
       if (!coords || !name) continue;
+      // Bulgaria only — bbox is advisory on some Photon builds, so re-check.
+      const countryCode = typeof props.countrycode === "string" ? props.countrycode.toLowerCase() : undefined;
+      if (countryCode && !BG_COUNTRY_CODES.has(countryCode)) continue;
+      if (!insideBulgaria(coords[1], coords[0])) continue;
       const osmKey = typeof props.osm_key === "string" ? props.osm_key : undefined;
       const osmValue = typeof props.osm_value === "string" ? props.osm_value : undefined;
       const region = [props.county, props.state]
@@ -174,7 +211,8 @@ export class PlacesService implements OnModuleInit {
         osmValue,
       });
     }
-    return results;
+    // Over-fetched (limit 15) so the Bulgaria filter still leaves a full list.
+    return results.slice(0, 10);
   }
 
   // ─── Offline event pack (Overpass, cached) ─────────────────────────────────

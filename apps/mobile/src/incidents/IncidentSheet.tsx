@@ -110,8 +110,17 @@ interface Props {
   onMoveLocation?: () => void;
   /** Show (or clear with null) the numbered asphalt exit pins on the map. */
   onAsphaltPins?: (pins: AsphaltPoint[] | null) => void;
-  /** Ease the camera onto one exit point (pins stay up). */
-  onFocusPoint?: (point: { lat: number; lng: number }) => void;
+  /** Select an exit point: draws its path/direct line + opens the preview card
+   *  outside the drawer. Null clears the selection. */
+  onSelectAsphaltPoint?: (point: AsphaltPoint | null) => void;
+}
+
+/** Drawable walk path from the incident to an exit point. */
+export interface AsphaltPath {
+  geometry: Array<[number, number]>;
+  elevations?: number[];
+  ascentMeters?: number;
+  descentMeters?: number;
 }
 
 /** One paved-road access ("exit") point from /routing/closest-asphalt. */
@@ -120,8 +129,10 @@ export interface AsphaltPoint {
   lat: number;
   lng: number;
   roadHint?: string;
-  incident: { distanceMeters: number; durationMs?: number; direct: boolean };
+  incident: { distanceMeters: number; durationMs?: number; direct: boolean; noRoad?: boolean };
   fromMe?: { distanceMeters: number; durationMs: number };
+  /** Present for routed points; direct ones are drawn as a straight line. */
+  path?: AsphaltPath;
 }
 
 function formatDistance(meters: number): string {
@@ -132,13 +143,18 @@ function formatMinutes(ms: number): string {
   return `${Math.max(1, Math.round(ms / 60000))} min`;
 }
 
+/** "Exit 2 · residential" — shared by the nav destination label and the POI name. */
+export function exitLabel(point: AsphaltPoint): string {
+  return `Exit ${point.index}${point.roadHint ? ` · ${point.roadHint.replace(/_/g, " ")}` : ""}`;
+}
+
 /**
  * Full incident detail sheet: hero header, navigate action, report meta, notes,
  * photo gallery (anyone can append photos after the report), responder roster
  * with coordinator assign/unassign, live team chat, and the close/archive flow.
  * Rendered inside the map screen's marker BottomSheet.
  */
-export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onAsphaltPins, onFocusPoint }: Props) {
+export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onAsphaltPins, onSelectAsphaltPoint }: Props) {
   const myId = useSessionStore((s) => s.userId);
   const amCoordinator = useRosterStore((s) => s.amCoordinator);
   const rosterMedics = useRosterStore((s) => s.medics);
@@ -161,9 +177,14 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
   const [asphaltLoading, setAsphaltLoading] = useState(false);
   const [asphaltView, setAsphaltView] = useState(false);
 
-  // Never leave orphaned exit pins on the map when this sheet goes away.
+  const [selectedExit, setSelectedExit] = useState<number | null>(null);
+
+  // Never leave orphaned exit pins / paths on the map when this sheet goes away.
   useEffect(() => {
-    return () => onAsphaltPins?.(null);
+    return () => {
+      onAsphaltPins?.(null);
+      onSelectAsphaltPoint?.(null);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -174,7 +195,21 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
 
   const closeAsphaltView = () => {
     setAsphaltView(false);
+    setSelectedExit(null);
+    onSelectAsphaltPoint?.(null);
     onAsphaltPins?.(null);
+  };
+
+  /** Tap a card: select it (draw path + open the preview card), tap again to clear. */
+  const toggleExit = (point: AsphaltPoint) => {
+    void Haptics.selectionAsync();
+    if (selectedExit === point.index) {
+      setSelectedExit(null);
+      onSelectAsphaltPoint?.(null);
+      return;
+    }
+    setSelectedExit(point.index);
+    onSelectAsphaltPoint?.(point);
   };
 
   const loadClosestAsphalt = async () => {
@@ -521,15 +556,17 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
         <BottomSheetScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
           {asphaltPoints.map((point) => {
             const direct = point.incident.direct;
-            const label = `Exit ${point.index}${point.roadHint ? ` · ${point.roadHint.replace(/_/g, " ")}` : ""}`;
+            const selected = selectedExit === point.index;
+            const label = exitLabel(point);
             return (
               <Pressable
                 key={point.index}
-                style={[styles.exitCard, direct && styles.exitCardDirect]}
-                onPress={() => {
-                  void Haptics.selectionAsync();
-                  onFocusPoint?.({ lat: point.lat, lng: point.lng });
-                }}
+                style={[
+                  styles.exitCard,
+                  direct && styles.exitCardDirect,
+                  selected && (direct ? styles.exitCardDirectSelected : styles.exitCardSelected),
+                ]}
+                onPress={() => toggleExit(point)}
               >
                 <View style={[styles.exitBadge, direct && styles.exitBadgeDirect]}>
                   <Text style={styles.exitBadgeText} allowFontScaling={false}>{point.index}</Text>
@@ -537,15 +574,17 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                 <View style={styles.exitInfo}>
                   <Text style={styles.exitTitle} numberOfLines={1}>
                     {point.roadHint ? point.roadHint.replace(/_/g, " ") : "Paved road"}
-                    {direct ? "  ·  no road" : ""}
+                    {point.incident.noRoad ? "  ·  no road" : ""}
                   </Text>
                   {/* Incident → point */}
                   <View style={styles.exitMetricRow}>
                     <Feather name={direct ? "arrow-up-right" : "trending-up"} size={11} color={direct ? "#fbbf24" : "#94a3b8"} />
                     <Text style={[styles.exitMetric, direct && { color: "#fcd34d" }]} numberOfLines={1}>
                       {direct
-                        ? `${formatDistance(point.incident.distanceMeters)} direct — no path from incident`
-                        : `From incident: ${formatMinutes(point.incident.durationMs ?? 0)} · ${formatDistance(point.incident.distanceMeters)}`}
+                        ? `${formatDistance(point.incident.distanceMeters)} straight line${point.incident.noRoad ? " — no path" : ""}`
+                        : point.incident.distanceMeters < 30
+                          ? "The incident is already on this road"
+                          : `From incident: ${formatMinutes(point.incident.durationMs ?? 0)} · ${formatDistance(point.incident.distanceMeters)}`}
                     </Text>
                   </View>
                   {/* Me → point (car) */}
@@ -574,7 +613,8 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             );
           })}
           <Text style={styles.exitFootnote}>
-            From-incident times are a foot/bike blend; tap a card to centre its pin.
+            Routed times are a foot/bike blend. Tap a card to draw its path; amber
+            points are straight-line only.
           </Text>
         </BottomSheetScrollView>
       </View>
@@ -1382,6 +1422,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(245,158,11,0.3)",
     borderStyle: "dashed",
   },
+  exitCardSelected: { borderColor: "#818cf8", backgroundColor: "rgba(99,102,241,0.16)", borderWidth: 1.5 },
+  exitCardDirectSelected: { borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,0.16)", borderWidth: 1.5 },
   exitBadge: {
     width: 30,
     height: 30,

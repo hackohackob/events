@@ -6,8 +6,11 @@ export interface AsphaltAccessPoint {
   lat: number;
   lng: number;
   roadHint?: string;
-  /** Incident → point leg. `direct` = no walkable route; straight distance, no time. */
-  incident: { distanceMeters: number; durationMs?: number; direct: boolean };
+  /** Incident → point leg. `direct` = drawn as a straight line (distance is
+   *  crow-flies); `noRoad` marks the ones with no walkable route at all. */
+  incident: { distanceMeters: number; durationMs?: number; direct: boolean; noRoad?: boolean };
+  /** Walk path from the incident (routed points only). */
+  path?: { geometry: Array<[number, number]>; elevations?: number[]; ascentMeters?: number; descentMeters?: number };
   /** Caller → point by car (when a caller position was sent). */
   fromMe?: { distanceMeters: number; durationMs: number };
 }
