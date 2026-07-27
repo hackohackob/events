@@ -288,12 +288,22 @@ export class ZelloClient extends EventEmitter {
       this.clearTimers();
       this.failPending(new Error("connection closed"));
       this.channelStatus = null;
-      // 3003 = another session logged on with the same account. Reconnecting
-      // immediately just starts a fight, so back off hard.
+      // 3003 = another client logged on with the same account. Reconnecting
+      // immediately just starts a fight — two clients kick each other in a
+      // loop — so back off hard and name the usual causes, which are far more
+      // often a second *server* (a local test tool, a staging deploy) than the
+      // phone app people assume.
       const kicked = event.code === 3003;
       if (kicked) this.reconnectAttempt = Math.max(this.reconnectAttempt, 3);
       if (!this.stopped) {
-        this.setState("offline", kicked ? "kicked — the same account signed in elsewhere" : `disconnected (${event.code})`);
+        this.setState(
+          "offline",
+          kicked
+            ? `kicked: another client is signed in as "${this.options.username}". ` +
+              "Only one connection per Zello account is allowed — check for a second server, " +
+              "a local test tool, or the phone app, and give this bridge its own account."
+            : `disconnected (${event.code})`,
+        );
         this.scheduleReconnect();
       }
     });

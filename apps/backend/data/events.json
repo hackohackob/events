@@ -2,7 +2,7 @@
   {
     "id": "severozapad",
     "title": "Tour de Severozapad",
-    "status": "draft",
+    "status": "active",
     "dates": [
       "2026-05-23",
       "2026-05-24"
@@ -170,7 +170,7 @@
   {
     "id": "event-mpidawb5",
     "title": "test",
-    "status": "active",
+    "status": "draft",
     "dates": [
       "2026-05-21"
     ],

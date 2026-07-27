@@ -62,12 +62,23 @@ export class PttMediaService {
   /**
    * Re-wrap an Ogg Opus buffer as m4a so every client can play it. Returns null
    * when ffmpeg is unavailable — callers then serve the .ogg as-is.
+   *
+   * The limiter is not optional polish. PTT handsets run aggressive AGC, and the
+   * decoded Opus routinely peaks *above* full scale — measured at +3.8 dBFS on
+   * real traffic, with ~0.5% of samples over. Converting that straight to 16-bit
+   * hard-clips every one of them, which is heard as loud crackling over the
+   * voice. Limiting in the float domain before the integer stage keeps the peaks
+   * as signal instead of destroying them; 0.891 leaves ~1 dB of headroom for the
+   * AAC encoder's own overshoot.
    */
   async oggToM4a(ogg: Buffer): Promise<Buffer | null> {
     if (!(await this.hasFfmpeg())) return null;
     return this.transcode(ogg, "ogg", "m4a", [
+      "-af", "alimiter=level_in=1:level_out=1:limit=0.891:attack=5:release=50:level=disabled",
       "-c:a", "aac",
-      "-b:a", "64k",
+      // 96k rather than 64k: the source is already lossy, and a second lossy
+      // pass on a limited signal is where intelligibility gets lost.
+      "-b:a", "96k",
       "-ar", "16000",
       "-ac", "1",
       "-movflags", "+faststart",
