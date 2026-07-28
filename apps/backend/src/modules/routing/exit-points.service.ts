@@ -30,9 +30,16 @@ const SEARCH_RINGS = [800, 2000, 4500, 9000];
 const ANCHOR_RINGS = [500, 1200, 2200, 3500];
 const ANCHOR_BEARINGS = 8;
 
-/** Probe directions per ring. Odd rings are offset half a step so the union of
- *  two rings covers 24 distinct bearings without paying for 24 every time. */
-const BEARINGS_PER_RING = 12;
+/**
+ * Probe directions per ring. Odd rings are offset half a step so the union of two
+ * rings covers twice as many distinct bearings.
+ *
+ * 12 was too coarse: confirmed asphalt 1330 m south-east of incident 28 was
+ * invisible to the search while a 16-bearing sweep found it, because no probe
+ * happened to run down that valley. Dedupe and the domination filter absorb the
+ * extra raw candidates, so the wider sweep costs probes rather than noise.
+ */
+const BEARINGS_PER_RING = 16;
 
 /** Stop expanding once this many distinct roads are on the table. */
 const ENOUGH_CANDIDATES = 6;
@@ -41,12 +48,37 @@ const ENOUGH_CANDIDATES = 6;
 const DEDUPE_M = 220;
 
 /** How many of the nearest candidates get the full routing treatment. */
-const MEASURE_LIMIT = 8;
+const MEASURE_LIMIT = 10;
 
-const MAX_ROUTED = 4;
-/** Straight-line points shown alongside routed ones — more when nothing routed. */
-const MAX_DIRECT = 2;
-const MAX_DIRECT_WHEN_NOTHING_ROUTED = 4;
+/** How many exit points the client is shown. */
+const MAX_POINTS = 5;
+
+/**
+ * Compass sectors used to spread the offered points around the incident.
+ *
+ * Without this, one road corridor takes every slot: incident 28 in the Test
+ * event returned four points inside a 12° window to the north-east while
+ * confirmed asphalt sat 964 m to the south, 1286 m north-west and 1330 m
+ * south-east — all found by the probes, all discarded. A single direction is
+ * also the worst possible answer operationally: if that way is blocked, the
+ * medic has no alternative to fall back on.
+ */
+const SECTOR_COUNT = 8;
+
+/**
+ * If one point's access path runs within this distance of a nearer point, you
+ * walk past the nearer one to get to it, so it adds nothing — the reason
+ * "point 4" used to be offered when its route went straight through point 2.
+ */
+const DOMINATION_M = 150;
+
+/** Road classes ranked by how much a rescue vehicle wants them. Lower is better. */
+const ROAD_CLASS_TIER: Record<string, number> = {
+  motorway: 0, trunk: 0, primary: 0, secondary: 0, tertiary: 0,
+  unclassified: 1, residential: 1, living_street: 1, road: 1,
+  service: 2, track: 2,
+};
+const roadTier = (roadClass?: string): number => ROAD_CLASS_TIER[roadClass ?? ""] ?? 1;
 
 /**
  * A candidate only counts towards "enough, stop expanding" if it is actually
@@ -83,9 +115,49 @@ const CONFIDENCE_BIAS: Record<PavedConfidence, number> = { confirmed: 1, likely:
 interface Candidate {
   point: LngLat;
   straightMeters: number;
+  /** Compass sector index (0..SECTOR_COUNT-1) as seen from the incident. */
+  sector: number;
   confidence: PavedConfidence;
   roadClass?: string;
   surfaceTag?: string;
+}
+
+/** Which compass sector `point` falls in, seen from `origin`. */
+function sectorOf(origin: LngLat, point: LngLat): number {
+  const dLng = ((point[0] - origin[0]) * Math.PI) / 180;
+  const lat1 = (origin[1] * Math.PI) / 180;
+  const lat2 = (point[1] * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  const width = 360 / SECTOR_COUNT;
+  return Math.floor(((bearing + width / 2) % 360) / width);
+}
+
+/**
+ * Take up to `limit` items from an already-ranked list, giving every sector a
+ * turn before any sector gets a second pick. The best item is always first, so
+ * spreading never costs us the top answer — it only decides who fills the rest.
+ */
+function spreadBySector<T>(ranked: T[], limit: number, sector: (item: T) => number): T[] {
+  const picked: T[] = [];
+  const deferred: T[] = [];
+  const used = new Set<number>();
+
+  for (const item of ranked) {
+    if (picked.length >= limit) break;
+    if (used.has(sector(item))) {
+      deferred.push(item);
+      continue;
+    }
+    used.add(sector(item));
+    picked.push(item);
+  }
+  for (const item of deferred) {
+    if (picked.length >= limit) break;
+    picked.push(item);
+  }
+  return picked;
 }
 
 /** One profile's measured leg, with the geometry the client can draw. */
@@ -105,6 +177,24 @@ interface Measured extends Candidate {
 /** Whichever profile produced a drawable path — foot preferred, bike as backup. */
 function drawableLeg(m: Measured): MeasuredLeg | null {
   return m.foot ?? m.bike;
+}
+
+/** True when at least one profile produced a usable route to this point. */
+function routable(m: Measured): boolean {
+  return m.foot !== null || m.bike !== null;
+}
+
+/** Minutes as the client rounds them, so ranking agrees with what is displayed. */
+function displayMinutes(ms: number | undefined): number {
+  return ms === undefined ? Infinity : Math.max(1, Math.round(ms / 60000));
+}
+
+/** Quickest of the measured profiles, ms. */
+function fastestLeg(m: Measured): number | undefined {
+  const times = [m.foot?.leg.durationMs, m.bike?.leg.durationMs].filter(
+    (t): t is number => typeof t === "number",
+  );
+  return times.length > 0 ? Math.min(...times) : undefined;
 }
 
 /**
@@ -261,6 +351,7 @@ export class ExitPointsService {
         {
           point,
           straightMeters: Math.round(distanceBetween(origin, point)),
+          sector: sectorOf(origin, point),
           confidence: paved.confidence,
           roadClass: paved.roadClass,
           surfaceTag: paved.surfaceTag,
@@ -286,14 +377,17 @@ export class ExitPointsService {
     return unique;
   }
 
-  /** The points the circle hits first — biased slightly towards trusted surfaces. */
+  /**
+   * The points the circle hits first — biased slightly towards trusted surfaces,
+   * and spread around the compass so the routing budget is not spent entirely on
+   * one corridor of roads that happens to be marginally nearest.
+   */
   private shortlist(candidates: Candidate[]): Candidate[] {
-    return [...candidates]
-      .sort(
-        (a, b) =>
-          a.straightMeters * CONFIDENCE_BIAS[a.confidence] - b.straightMeters * CONFIDENCE_BIAS[b.confidence],
-      )
-      .slice(0, MEASURE_LIMIT);
+    const scored = [...candidates].sort(
+      (a, b) =>
+        a.straightMeters * CONFIDENCE_BIAS[a.confidence] - b.straightMeters * CONFIDENCE_BIAS[b.confidence],
+    );
+    return spreadBySector(scored, MEASURE_LIMIT, (c) => c.sector);
   }
 
   // ── 2. Measurement ─────────────────────────────────────────────────────────
@@ -426,103 +520,116 @@ export class ExitPointsService {
   // ── 3. Ranking ─────────────────────────────────────────────────────────────
 
   /**
-   * Order the measured candidates into the list the UI shows.
+   * Turn the measured candidates into the list the UI shows.
    *
-   * The list is ordered by how close the road actually is — the order the
-   * expanding circle reached them. Sorting by travel time instead buried the
-   * genuinely useful answers: on the Musala ridge a road 5.2 km away with a
-   * two-minute ambulance drive came out *below* one 8.9 km away that happened to
-   * have a walkable route, because 130 minutes of walking beat "no route".
+   * Three rules, each of which came out of a wrong answer on real data:
    *
-   * Usefulness is carried by the `best` flag instead: the fastest point that can
-   * actually be reached, preferring ones the caller can also drive to, since a
-   * paved stub no vehicle can get to is worthless however close it is.
+   * 1. **Selection respects distance.** Keeping the four *fastest* while
+   *    *displaying* by distance silently dropped the nearest road: incident 28
+   *    had confirmed asphalt 964 m south, beaten to the last slot by four
+   *    north-east points that merely routed quicker.
+   * 2. **Spread around the compass.** One corridor used to take every slot, so a
+   *    blocked approach left the medic with no alternative.
+   * 3. **Drop dominated points.** If the path to B runs past A, B is noise.
+   *
+   * Usefulness is carried by the `best` flag: the fastest point that can actually
+   * be reached, preferring ones the caller can also drive to, since a paved stub
+   * no vehicle can get to is worthless however close it is.
    */
   private rank(measured: Measured[], haveCaller: boolean): AsphaltAccessPoint[] {
-    const fastest = (m: Measured): number | undefined => {
-      const times = [m.foot?.leg.durationMs, m.bike?.leg.durationMs].filter(
-        (t): t is number => typeof t === "number",
-      );
-      return times.length > 0 ? Math.min(...times) : undefined;
-    };
+    const survivors = this.dropDominated(measured);
 
-    const routed = measured
-      .filter((m) => m.foot !== null || m.bike !== null)
-      .sort((a, b) => {
-        if (haveCaller) {
-          const reach = Number(!a.fromMe) - Number(!b.fromMe);
-          if (reach !== 0) return reach;
-        }
-        return (fastest(a) ?? Infinity) - (fastest(b) ?? Infinity);
-      })
-      .slice(0, MAX_ROUTED);
+    // Nearest first, and a point you can actually reach outranks an equidistant
+    // one you cannot.
+    const byDistance = [...survivors].sort(
+      (a, b) => a.straightMeters - b.straightMeters || Number(!routable(a)) - Number(!routable(b)),
+    );
+    const selected = spreadBySector(byDistance, MAX_POINTS, (m) => m.sector);
 
-    // Straight-line points exist for exactly one reason: asphalt that is close
-    // but has no walkable route to it at all. A routed candidate that merely
-    // missed the top four is not shown as "direct" — pairing a crow-flies
-    // distance with a path-following duration is how the old list ended up
-    // contradicting itself.
-    const direct = measured
-      .filter((m) => m.foot === null && m.bike === null)
-      .sort((a, b) => a.straightMeters - b.straightMeters)
-      // When nothing routed at all, these are the only answers there are —
-      // show more of them rather than leaving the medic with two.
-      .slice(0, routed.length === 0 ? MAX_DIRECT_WHEN_NOTHING_ROUTED : MAX_DIRECT);
-
-    const bestPoint = routed[0];
-
-    const asRouted = routed.map((m): AsphaltAccessPoint => {
-      const drawable = drawableLeg(m);
-      const offPathMeters = drawable?.offPathMeters ?? 0;
-      const carry = offPathCarry(offPathMeters);
-      return {
-        index: 0,
-        lat: m.point[1],
-        lng: m.point[0],
-        roadHint: m.roadClass,
-        surfaceHint: m.surfaceTag,
-        confidence: m.confidence,
-        best: m === bestPoint,
-        incident: {
-          distanceMeters: m.foot?.leg.distanceMeters ?? m.bike?.leg.distanceMeters ?? m.straightMeters,
-          durationMs: fastest(m),
-          offPathMeters,
-          offPathSignificant: carry.significant || undefined,
-          foot: m.foot?.leg,
-          bike: m.bike?.leg,
-          direct: false,
-        },
-        fromMe: m.fromMe,
-        path: drawable?.path,
-      };
+    // `best` = fastest reachable of the ones we are showing. Ties go to the
+    // nearer road — two points 15 minutes apart by bike are not equivalent when
+    // one is 1.2 km away and the other 1.5 km.
+    const reachable = selected.filter(routable).sort((a, b) => {
+      if (haveCaller) {
+        const reach = Number(!a.fromMe) - Number(!b.fromMe);
+        if (reach !== 0) return reach;
+      }
+      // Compare the times the medic actually sees — whole minutes. Raw
+      // milliseconds made a road 360 m further away "best" because it routed
+      // three seconds quicker, which is noise, not a decision.
+      const byTime = displayMinutes(fastestLeg(a)) - displayMinutes(fastestLeg(b));
+      if (byTime !== 0) return byTime;
+      return a.straightMeters - b.straightMeters;
     });
+    const bestPoint = reachable[0];
 
-    const asDirect = direct.map((m): AsphaltAccessPoint => ({
-      index: 0,
-      lat: m.point[1],
-      lng: m.point[0],
-      roadHint: m.roadClass,
-      surfaceHint: m.surfaceTag,
-      confidence: m.confidence,
-      incident: {
-        distanceMeters: m.straightMeters,
-        offPathMeters: 0,
-        direct: true,
-        noRoad: true,
-      },
-      fromMe: m.fromMe,
-    }));
+    return selected
+      .sort((a, b) => a.straightMeters - b.straightMeters)
+      .map((m, i): AsphaltAccessPoint => {
+        const drawable = drawableLeg(m);
+        const offPathMeters = drawable?.offPathMeters ?? 0;
+        const carry = offPathCarry(offPathMeters);
+        const direct = !routable(m);
+        return {
+          index: i + 1,
+          lat: m.point[1],
+          lng: m.point[0],
+          roadHint: m.roadClass,
+          surfaceHint: m.surfaceTag,
+          confidence: m.confidence,
+          best: m === bestPoint || undefined,
+          incident: direct
+            ? {
+                distanceMeters: m.straightMeters,
+                offPathMeters: 0,
+                direct: true,
+                noRoad: true,
+              }
+            : {
+                distanceMeters: m.foot?.leg.distanceMeters ?? m.bike?.leg.distanceMeters ?? m.straightMeters,
+                durationMs: fastestLeg(m),
+                offPathMeters,
+                offPathSignificant: carry.significant || undefined,
+                foot: m.foot?.leg,
+                bike: m.bike?.leg,
+                direct: false,
+              },
+          fromMe: m.fromMe,
+          path: direct ? undefined : drawable?.path,
+        };
+      });
+  }
 
-    // Numbered by proximity to the casualty, routed and unroutable interleaved.
-    const straightOf = new Map<AsphaltAccessPoint, number>();
-    for (const [list, source] of [
-      [asRouted, routed],
-      [asDirect, direct],
-    ] as const) {
-      list.forEach((point, i) => straightOf.set(point, source[i].straightMeters));
+  /**
+   * Remove candidates you would walk straight past another candidate to reach.
+   *
+   * A point whose access path runs within {@link DOMINATION_M} of a nearer,
+   * reachable point adds nothing — you are already there. Kept anyway if it sits
+   * on a materially better road for a vehicle, so a service road on the approach
+   * cannot hide the main road behind it.
+   */
+  private dropDominated(measured: Measured[]): Measured[] {
+    const nearestFirst = [...measured].sort((a, b) => a.straightMeters - b.straightMeters);
+    const kept: Measured[] = [];
+
+    for (const candidate of nearestFirst) {
+      const path = drawableLeg(candidate)?.path.geometry;
+      const shadowedBy = path
+        ? kept.find(
+            (earlier) =>
+              routable(earlier) &&
+              roadTier(earlier.roadClass) <= roadTier(candidate.roadClass) &&
+              path.some((vertex) => distanceBetween(vertex, earlier.point) < DOMINATION_M),
+          )
+        : undefined;
+      if (shadowedBy) {
+        this.logger.debug(
+          `exit points: dropped ${candidate.roadClass ?? "?"} at ${candidate.straightMeters} m — its path runs past ${shadowedBy.roadClass ?? "?"} at ${shadowedBy.straightMeters} m`,
+        );
+        continue;
+      }
+      kept.push(candidate);
     }
-    return [...asRouted, ...asDirect]
-      .sort((a, b) => (straightOf.get(a) ?? 0) - (straightOf.get(b) ?? 0))
-      .map((point, i) => ({ ...point, index: i + 1 }));
+    return kept;
   }
 }
