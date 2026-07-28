@@ -35,6 +35,7 @@ import { freshnessBucket, freshnessColor, freshnessLabel } from "../map/freshnes
 import { useLocationStatus } from "../debug/location-status";
 import { uploadIncidentPhoto, uploadIncidentVoice } from "./incident-api";
 import { debugLog } from "../debug/debug-log";
+import { TranscriptText } from "../ui/TranscriptText";
 import { useIncidentReadsStore } from "./incident-reads-store";
 
 const TYPE_META: Record<string, { label: string; icon: string }> = {
@@ -859,6 +860,42 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             ) : (
               <View style={styles.chatList}>
                 {messages.map((m) => {
+                  // Casualty handover — the closing summary, spelled out in the
+                  // log rather than hidden behind a one-line "closed by X".
+                  if (m.kind === "handover") {
+                    const meta = (m.meta ?? {}) as {
+                      by?: string;
+                      vitals?: string;
+                      treatment?: string;
+                      transport?: string;
+                    };
+                    const rows: Array<[string, string]> = [];
+                    if (meta.vitals) rows.push(["Vitals", meta.vitals]);
+                    if (meta.treatment) rows.push(["Treatment", meta.treatment]);
+                    if (meta.transport) rows.push(["Transport", meta.transport]);
+                    return (
+                      <View key={m.id} style={styles.handoverCard}>
+                        <View style={styles.handoverHeader}>
+                          <Feather name="clipboard" size={10} color="#22c55e" />
+                          <Text style={styles.handoverKicker}>CASUALTY HANDOVER</Text>
+                          <Text style={styles.handoverTime}>
+                            {meta.by ? `${meta.by} · ` : ""}
+                            {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </Text>
+                        </View>
+                        {rows.length === 0 ? (
+                          <Text style={styles.handoverEmpty}>Closed without handover notes.</Text>
+                        ) : (
+                          rows.map(([label, value]) => (
+                            <Text key={label} style={styles.handoverValue}>
+                              <Text style={styles.handoverLabel}>{label}: </Text>
+                              {value}
+                            </Text>
+                          ))
+                        )}
+                      </View>
+                    );
+                  }
                   // System log entries (reported / dispatched / arrived / …)
                   // render as centered timeline markers, not chat bubbles.
                   if (m.authorId === "system") {
@@ -926,9 +963,11 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                             <Text style={styles.voiceDuration}>{formatVoiceDuration(m.audioDurationMs)}</Text>
                           </Pressable>
                           {m.transcript ? (
-                            <Text style={styles.voiceTranscript}>
-                              <Feather name="file-text" size={10} color="#64748b" /> {m.transcript}
-                            </Text>
+                            <TranscriptText
+                              text={m.transcript}
+                              style={styles.voiceTranscript}
+                              containerStyle={styles.voiceTranscriptBox}
+                            />
                           ) : null}
                         </>
                       ) : m.photoUrl ? (
@@ -1278,6 +1317,22 @@ const styles = StyleSheet.create({
   careChipTime: { color: "#48586c", fontSize: 9.5, fontWeight: "700", marginTop: 2 },
   careChipText: { color: "#e2ecf7", fontSize: 11.5, fontWeight: "800", flexShrink: 1, lineHeight: 16 },
   careChipQuestionInline: { color: "#7d8ea4", fontWeight: "600" },
+  // Casualty handover, shown inline in the log when the incident is closed.
+  handoverCard: {
+    borderRadius: 12,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    gap: 3,
+    backgroundColor: "rgba(34,197,94,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(34,197,94,0.22)",
+  },
+  handoverHeader: { flexDirection: "row", alignItems: "center", gap: 5 },
+  handoverKicker: { color: "#22c55e", fontSize: 9.5, fontWeight: "900", letterSpacing: 0.6 },
+  handoverTime: { color: "#48586c", fontSize: 9.5, fontWeight: "700", flex: 1, textAlign: "right" },
+  handoverLabel: { color: "#7d8ea4", fontWeight: "800" },
+  handoverValue: { color: "#dbe7f3", fontSize: 11.5, fontWeight: "600", lineHeight: 16 },
+  handoverEmpty: { color: "#7d8ea4", fontSize: 11.5, fontWeight: "600" },
   bubble: { maxWidth: "85%", borderRadius: 13, paddingVertical: 7, paddingHorizontal: 11 },
   bubbleMine: { alignSelf: "flex-end", backgroundColor: "rgba(34,197,94,0.16)", borderTopRightRadius: 4 },
   bubbleOther: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.05)", borderTopLeftRadius: 4 },
@@ -1300,7 +1355,8 @@ const styles = StyleSheet.create({
   voiceWaveBar: { width: 3, borderRadius: 2, backgroundColor: "rgba(148,163,184,0.55)" },
   voiceWaveBarActive: { backgroundColor: "#34d399" },
   voiceDuration: { color: "#9fb3cc", fontSize: 11, fontWeight: "800" },
-  voiceTranscript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic", marginTop: 6, maxWidth: 230 },
+  voiceTranscript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic" },
+  voiceTranscriptBox: { marginTop: 6, maxWidth: 230 },
   composer: { flexDirection: "row", gap: 8, alignItems: "center" },
   composerInput: {
     flex: 1,

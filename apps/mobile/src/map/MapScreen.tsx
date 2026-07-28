@@ -251,7 +251,16 @@ function incidentToMarker(incident: IncidentResponse) {
   };
 }
 
-function poiToMarker(poi: { id: string; type: string; lat: number; lng: number; name?: string; description?: string; icon?: string }) {
+function poiToMarker(poi: {
+  id: string;
+  type: string;
+  lat: number;
+  lng: number;
+  name?: string;
+  description?: string;
+  icon?: string;
+  archived?: boolean;
+}) {
   return {
     id: poi.id,
     type: "infrastructure" as const,
@@ -262,6 +271,7 @@ function poiToMarker(poi: { id: string; type: string; lat: number; lng: number; 
     poiType: poi.type,
     poiIcon: poi.icon,
     poiDescription: poi.description,
+    poiArchived: poi.archived,
   };
 }
 
@@ -1532,6 +1542,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const loadRoster = useRosterStore((state) => state.load);
   const trackingHealth = useTrackingHealth();
 
+  // Coordinator-only "review archives" mode: archived incidents and points stay
+  // on the map, dimmed. Held in a ref as well because the socket handlers and
+  // the one-shot loaders below are registered once and must read it live.
+  const isCoordinator = useSessionStore((state) => state.role) === "coordinator";
+  const showArchivedSetting = useSettingsStore((s) => s.showArchived);
+  const showArchived = isCoordinator && showArchivedSetting;
+  const showArchivedRef = useRef(showArchived);
+  showArchivedRef.current = showArchived;
+
   // Hospital pins — shown while the hospitals drawer is open. Capped to the
   // nearest few dozen so a country-wide directory doesn't flood the map.
   const allHospitals = useHospitalsStore((state) => state.hospitals);
@@ -1592,6 +1611,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [mapZoom, setMapZoom] = useState(FALLBACK_ZOOM);
   const [mapCenterLat, setMapCenterLat] = useState(FALLBACK_LAT);
+  /** Last settled map centre `[lng, lat]` — a ref so it never re-renders the map. */
+  const mapCenterRef = useRef<[number, number] | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [layersTab, setLayersTab] = useState<LayersTab>("layers");
   const [pendingPoi, setPendingPoi] = useState<{ lat: number; lng: number } | null>(null);
@@ -1621,6 +1642,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const navPendingInsert = useNavStore((s) => s.pendingInsertIndex);
   useNavigationCamera(cameraRef);
   const trackNavPhase = useTrackNavStore((s) => s.phase);
+  const followedTrackId = useTrackNavStore((s) => s.track?.id ?? null);
   useTrackNavCamera(cameraRef);
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
   const [trackPickerOpen, setTrackPickerOpen] = useState(false);
@@ -1766,7 +1788,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const incidents = await apiFetch<IncidentResponse[]>("/incidents");
       const existing = useMapStore.getState().markers;
       const others = existing.filter((m) => m.type !== "incident");
-      const visible = incidents.filter((i) => !isArchivedIncidentStatus(i.status));
+      const visible = incidents.filter(
+        (i) => showArchivedRef.current || !isArchivedIncidentStatus(i.status),
+      );
       const observe = useIncidentReadsStore.getState().observe;
       visible.forEach((i) => observe(i.id, i.lastMessageAt));
       setMarkers([...others, ...visible.map(incidentToMarker)]);
@@ -1774,6 +1798,35 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       debugLog("api", "error", "incidents refresh failed", String(err));
     }
   }, [setMarkers]);
+
+  /** Re-pull the POI layer (used when the archive-review setting is toggled). */
+  const refreshPois = useCallback(async () => {
+    try {
+      const pois = await apiFetch<
+        Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number; icon?: string; archived?: boolean }>
+      >(showArchivedRef.current ? "/events/pois?includeArchived=1" : "/events/pois");
+      const existing = useMapStore.getState().markers;
+      const others = existing.filter((m) => m.type !== "infrastructure");
+      setMarkers([
+        ...others,
+        ...pois.map((poi, i) => poiToMarker({ ...poi, id: poi.id ?? `poi-${i}-${poi.lat}-${poi.lng}` })),
+      ]);
+    } catch (err) {
+      debugLog("api", "error", "poi refresh failed", String(err));
+    }
+  }, [setMarkers]);
+
+  // Toggling archive review re-pulls both layers: archived items have to appear
+  // (or disappear) immediately, not on the next foreground.
+  const archiveModeMounted = useRef(false);
+  useEffect(() => {
+    if (!archiveModeMounted.current) {
+      archiveModeMounted.current = true;
+      return;
+    }
+    void refreshIncidents();
+    void refreshPois();
+  }, [showArchived, refreshIncidents, refreshPois]);
 
   // Bounding box around all current markers + tracks, for caching the event area offline.
   const computeOfflineBounds = useCallback((): [number, number, number, number] | null => {
@@ -1832,7 +1885,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             ? apiFetch<MedicActiveResponse[]>(`/events/${eventId}/medics/active`).catch(() => [])
             : Promise.resolve<MedicActiveResponse[]>([]),
           apiFetch<unknown>("/events/tracks"),
-          apiFetch<Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number; icon?: string }>>("/events/pois").catch(() => []),
+          apiFetch<Array<{ id?: string; type: string; name?: string; description?: string; lat: number; lng: number; icon?: string; archived?: boolean }>>(
+            // Coordinators who opted in also pull the archived points; the
+            // server ignores the flag for every other role.
+            showArchivedRef.current ? "/events/pois?includeArchived=1" : "/events/pois",
+          ).catch(() => []),
           apiFetch<IncidentResponse[]>("/incidents").catch(() => [] as IncidentResponse[]),
           eventId
             ? apiFetch<Array<{ userId: string; name?: string; bibNumber?: string; lat?: number; lng?: number; freshness?: "fresh" | "warning" | "stale" | "offline" }>>(
@@ -1890,8 +1947,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           poiType: poi.type,
           poiIcon: poi.icon,
           poiDescription: poi.description,
+          poiArchived: poi.archived,
         }));
-        const visibleIncidents = incidents.filter((i) => !isArchivedIncidentStatus(i.status));
+        const visibleIncidents = incidents.filter(
+          (i) => showArchivedRef.current || !isArchivedIncidentStatus(i.status),
+        );
         const observeRead = useIncidentReadsStore.getState().observe;
         visibleIncidents.forEach((i) => observeRead(i.id, i.lastMessageAt));
         const incidentMarkers = visibleIncidents.map(incidentToMarker);
@@ -2056,8 +2116,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const existing = useMapStore.getState().markers;
       const existingMarker = existing.find((m) => m.id === payload.id);
       const withoutIncident = existing.filter((m) => m.id !== payload.id);
-      // Archived incidents drop off the active map entirely.
-      if (isArchivedIncidentStatus(payload.status)) {
+      // Archived incidents drop off the active map entirely — unless a
+      // coordinator asked to keep reviewing them.
+      if (isArchivedIncidentStatus(payload.status) && !showArchivedRef.current) {
         setMarkers(withoutIncident);
         return;
       }
@@ -2111,6 +2172,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     });
     socket.on("poi.removed", (payload: { id: string }) => {
       const existing = useMapStore.getState().markers;
+      // Coordinators reviewing archives keep the pin, flagged as archived.
+      if (showArchivedRef.current) {
+        setMarkers(existing.map((m) => (m.id === payload.id ? { ...m, poiArchived: true } : m)));
+        return;
+      }
       setMarkers(existing.filter((m) => m.id !== payload.id));
     });
     // POI edited elsewhere (e.g. moved to a new position) — upsert in place.
@@ -2389,11 +2455,26 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const renderedTrackVisuals = useMemo(() => {
     // Hospitals mode: the pins are the story — tracks would bury them.
     if (hospitalsSheetIndex >= 0) return [];
+    // Following a track: only that track is drawn. On an event where several
+    // routes share the same roads, the neighbouring lines are indistinguishable
+    // from the one being followed and are the easiest way to take a wrong turn.
+    if (trackNavPhase !== "idle" && followedTrackId) {
+      const followed = trackVisuals.find((t) => t.id === followedTrackId);
+      if (followed) return [followed];
+    }
     if (trackModeActive && focusedTrackVisual) {
       return [focusedTrackVisual];
     }
     return visibleTrackVisuals;
-  }, [focusedTrackVisual, trackModeActive, visibleTrackVisuals, hospitalsSheetIndex]);
+  }, [
+    focusedTrackVisual,
+    trackModeActive,
+    visibleTrackVisuals,
+    hospitalsSheetIndex,
+    trackNavPhase,
+    followedTrackId,
+    trackVisuals,
+  ]);
   const focusedTrackProfile = useMemo(
     () => (focusedTrack ? buildTrackProfile(focusedTrack) : null),
     [focusedTrack],
@@ -3096,7 +3177,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           // Track centre latitude so the scale bar's metres-per-pixel is correct.
           const center =
             props.center ?? event?.geometry?.coordinates ?? event?.nativeEvent?.geometry?.coordinates;
-          if (Array.isArray(center) && Number.isFinite(center[1])) setMapCenterLat(center[1]);
+          if (Array.isArray(center) && Number.isFinite(center[1])) {
+            setMapCenterLat(center[1]);
+            if (Number.isFinite(center[0])) mapCenterRef.current = [center[0], center[1]];
+          }
           if (typeof z === "number" && Number.isFinite(z)) {
             setMapZoom(z);
             // A pinch just settled during navigation: this event carries the
@@ -3645,7 +3729,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               });
             }}
           >
-            <View>
+            {/* Archived items are only here at all in coordinator archive-review
+                mode — faded so they never read as part of the live picture. */}
+            <View
+              style={
+                isArchivedIncidentStatus(marker.status) || marker.poiArchived
+                  ? styles.archivedMarker
+                  : undefined
+              }
+            >
               {marker.type === "incident" ? (() => {
                 const closed = isClosedIncidentStatus(marker.status);
                 const isSelected = marker.id === selectedMarkerId;
@@ -4726,6 +4818,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             <BottomSheetScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
               {selectedMarker.type === "infrastructure" ? (
                 <>
+                  {selectedMarker.poiArchived ? (
+                    <View style={styles.sheetInfoRow}>
+                      <Text style={styles.sheetInfoLabel}>Status</Text>
+                      <Text style={[styles.sheetInfoValue, { color: "#94a3b8" }]}>
+                        Archived — not visible to the team
+                      </Text>
+                    </View>
+                  ) : null}
                   {selectedMarker.poiDescription ? (
                     <View style={styles.sheetInfoRow}>
                       <Text style={styles.sheetInfoLabel}>Description</Text>
@@ -4816,12 +4916,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </View>
       </BottomSheet>
 
-      {/* Selected exit point preview — deliberately OUTSIDE the drawer, parked
-          just above it so the map, the path and the profile are all visible. */}
+      {/* Selected exit point preview — deliberately OUTSIDE the drawer, but glued
+          flush to its top edge so it eats as little map as possible. */}
       {selectedExitPoint ? (
         <ExitPointPreview
           point={selectedExitPoint}
-          bottom={Math.round(SCREEN_HEIGHT * snapFraction(markerSheetSnapPoints, markerSheetIndex)) + 10}
+          bottom={Math.round(SCREEN_HEIGHT * snapFraction(markerSheetSnapPoints, markerSheetIndex)) - 1}
           onClose={() => setSelectedExitPoint(null)}
           onPoiCreated={(poi: PoiDto) => {
             const existing = useMapStore.getState().markers;
@@ -4833,7 +4933,22 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
       {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
-      {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? <IncidentFAB /> : null}
+      {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? (
+        <IncidentFAB
+          // "Add point" from the FAB drops at my own position — the long-press
+          // menu is still the way to place one somewhere else on the map.
+          onAddPoint={() => {
+            const fix = useLocationStatus.getState().lastFix;
+            if (fix) {
+              setPendingPoi({ lat: fix.lat, lng: fix.lng });
+              return;
+            }
+            // No GPS fix yet — fall back to whatever the map is centred on.
+            const center = mapCenterRef.current;
+            if (center) setPendingPoi({ lat: center[1], lng: center[0] });
+          }}
+        />
+      ) : null}
       <ReportIncidentSheet />
 
       {/* Universal search: places / coordinates in any format / bibs. */}
@@ -5599,6 +5714,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#64748b",
     borderColor: "rgba(255,255,255,0.5)",
   },
+  /** Archive-review mode: faded enough to read as "not live" at a glance. */
+  archivedMarker: { opacity: 0.4 },
   incidentDotTextClosed: {
     color: "rgba(255,255,255,0.85)",
     fontSize: 12,

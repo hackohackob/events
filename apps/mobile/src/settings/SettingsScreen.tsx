@@ -20,6 +20,8 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
   const setTrackGradientEnabled = useSettingsStore((s) => s.setTrackGradientEnabled);
   const kmMarkerIntervalKm = useSettingsStore((s) => s.kmMarkerIntervalKm);
   const setKmMarkerIntervalKm = useSettingsStore((s) => s.setKmMarkerIntervalKm);
+  const showArchived = useSettingsStore((s) => s.showArchived);
+  const setShowArchived = useSettingsStore((s) => s.setShowArchived);
 
   const pickInterval = (ms: number) => {
     if (ms === locationIntervalMs) return;
@@ -127,6 +129,33 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
             </View>
           </View>
         </View>
+
+        {/* ── Coordinator-only view options ───────────────────── */}
+        {isCoordinator ? (
+          <>
+            <Text style={styles.sectionLabel}>COORDINATOR</Text>
+            <View style={styles.card}>
+              <View style={styles.row}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle}>Show archived incidents & points</Text>
+                  <Text style={styles.rowSub}>
+                    Keep archived incidents and points on the map, dimmed, so you can review what was taken
+                    down. Everyone else still sees only the live picture.
+                  </Text>
+                </View>
+                <Switch
+                  value={showArchived}
+                  onValueChange={(v) => {
+                    setShowArchived(v);
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  trackColor={{ false: "#1e293b", true: "#16a34a" }}
+                  thumbColor="#f1f5f9"
+                />
+              </View>
+            </View>
+          </>
+        ) : null}
 
         {/* ── Location tracking ───────────────────────────────── */}
         <Text style={styles.sectionLabel}>LOCATION TRACKING</Text>

@@ -17,7 +17,7 @@ interface Props {
 
 const ROUTED_COLOR = "#818cf8";
 const DIRECT_COLOR = "#f59e0b";
-const CHART_HEIGHT = 44;
+const CHART_HEIGHT = 24;
 
 function formatDistance(meters: number): string {
   return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
@@ -37,20 +37,17 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
 
   // Elevation series → stepped bars. Same trick the track profile uses (no SVG
   // dependency in this app): one thin View per sample, height = normalised gain.
-  const chart = useMemo(() => {
+  // Only the SHAPE matters here — absolute start/end altitudes are noise for a
+  // medic deciding on an extraction, so they are not labelled.
+  const bars = useMemo(() => {
     const elevations = point.path?.elevations;
     if (!elevations || elevations.length < 4) return null;
     const SAMPLES = 34;
     const step = (elevations.length - 1) / (SAMPLES - 1);
     const sampled = Array.from({ length: SAMPLES }, (_, i) => elevations[Math.round(i * step)]);
     const min = Math.min(...sampled);
-    const max = Math.max(...sampled);
-    const span = Math.max(1, max - min);
-    return {
-      bars: sampled.map((value) => Math.max(2, ((value - min) / span) * CHART_HEIGHT)),
-      min: Math.round(min),
-      max: Math.round(max),
-    };
+    const span = Math.max(1, Math.max(...sampled) - min);
+    return sampled.map((value) => Math.max(2, ((value - min) / span) * CHART_HEIGHT));
   }, [point.path]);
 
   const addExtractionPoi = async () => {
@@ -93,6 +90,9 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
               : point.incident.distanceMeters < 30
                 ? "Incident is already on this road"
                 : `${Math.max(1, Math.round((point.incident.durationMs ?? 0) / 60000))} min · ${formatDistance(point.incident.distanceMeters)} on foot`}
+            {point.fromMe
+              ? ` · 🚗 ${Math.max(1, Math.round(point.fromMe.durationMs / 60000))} min`
+              : ""}
           </Text>
         </View>
 
@@ -118,80 +118,70 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
         </Pressable>
       </View>
 
-      {/* Elevation profile of the walk path (routed points only). */}
-      {chart ? (
-        <View style={styles.chartBlock}>
-          <View style={styles.chartRow}>
-            {chart.bars.map((height, i) => (
+      {/* Elevation profile of the walk path (routed points only). Only the
+          climb/drop is labelled — start/end altitude took a whole extra row and
+          told the medic nothing actionable. */}
+      {bars ? (
+        <View style={styles.chartRow}>
+          <View style={styles.chartBars}>
+            {bars.map((height, i) => (
               <View key={i} style={[styles.bar, { height, backgroundColor: accent }]} />
             ))}
           </View>
-          <View style={styles.chartLabels}>
-            <Text style={styles.chartLabel}>{chart.min} m</Text>
-            <Text style={styles.chartLabel}>
-              {point.path?.ascentMeters != null ? `↑ ${point.path.ascentMeters} m` : "elevation"}
-              {point.path?.descentMeters != null ? `   ↓ ${point.path.descentMeters} m` : ""}
-            </Text>
-            <Text style={styles.chartLabel}>{chart.max} m</Text>
-          </View>
-        </View>
-      ) : (
-        <Text style={styles.noChartText}>
-          {direct
-            ? "No path — the line shown is straight-line distance."
-            : "No elevation data for this path."}
-        </Text>
-      )}
-
-      {point.fromMe ? (
-        <View style={styles.driveRow}>
-          <Feather name="truck" size={12} color="#94a3b8" />
-          <Text style={styles.driveText}>
-            You by car: {Math.max(1, Math.round(point.fromMe.durationMs / 60000))} min ·{" "}
-            {formatDistance(point.fromMe.distanceMeters)}
+          <Text style={styles.chartLabel} allowFontScaling={false}>
+            {point.path?.ascentMeters != null ? `↑${point.path.ascentMeters}` : ""}
+            {point.path?.descentMeters != null ? ` ↓${point.path.descentMeters}` : ""}
+            {point.path?.ascentMeters != null || point.path?.descentMeters != null ? " m" : ""}
           </Text>
         </View>
+      ) : direct ? (
+        <Text style={styles.noChartText}>Straight-line distance — no path.</Text>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Parked flush on top of the open drawer (`bottom` is the drawer height), so
+  // the two read as one stacked surface — hence square bottom corners.
   card: {
     position: "absolute",
-    left: 12,
-    right: 12,
+    left: 8,
+    right: 8,
     zIndex: 40,
     backgroundColor: "rgba(8, 15, 28, 0.97)",
-    borderRadius: 18,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
     borderWidth: 1.5,
-    paddingHorizontal: 13,
-    paddingVertical: 12,
-    gap: 10,
+    borderBottomWidth: 0,
+    paddingHorizontal: 10,
+    paddingTop: 7,
+    paddingBottom: 6,
+    gap: 5,
     shadowColor: "#000",
     shadowOpacity: 0.45,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -2 },
     elevation: 12,
   },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   badge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
     borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
-  badgeText: { color: "#ffffff", fontSize: 13, fontWeight: "900", includeFontPadding: false },
+  badgeText: { color: "#ffffff", fontSize: 11, fontWeight: "900", includeFontPadding: false },
   headerText: { flex: 1, minWidth: 0 },
-  title: { color: "#E9F1FA", fontSize: 14.5, fontWeight: "900", textTransform: "capitalize" },
-  subtitle: { fontSize: 12, fontWeight: "700", marginTop: 1 },
+  title: { color: "#E9F1FA", fontSize: 13, fontWeight: "900", textTransform: "capitalize" },
+  subtitle: { fontSize: 11, fontWeight: "700" },
   actionBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(52,211,153,0.14)",
@@ -200,16 +190,17 @@ const styles = StyleSheet.create({
   },
   actionBtnDone: { backgroundColor: "#34d399", borderColor: "#34d399" },
   closeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.05)",
   },
 
-  chartBlock: { gap: 5 },
-  chartRow: {
+  chartRow: { flexDirection: "row", alignItems: "flex-end", gap: 6 },
+  chartBars: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
@@ -217,10 +208,6 @@ const styles = StyleSheet.create({
     gap: 1.5,
   },
   bar: { flex: 1, borderRadius: 1.5, opacity: 0.85, minWidth: 2 },
-  chartLabels: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   chartLabel: { color: "#5b6b80", fontSize: 9.5, fontWeight: "700" },
-  noChartText: { color: "#5b6b80", fontSize: 11.5, fontWeight: "600" },
-
-  driveRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  driveText: { color: "#94a3b8", fontSize: 12, fontWeight: "600" },
+  noChartText: { color: "#5b6b80", fontSize: 11, fontWeight: "600" },
 });

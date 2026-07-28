@@ -61,9 +61,11 @@ interface Props {
   loading: boolean
   onSend: (text: string) => Promise<void>
   onClose: () => void
+  /** Frame a shared location on the dashboard map (chat stays open). */
+  onFocusLocation?: (point: { lat: number; lng: number }) => void
 }
 
-export default function ChatDrawer({ messages, loading, onSend, onClose }: Props) {
+export default function ChatDrawer({ messages, loading, onSend, onClose, onFocusLocation }: Props) {
   const [myId] = useState(selfUserId)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -142,7 +144,7 @@ export default function ChatDrawer({ messages, loading, onSend, onClose }: Props
                 {msg.kind === 'system' ? (
                   <SystemCard msg={msg} />
                 ) : (
-                  <Bubble msg={msg} mine={mine} showHeader={showHeader} />
+                  <Bubble msg={msg} mine={mine} showHeader={showHeader} onFocusLocation={onFocusLocation} />
                 )}
               </div>
             ))
@@ -193,7 +195,14 @@ function SystemCard({ msg }: { msg: EventMessage }) {
   )
 }
 
-function Bubble({ msg, mine, showHeader }: { msg: EventMessage; mine: boolean; showHeader: boolean }) {
+function Bubble({
+  msg, mine, showHeader, onFocusLocation,
+}: {
+  msg: EventMessage
+  mine: boolean
+  showHeader: boolean
+  onFocusLocation?: (point: { lat: number; lng: number }) => void
+}) {
   const name = msg.authorName || 'Team'
   const origin = msg.origin && msg.origin !== 'app' ? ORIGIN[msg.origin] : undefined
   return (
@@ -252,7 +261,7 @@ function Bubble({ msg, mine, showHeader }: { msg: EventMessage; mine: boolean; s
               )}
             </a>
           ) : msg.location ? (
-            <LocationCard location={msg.location} text={msg.text} mine={mine} />
+            <LocationCard location={msg.location} text={msg.text} mine={mine} onFocus={onFocusLocation} />
           ) : (
             <div className="text-sm leading-snug" style={{ color: mine ? '#04121f' : '#e6eef9', fontWeight: mine ? 500 : 400 }}>{msg.text}</div>
           )}
@@ -263,34 +272,70 @@ function Bubble({ msg, mine, showHeader }: { msg: EventMessage; mine: boolean; s
   )
 }
 
-/** Coordinates stay local until clicked — the link is the only thing that leaves. */
+/**
+ * A location shared into the chat. Clicking the card frames it on the
+ * dashboard's own map — that is what a coordinator wants when a Zello user
+ * drops a pin. The external-map link stays as a secondary affordance; nothing
+ * leaves the dashboard unless that link is clicked.
+ */
 function LocationCard({
-  location, text, mine,
-}: { location: NonNullable<EventMessage['location']>; text?: string; mine: boolean }) {
+  location, text, mine, onFocus,
+}: {
+  location: NonNullable<EventMessage['location']>
+  text?: string
+  mine: boolean
+  onFocus?: (point: { lat: number; lng: number }) => void
+}) {
   const label = location.address ?? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`
-  return (
-    <a
-      href={`https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lng}#map=17/${location.lat}/${location.lng}`}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-start gap-2.5"
-      style={{ minWidth: 190 }}
-    >
+  // Bridged locations repeat the label in `text` so text-only clients still see
+  // something — don't print it twice.
+  const caption = text && text !== label ? text : null
+  const osm = `https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lng}#map=17/${location.lat}/${location.lng}`
+
+  const body = (
+    <>
       <div
         className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
         style={{ background: mine ? 'rgba(4,18,31,0.15)' : 'rgba(52,211,153,0.15)' }}
       >
         <MapPin className="w-4 h-4" style={{ color: mine ? '#04121f' : '#34d399' }} />
       </div>
-      <div className="min-w-0">
-        <div className="text-[13px] font-semibold flex items-center gap-1" style={{ color: mine ? '#04121f' : '#e6eef9' }}>
-          {label}
-          <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
-        </div>
+      <div className="min-w-0 text-left">
+        <div className="text-[13px] font-semibold" style={{ color: mine ? '#04121f' : '#e6eef9' }}>{label}</div>
         <div className="text-[11px]" style={{ color: mine ? 'rgba(4,18,31,0.6)' : '#5f7088' }}>
-          {text || (location.accuracyM ? `±${location.accuracyM} m` : 'Shared location')}
+          {caption ?? (location.accuracyM ? `±${location.accuracyM} m` : 'Shared location')}
         </div>
       </div>
-    </a>
+    </>
+  )
+
+  if (!onFocus) {
+    return (
+      <a href={osm} target="_blank" rel="noreferrer" className="flex items-start gap-2.5" style={{ minWidth: 190 }}>
+        {body}
+      </a>
+    )
+  }
+
+  return (
+    <div className="flex items-start gap-1.5" style={{ minWidth: 190 }}>
+      <button
+        onClick={() => onFocus({ lat: location.lat, lng: location.lng })}
+        className="flex items-start gap-2.5 flex-1 min-w-0 cursor-pointer"
+        title="Show on the map"
+      >
+        {body}
+      </button>
+      <a
+        href={osm}
+        target="_blank"
+        rel="noreferrer"
+        title="Open in OpenStreetMap"
+        className="flex-shrink-0 mt-1 opacity-50 hover:opacity-100"
+        style={{ color: mine ? '#04121f' : '#9fb3cc' }}
+      >
+        <ExternalLink className="w-3 h-3" />
+      </a>
+    </div>
   )
 }

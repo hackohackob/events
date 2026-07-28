@@ -31,6 +31,7 @@ import { useSessionStore } from "../security/session-store";
 import { useNotificationFocus } from "../notifications/notification-focus";
 import { getSocket } from "../realtime/socket-client";
 import { debugLog } from "../debug/debug-log";
+import { TranscriptText } from "../ui/TranscriptText";
 import {
   listEventMessages,
   sendEventLocation,
@@ -325,11 +326,15 @@ function ChatBubble({ row }: { row: Row }) {
             origin && !mine ? { borderLeftWidth: 2, borderLeftColor: origin.color } : null,
           ]}
         >
-          {msg.audioUrl ? (
+          {/* Branch on `kind` first, not on the payload field. A bridged photo
+              or location whose media never made it across used to fall through
+              to the text branch and render an empty bubble (those messages
+              carry no text) — now it always says what it was. */}
+          {msg.kind === "voice" || msg.audioUrl ? (
             <VoiceContent msg={msg} mine={mine} />
-          ) : msg.imageUrl ? (
+          ) : msg.kind === "image" || msg.imageUrl ? (
             <PhotoContent msg={msg} mine={mine} />
-          ) : msg.location ? (
+          ) : msg.kind === "location" || msg.location ? (
             <LocationContent msg={msg} mine={mine} />
           ) : (
             <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{msg.text}</Text>
@@ -342,8 +347,19 @@ function ChatBubble({ row }: { row: Row }) {
 }
 
 function PhotoContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
-  const uri = resolveMediaUrl(msg.thumbnailUrl ?? msg.imageUrl);
   const full = resolveMediaUrl(msg.imageUrl);
+  // Thumbnail first, then the full-size file: a bridged photo only carries a
+  // thumbnail when the sending client made one, and either can be missing.
+  const candidates = useMemo(
+    () =>
+      [msg.thumbnailUrl, msg.imageUrl]
+        .map((u) => resolveMediaUrl(u))
+        .filter((u, i, all): u is string => Boolean(u) && all.indexOf(u) === i),
+    [msg.thumbnailUrl, msg.imageUrl],
+  );
+  const [attempt, setAttempt] = useState(0);
+  const shown = candidates[attempt];
+
   return (
     <Pressable
       onPress={() => {
@@ -352,7 +368,24 @@ function PhotoContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
         void Linking.openURL(full);
       }}
     >
-      {uri ? <Image source={{ uri }} style={styles.photo} resizeMode="cover" /> : null}
+      {shown ? (
+        <Image
+          key={shown}
+          source={{ uri: shown }}
+          style={styles.photo}
+          resizeMode="cover"
+          onError={() => setAttempt((a) => a + 1)}
+        />
+      ) : (
+        // Never render nothing: an image that will not load still has to read
+        // as "someone sent a photo".
+        <View style={[styles.photo, styles.photoFallback]}>
+          <Feather name="image" size={22} color="#4b6076" />
+          <Text style={styles.photoFallbackText}>
+            {full ? "Photo unavailable — tap to open" : "Photo unavailable"}
+          </Text>
+        </View>
+      )}
       {msg.text ? (
         <Text style={[styles.bubbleText, mine && styles.bubbleTextMine, { marginTop: 6 }]}>{msg.text}</Text>
       ) : null}
@@ -361,12 +394,25 @@ function PhotoContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
 }
 
 function LocationContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
-  const loc = msg.location!;
-  const label = loc.address ?? `${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}`;
+  const loc = msg.location;
+  // A bridged location can arrive without usable coordinates; show the message
+  // for what it is rather than crashing on `.toFixed` or rendering an empty row.
+  const hasFix = loc != null && Number.isFinite(loc.lat) && Number.isFinite(loc.lng);
+  const coords = hasFix ? `${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}` : null;
+  const label = loc?.address ?? coords ?? "Shared location";
+  // Bridged locations repeat the label in `text` as a fallback for clients that
+  // can't render the card — don't print it twice here.
+  const caption = msg.text && msg.text !== label ? msg.text : null;
+  const sub = hasFix
+    ? caption ?? (loc.accuracyM ? `±${loc.accuracyM} m` : loc.address ? coords! : "Shared location")
+    : caption ?? "No coordinates received";
+
   return (
     <Pressable
       style={styles.locationRow}
+      disabled={!hasFix}
       onPress={() => {
+        if (!hasFix) return;
         void Haptics.selectionAsync();
         // Hand off to the OS maps app rather than embedding a second map here.
         const url = Platform.select({
@@ -383,8 +429,8 @@ function LocationContent({ msg, mine }: { msg: EventMessageDto; mine: boolean })
         <Text style={[styles.locationLabel, mine && { color: "#04121f" }]} numberOfLines={2}>
           {label}
         </Text>
-        <Text style={[styles.locationSub, mine && { color: "rgba(4,18,31,0.6)" }]}>
-          {msg.text || (loc.accuracyM ? `±${loc.accuracyM} m` : "Shared location")}
+        <Text style={[styles.locationSub, mine && { color: "rgba(4,18,31,0.6)" }]} numberOfLines={2}>
+          {sub}
         </Text>
       </View>
     </Pressable>
@@ -426,9 +472,12 @@ function VoiceContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
         </Text>
       </Pressable>
       {msg.transcript ? (
-        <Text style={[styles.transcript, mine && { color: "rgba(4,18,31,0.78)" }]}>
-          <Feather name="file-text" size={10} color={mine ? "rgba(4,18,31,0.6)" : "#64748b"} /> {msg.transcript}
-        </Text>
+        <TranscriptText
+          text={msg.transcript}
+          style={[styles.transcript, mine && { color: "rgba(4,18,31,0.78)" }]}
+          containerStyle={styles.transcriptBox}
+          iconColor={mine ? "rgba(4,18,31,0.6)" : "#64748b"}
+        />
       ) : null}
     </View>
   );
@@ -754,9 +803,12 @@ const styles = StyleSheet.create({
   waveform: { flexDirection: "row", alignItems: "center", gap: 2.5, height: 22 },
   waveBar: { width: 2.5, borderRadius: 2 },
   voiceDur: { fontSize: 11, fontWeight: "800", fontVariant: ["tabular-nums"] },
-  transcript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic", marginTop: 6, maxWidth: 230 },
+  transcript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic" },
+  transcriptBox: { marginTop: 6, maxWidth: 230 },
 
   photo: { width: 216, height: 162, borderRadius: 12, backgroundColor: "#0b1626" },
+  photoFallback: { alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12 },
+  photoFallbackText: { color: "#6b8199", fontSize: 11.5, fontWeight: "700", textAlign: "center" },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 9, minWidth: 190, paddingVertical: 2 },
   locationIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   locationLabel: { color: "#e6eef9", fontSize: 13.5, fontWeight: "700" },

@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { Play, Pause, FileText } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Play, Pause, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 
 const BARS = [8, 14, 10, 17, 12, 16, 9, 13, 18, 11, 15, 9, 14, 12, 16, 10]
 
@@ -79,13 +79,56 @@ export default function VoiceMessage({
           {fmt(playing || progress > 0 ? progress * dur : dur)}
         </span>
       </div>
-      {transcript ? (
-        <div className="flex gap-1.5 mt-1.5 text-xs italic" style={{ color: mine ? 'rgba(4,18,31,0.78)' : '#aeb9c9' }}>
-          <FileText className="w-3 h-3 flex-shrink-0 mt-0.5" />
-          <span>{transcript}</span>
-        </div>
-      ) : null}
+      {transcript ? <Transcript text={transcript} mine={mine} /> : null}
       <audio ref={audioRef} src={src} preload="none" />
+    </div>
+  )
+}
+
+/** Max transcript lines before it collapses behind an expand arrow. */
+const TRANSCRIPT_LINES = 3
+
+/**
+ * Transcripts of long radio traffic can run a dozen lines and push everything
+ * else out of the chat, so they clamp to 3 lines with an expand chevron. The
+ * chevron only appears when the text actually overflows.
+ */
+function Transcript({ text, mine }: { text: string; mine: boolean }) {
+  const ref = useRef<HTMLSpanElement | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const color = mine ? 'rgba(4,18,31,0.78)' : '#aeb9c9'
+
+  // Measure while clamped — once expanded, scrollHeight === clientHeight.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || expanded) return
+    setOverflows(el.scrollHeight - el.clientHeight > 1)
+  }, [text, expanded])
+
+  return (
+    <div className="flex gap-1.5 mt-1.5 text-xs italic" style={{ color }}>
+      <FileText className="w-3 h-3 flex-shrink-0 mt-0.5" />
+      <span
+        ref={ref}
+        className="flex-1 min-w-0"
+        style={
+          expanded
+            ? undefined
+            : { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: TRANSCRIPT_LINES, overflow: 'hidden' }
+        }
+      >
+        {text}
+      </span>
+      {overflows ? (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex-shrink-0 self-end opacity-70 hover:opacity-100"
+          title={expanded ? 'Collapse transcript' : 'Expand transcript'}
+        >
+          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+      ) : null}
     </div>
   )
 }

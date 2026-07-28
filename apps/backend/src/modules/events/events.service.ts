@@ -464,10 +464,11 @@ export class EventsService implements OnModuleInit {
     };
   }
 
-  listPoisForEvent(eventId: string): StoredPoi[] {
+  listPoisForEvent(eventId: string, includeArchived = false): StoredPoi[] {
     const event = this.events.find((e) => e.id === eventId);
     if (!event) return [];
-    return event.days.flatMap((d) => d.pois).filter((p) => !p.archived);
+    const pois = event.days.flatMap((d) => d.pois);
+    return includeArchived ? pois : pois.filter((p) => !p.archived);
   }
 
   /** Create a POI at the given coordinates (long-press on the map). */

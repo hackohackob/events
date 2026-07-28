@@ -298,6 +298,16 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [showPois, setShowPois] = useState(true)
   const [showParticipants, setShowParticipants] = useState(false)
   const [showIncidents, setShowIncidents] = useState(true)
+  // Coordinator-only review mode: archived incidents and points are normally
+  // gone for good from the live board; this puts them back, greyed, so what was
+  // taken down can still be read after the fact. Remembered between sessions.
+  const [showArchived, setShowArchived] = useState(false)
+  useEffect(() => {
+    setShowArchived(localStorage.getItem('dashboard_show_archived') === '1')
+  }, [])
+  useEffect(() => {
+    localStorage.setItem('dashboard_show_archived', showArchived ? '1' : '0')
+  }, [showArchived])
   const [baseLayer, setBaseLayer] = useState<BaseLayer>('streets')
   const [map3d, setMap3d] = useState(false)
   const [layersOpen, setLayersOpen] = useState(true)
@@ -333,7 +343,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     assignDestination, removeActiveMedic, assignIncident, unassignIncident,
     resolveIncident, closeIncident, updateIncidentNotes, moveIncident, archiveIncident,
     loadMessages, sendMessage,
-  } = useLiveMap({ eventId: id, enabled: isActive })
+  } = useLiveMap({ eventId: id, enabled: isActive, includeArchived: showArchived })
 
   // Runner heatmap from one aggregated, polled snapshot (not per-participant WS).
   const { points: heatPoints, count: runnerCount } = useHeatmap(id, isActive)
@@ -359,7 +369,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   // "Move incident" mode: the next map click repositions this incident's pin.
   const [movingIncident, setMovingIncident] = useState<{ id: string; name: string } | null>(null)
   // Locating a participant from the roster: fly the map there + drop a pin.
-  const [participantFocus, setParticipantFocus] = useState<{ lng: number; lat: number; nonce: number } | null>(null)
+  const [participantFocus, setParticipantFocus] = useState<
+    { lng: number; lat: number; nonce: number; avoidRightDrawer?: boolean } | null
+  >(null)
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useEventChat({ eventId: id, enabled: isActive })
   const [roster, setRoster] = useState<EventMedic[]>([])
@@ -443,7 +455,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     }))
   )
 
-  const filteredPois = filteredDays.flatMap(d => d.pois || [])
+  // Archived points are off the board unless archive review is on.
+  const filteredPois = filteredDays.flatMap(d => d.pois || []).filter(p => showArchived || !p.archived)
+  const archivedCount =
+    filteredDays.flatMap(d => d.pois || []).filter(p => p.archived).length +
+    liveIncidents.filter(i => i.status === 'archived').length
 
   const mapPois = [
     ...filteredPois.map((p, i) => ({
@@ -961,8 +977,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   [...liveIncidents]
                     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                     .map(inc => {
-                    const resolvedOrClosed = inc.status === 'resolved' || inc.status === 'closed'
-                    const statusColor = inc.status === 'resolved' ? '#22c55e' : inc.status === 'closed' ? '#64748b' : inc.status === 'in_progress' || inc.status === 'assigned' ? '#f59e0b' : '#f87171'
+                    const archived = inc.status === 'archived'
+                    const resolvedOrClosed = inc.status === 'resolved' || inc.status === 'closed' || archived
+                    const statusColor = inc.status === 'resolved' ? '#22c55e' : inc.status === 'closed' || archived ? '#64748b' : inc.status === 'in_progress' || inc.status === 'assigned' ? '#f59e0b' : '#f87171'
                     return (
                     <button
                       key={inc.id}
@@ -971,6 +988,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                       style={{
                         background: resolvedOrClosed ? 'rgba(255,255,255,0.03)' : 'rgba(239,68,68,0.07)',
                         border: `1px solid ${resolvedOrClosed ? 'rgba(148,163,184,0.12)' : 'rgba(239,68,68,0.2)'}`,
+                        // Archived entries are review-only — visibly demoted.
+                        opacity: archived ? 0.55 : 1,
                       }}
                     >
                       <div
@@ -1238,6 +1257,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 { key: 'participant-dots', label: 'Participants', count: participantMarkers.length, color: '#22c55e', active: showParticipantDots, toggle: () => setShowParticipantDots(v => !v) },
                 { key: 'participants', label: 'Heatmap', count: runnerCount, color: '#f97316', active: showParticipants, toggle: () => setShowParticipants(v => !v) },
                 { key: 'incidents', label: 'Incidents', count: liveIncidents.length, color: '#f87171', active: showIncidents, toggle: () => setShowIncidents(v => !v) },
+                // Coordinator review mode: put archived incidents and points back
+                // on the map (and in the lists) instead of hiding them.
+                { key: 'archived', label: 'Archived', count: archivedCount, color: '#94a3b8', active: showArchived, toggle: () => setShowArchived(v => !v) },
               ].map(({ key, label, count, color, active, toggle }) => (
                 <button
                   key={key}
@@ -1411,6 +1433,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           loading={chat.loading}
           onSend={chat.send}
           onClose={() => { setChatOpen(false); chat.setOpen(false) }}
+          // A location shared into the chat (typically from Zello) frames on the
+          // map without closing the drawer — the coordinator keeps reading.
+          onFocusLocation={(point) =>
+            setParticipantFocus({ ...point, nonce: Date.now(), avoidRightDrawer: true })
+          }
         />
       )}
 

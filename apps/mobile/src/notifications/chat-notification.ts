@@ -31,7 +31,16 @@ function messagePreview(msg: EventMessageDto): string {
     const length = secs ? ` (${secs}s)` : "";
     return msg.transcript ? `🎤 ${msg.transcript}` : `🎤 Voice message${length}`;
   }
-  return msg.text ?? "New message";
+  // Photos and shared locations carry no text — without their own preview they
+  // all showed up in the tray as a bare "New message".
+  if (msg.kind === "image" || msg.imageUrl) return msg.text ? `📷 ${msg.text}` : "📷 Photo";
+  if (msg.kind === "location" || msg.location) {
+    const where =
+      msg.location?.address ??
+      (msg.location ? `${msg.location.lat.toFixed(4)}, ${msg.location.lng.toFixed(4)}` : null);
+    return `📍 ${msg.text || where || "Shared location"}`;
+  }
+  return msg.text || "New message";
 }
 
 /**

@@ -416,10 +416,11 @@ export interface CloseIncidentRequest {
 
 /**
  * Incident chat message kinds. `first_aid` and `cpr` are structured entries
- * logged automatically by the runner app during guided care; `text` always
- * carries a human-readable fallback line for old clients.
+ * logged automatically by the runner app during guided care; `handover` is the
+ * casualty handover written when the incident is closed; `text` always carries
+ * a human-readable fallback line for old clients.
  */
-export type IncidentMessageKind = "text" | "voice" | "first_aid" | "cpr" | "system";
+export type IncidentMessageKind = "text" | "voice" | "first_aid" | "cpr" | "system" | "handover";
 
 export interface IncidentMessage {
   id: string;

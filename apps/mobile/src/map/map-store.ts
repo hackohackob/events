@@ -39,6 +39,8 @@ interface Marker {
   route?: MedicMarkerRoute | null;
   /** POI free-text description (shown in the marker detail sheet). */
   poiDescription?: string;
+  /** Archived POI — only on the map at all when a coordinator opted in. */
+  poiArchived?: boolean;
   /** Incident category (medical | cardiac | trauma | …). */
   incidentType?: string;
   /** Server-relative photo path attached to an incident, if any. */

@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -53,9 +54,15 @@ export class EventsController {
     return geojson;
   }
 
+  /**
+   * Event POIs. Archived ones are hidden by default; coordinators can ask for
+   * them (`?includeArchived=1`) to review what was taken off the map — the flag
+   * is ignored for everyone else so a stale point never reappears in the field.
+   */
   @Get("pois")
-  pois(@CurrentUser() user: RequestUser) {
-    return this.eventsService.listPoisForEvent(user.eventId);
+  pois(@CurrentUser() user: RequestUser, @Query("includeArchived") includeArchived?: string) {
+    const wantsArchived = includeArchived === "1" || includeArchived === "true";
+    return this.eventsService.listPoisForEvent(user.eventId, wantsArchived && user.role === "coordinator");
   }
 
   @Post("pois")

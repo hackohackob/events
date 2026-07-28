@@ -16,6 +16,8 @@ import { wsUrl } from '@/env'
 export interface UseLiveMapOptions {
   eventId: string | null
   enabled?: boolean
+  /** Coordinator archive review: keep archived incidents in the returned list. */
+  includeArchived?: boolean
 }
 
 export interface RunnerLocation {
@@ -97,7 +99,7 @@ function toLiveIncident(inc: any): LiveIncident {
   }
 }
 
-export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
+export function useLiveMap({ eventId, enabled = true, includeArchived = false }: UseLiveMapOptions) {
   const [medics, setMedics] = useState<Map<string, MedicState>>(new Map())
   const [runners, setRunners] = useState<Map<string, RunnerLocation>>(new Map())
   const [incidents, setIncidents] = useState<Map<string, LiveIncident>>(new Map())
@@ -377,8 +379,11 @@ export function useLiveMap({ eventId, enabled = true }: UseLiveMapOptions) {
   return {
     medics: Array.from(medics.values()),
     runners: Array.from(runners.values()),
-    // Archived incidents are hidden everywhere (map + lists).
-    incidents: Array.from(incidents.values()).filter((i) => i.status !== 'archived'),
+    // Archived incidents are hidden everywhere (map + lists) unless a
+    // coordinator turned on archive review.
+    incidents: includeArchived
+      ? Array.from(incidents.values())
+      : Array.from(incidents.values()).filter((i) => i.status !== 'archived'),
     incidentMessages,
     connected,
     alarmSignal,

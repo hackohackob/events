@@ -103,6 +103,8 @@ export default function CreateEventWizard({
               name: poi.name,
               description: poi.description,
               icon: poi.icon,
+              // Carried through the editor so a save doesn't un-archive a point.
+              archived: poi.archived,
             })),
             assignments: (day.assignments ?? []).map(a => ({
               userId: a.userId,

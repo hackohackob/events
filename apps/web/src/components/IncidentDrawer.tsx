@@ -556,7 +556,9 @@ export default function IncidentDrawer({
               {messages.length === 0 ? (
                 <div className="text-center text-xs py-10" style={{ color: '#475569' }}>No messages yet. Start the conversation.</div>
               ) : (
-                messages.map(m => m.authorId === 'system' ? (
+                messages.map(m => m.kind === 'handover' ? (
+                  <HandoverChip key={m.id} message={m} />
+                ) : m.authorId === 'system' ? (
                   // Timeline log entry (reported / dispatched / arrived / …)
                   <div key={m.id} className="flex items-center gap-2 py-0.5">
                     <div className="flex-1 h-px" style={{ background: 'rgba(148,163,184,0.14)' }} />
@@ -657,6 +659,39 @@ function FirstAidChip({ message: m }: { message: IncidentMessage }) {
         </div>
         {secondary && <div className="text-[11px] mt-1" style={{ color: '#7d8ea4' }}>{secondary}</div>}
         <div className="text-sm font-bold text-slate-100 mt-0.5">{primary}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Casualty handover as a log entry — the closing summary, inline in the timeline. */
+function HandoverChip({ message: m }: { message: IncidentMessage }) {
+  const meta = (m.meta ?? {}) as { by?: string; vitals?: string; treatment?: string; transport?: string }
+  const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const empty = !meta.vitals && !meta.treatment && !meta.transport
+
+  return (
+    <div className="flex justify-center py-0.5">
+      <div
+        className="rounded-xl px-3 py-2 space-y-1"
+        style={{ maxWidth: '92%', background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.22)' }}
+      >
+        <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold tracking-wide" style={{ color: '#22c55e' }}>
+          <ClipboardList className="w-3 h-3" />
+          CASUALTY HANDOVER
+          <span className="font-medium" style={{ color: '#48586c' }}>
+            {meta.by ? `· ${meta.by} ` : ''}· {time}
+          </span>
+        </div>
+        {empty ? (
+          <div className="text-[11px] text-center" style={{ color: '#7d8ea4' }}>Closed without handover notes.</div>
+        ) : (
+          <>
+            {meta.vitals && <HandoverRow label="Vitals" value={meta.vitals} />}
+            {meta.treatment && <HandoverRow label="Treatment" value={meta.treatment} />}
+            {meta.transport && <HandoverRow label="Transport" value={meta.transport} />}
+          </>
+        )}
       </div>
     </div>
   )

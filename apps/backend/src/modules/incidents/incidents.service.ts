@@ -66,7 +66,7 @@ export interface IncidentMessageRecord {
   authorId: string;
   authorName: string;
   text: string;
-  /** "text" | "voice" | "first_aid" | "cpr" | "system" — structured kinds carry `meta`. */
+  /** "text" | "voice" | "first_aid" | "cpr" | "system" | "handover" — structured kinds carry `meta`. */
   kind?: string;
   /** Structured context for first_aid/cpr entries (question, answer, action, durationMs …). */
   meta?: Record<string, unknown>;
@@ -378,16 +378,23 @@ export class IncidentsService implements OnModuleInit {
   /**
    * Insert a system "log" entry into the incident chat (reported / dispatched /
    * arrived / …) and broadcast it like a normal message. Clients render
-   * author_id "system" as a timeline divider. Best-effort — never throws.
+   * author_id "system" as a timeline divider, except for structured kinds
+   * (e.g. "handover") which get their own card. Best-effort — never throws.
    */
-  private async systemMessage(eventId: string, incidentId: string, text: string): Promise<void> {
+  private async systemMessage(
+    eventId: string,
+    incidentId: string,
+    text: string,
+    opts: { kind?: string; meta?: Record<string, unknown> } = {},
+  ): Promise<void> {
     try {
       const id = randomUUID();
       const now = new Date().toISOString();
+      const kind = opts.kind ?? "system";
       await this.db.query(
-        `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, kind, created_at)
-         VALUES ($1, $2, $3, 'system', 'System', $4, 'system', $5)`,
-        [id, incidentId, eventId, text, now],
+        `INSERT INTO incident_messages (id, incident_id, event_id, author_id, author_name, text, kind, meta, created_at)
+         VALUES ($1, $2, $3, 'system', 'System', $4, $5, $6, $7)`,
+        [id, incidentId, eventId, text, kind, opts.meta ? JSON.stringify(opts.meta) : null, now],
       );
       const message: IncidentMessageRecord = {
         id,
@@ -396,7 +403,8 @@ export class IncidentsService implements OnModuleInit {
         authorId: "system",
         authorName: "System",
         text,
-        kind: "system",
+        kind,
+        meta: opts.meta,
         createdAt: now,
       };
       await this.redisService.publish(`event:${eventId}:incidents`, {
@@ -1137,8 +1145,19 @@ export class IncidentsService implements OnModuleInit {
       payload: { ...incident, nearbyParamedics: [] },
     });
 
+    // The handover goes into the log as a structured entry, not just a "closed
+    // by X" divider — the log is what gets read back afterwards, and the
+    // vitals/treatment/transport are the whole point of closing this way.
     void this.resolveReporterName(eventId, userId).then((actorName) => {
-      void this.systemMessage(eventId, incidentId, `🏁 Closed with handover by ${actorName}`);
+      void this.systemMessage(eventId, incidentId, `🏁 Closed with handover by ${actorName}`, {
+        kind: "handover",
+        meta: {
+          by: actorName,
+          vitals: incident.vitals ?? undefined,
+          treatment: incident.treatment ?? undefined,
+          transport: incident.transport ?? undefined,
+        },
+      });
     });
 
     return incident;

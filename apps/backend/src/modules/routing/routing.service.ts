@@ -192,9 +192,11 @@ export class RoutingService {
   /**
    * Find the nearest paved-road access ("exit") points around an incident.
    *
-   * Fully offline (self-hosted GraphHopper): probe car-profile routes from the
-   * incident towards 8 compass bearings and take the FIRST paved point along
-   * each probe path (surface details), deduped. Each surviving point gets:
+   * Fully offline (self-hosted GraphHopper): probe routes from the incident
+   * towards 12 compass bearings (foot first, car as the fallback) and take the
+   * FIRST paved point along each probe path (surface details), deduped. Note
+   * this finds roads the ROUTER leads to, not the geometrically nearest road —
+   * see the caveats around `firstPavedPointIndex`. Each surviving point gets:
    *   - an incident leg: foot + mtb routes, duration = their average (a
    *     "carrying gear cross-country" pace between walking and cycling); when
    *     neither profile can route there it's kept as a DIRECT point (straight

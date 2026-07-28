@@ -41,6 +41,8 @@ export interface PointOfInterest {
   description?: string
   /** Custom glyph (emoji) overriding the type's default icon — used by custom points. */
   icon?: string
+  /** Archived points stay off the live board; the editor must round-trip this. */
+  archived?: boolean
 }
 
 export interface Discipline {

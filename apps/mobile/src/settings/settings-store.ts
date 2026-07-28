@@ -27,6 +27,11 @@ interface SettingsState {
   kmMarkersEnabled: boolean;
   /** Spacing between km chips, in km. */
   kmMarkerIntervalKm: number;
+  /**
+   * Coordinators only: keep archived incidents and points on the map (dimmed)
+   * instead of dropping them. Everyone else gets the clean live picture.
+   */
+  showArchived: boolean;
   hydrated: boolean;
 
   setLocationIntervalMs: (ms: number) => void;
@@ -34,6 +39,7 @@ interface SettingsState {
   setTrackGradientEnabled: (enabled: boolean) => void;
   setKmMarkersEnabled: (enabled: boolean) => void;
   setKmMarkerIntervalKm: (km: number) => void;
+  setShowArchived: (enabled: boolean) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -45,12 +51,18 @@ const DEFAULTS = {
   trackGradientEnabled: true,
   kmMarkersEnabled: true,
   kmMarkerIntervalKm: 5,
+  showArchived: false,
 };
 
 function persist(
   state: Pick<
     SettingsState,
-    "locationIntervalMs" | "trackOffsetEnabled" | "trackGradientEnabled" | "kmMarkersEnabled" | "kmMarkerIntervalKm"
+    | "locationIntervalMs"
+    | "trackOffsetEnabled"
+    | "trackGradientEnabled"
+    | "kmMarkersEnabled"
+    | "kmMarkerIntervalKm"
+    | "showArchived"
   >,
 ) {
   void AsyncStorage.setItem(
@@ -61,6 +73,7 @@ function persist(
       trackGradientEnabled: state.trackGradientEnabled,
       kmMarkersEnabled: state.kmMarkersEnabled,
       kmMarkerIntervalKm: state.kmMarkerIntervalKm,
+      showArchived: state.showArchived,
     }),
   );
 }
@@ -71,6 +84,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   trackGradientEnabled: DEFAULTS.trackGradientEnabled,
   kmMarkersEnabled: DEFAULTS.kmMarkersEnabled,
   kmMarkerIntervalKm: DEFAULTS.kmMarkerIntervalKm,
+  showArchived: DEFAULTS.showArchived,
   hydrated: false,
 
   setLocationIntervalMs: (locationIntervalMs) => {
@@ -93,6 +107,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ kmMarkerIntervalKm });
     persist({ ...get(), kmMarkerIntervalKm });
   },
+  setShowArchived: (showArchived) => {
+    set({ showArchived });
+    persist({ ...get(), showArchived });
+  },
 
   hydrate: async () => {
     try {
@@ -110,6 +128,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             typeof parsed.kmMarkersEnabled === "boolean" ? parsed.kmMarkersEnabled : DEFAULTS.kmMarkersEnabled,
           kmMarkerIntervalKm:
             typeof parsed.kmMarkerIntervalKm === "number" ? parsed.kmMarkerIntervalKm : DEFAULTS.kmMarkerIntervalKm,
+          showArchived: typeof parsed.showArchived === "boolean" ? parsed.showArchived : DEFAULTS.showArchived,
         });
       }
     } catch {

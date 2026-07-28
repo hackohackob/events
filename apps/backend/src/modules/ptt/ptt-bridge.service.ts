@@ -182,9 +182,13 @@ export class PttBridgeService implements OnModuleInit {
       case "text":
         return { kind: "text", text: message.text };
 
+      // Photos and locations also get a plain-text line. It is what any client
+      // that cannot render the attachment falls back to, and it keeps the
+      // message readable in the log instead of showing up as an empty bubble.
       case "location":
         return {
           kind: "location",
+          text: message.address ?? `${message.lat.toFixed(5)}, ${message.lng.toFixed(5)}`,
           location: {
             lat: message.lat,
             lng: message.lng,

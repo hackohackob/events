@@ -212,8 +212,10 @@ interface MapClientProps {
   hoverCoordColor?: string
   fitBounds?: [[number, number], [number, number]]
   /** Imperatively fly the camera to a point (e.g. locating a participant). The
-   *  `nonce` makes repeat clicks on the same coordinate re-trigger the flight. */
-  focusTarget?: { lng: number; lat: number; nonce: number }
+   *  `nonce` makes repeat clicks on the same coordinate re-trigger the flight.
+   *  Set `avoidRightDrawer` when a right-hand drawer is open over the map, so
+   *  the point lands beside it instead of underneath it. */
+  focusTarget?: { lng: number; lat: number; nonce: number; avoidRightDrawer?: boolean }
   /** POIs available as Go-To destinations */
   availablePois?: PointOfInterest[]
   /** Callback for right-click to add a POI */
@@ -1399,7 +1401,7 @@ export default function MapClient({
   // time the nonce changes, even if the coordinate is identical.
   useEffect(() => {
     if (!focusTarget) return
-    focusOn(focusTarget.lng, focusTarget.lat, { rightDrawer: false })
+    focusOn(focusTarget.lng, focusTarget.lat, { rightDrawer: focusTarget.avoidRightDrawer ?? false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget?.nonce])
 
