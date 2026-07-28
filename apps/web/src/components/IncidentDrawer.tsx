@@ -22,6 +22,14 @@ function photoSrc(url?: string) {
   return `${apiUrl.replace(/\/api$/, '')}${url}`
 }
 
+function fmtMeters(meters: number): string {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`
+}
+
+function fmtMinutes(ms: number): string {
+  return `${Math.max(1, Math.round(ms / 60000))} min`
+}
+
 function timeAgo(iso?: string): string {
   if (!iso) return '—'
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
@@ -84,6 +92,7 @@ export default function IncidentDrawer({
   const [notesDraft, setNotesDraft] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
   const [asphalt, setAsphalt] = useState<AsphaltAccessPoint[] | null>(null)
+  const [asphaltRadius, setAsphaltRadius] = useState<number | null>(null)
   const [asphaltLoading, setAsphaltLoading] = useState(false)
   const [asphaltError, setAsphaltError] = useState<string | null>(null)
 
@@ -93,7 +102,9 @@ export default function IncidentDrawer({
     setAsphaltLoading(true)
     setAsphaltError(null)
     try {
-      setAsphalt(await closestAsphalt(incident.lat, incident.lng))
+      const result = await closestAsphalt(incident.lat, incident.lng)
+      setAsphalt(result.points)
+      setAsphaltRadius(result.searchRadiusMeters ?? null)
     } catch {
       setAsphaltError('No reachable paved road found around this incident.')
     } finally {
@@ -324,43 +335,70 @@ export default function IncidentDrawer({
                 </button>
                 {asphaltError && <div className="text-xs mt-1.5" style={{ color: '#f87171' }}>{asphaltError}</div>}
                 {asphalt && (
-                  <div className="mt-2 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(129,140,248,0.22)', background: 'rgba(99,102,241,0.05)' }}>
-                    {asphalt.map((p, i) => {
-                      const direct = p.incident.direct
-                      const dist = p.incident.distanceMeters >= 1000
-                        ? `${(p.incident.distanceMeters / 1000).toFixed(1)} km`
-                        : `${p.incident.distanceMeters} m`
-                      const timing = direct
-                        ? `${dist} straight line${p.incident.noRoad ? ' — no path' : ''}`
-                        : `${Math.max(1, Math.round((p.incident.durationMs ?? 0) / 60000))} min · ${dist}`
-                      return (
-                        <div key={p.index} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: i > 0 ? '1px solid rgba(129,140,248,0.16)' : 'none' }}>
-                          <span
-                            className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-                            style={{ background: direct ? 'rgba(245,158,11,0.22)' : 'rgba(129,140,248,0.18)', color: direct ? '#fbbf24' : '#a5b4fc' }}
+                  <>
+                    {asphaltRadius && (
+                      <div className="text-[10px] mt-1.5" style={{ color: '#475569' }}>
+                        Expanding search reached {fmtMeters(asphaltRadius)}
+                      </div>
+                    )}
+                    <div className="mt-1.5 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(148,163,184,0.16)', background: 'rgba(255,255,255,0.02)' }}>
+                      {asphalt.map((p, i) => {
+                        const direct = p.incident.direct
+                        // Green = recommended, indigo = routed, amber = no route.
+                        const accent = direct ? '#f59e0b' : p.best ? '#22c55e' : '#818cf8'
+                        return (
+                          <div
+                            key={p.index}
+                            className="flex items-center gap-2.5 px-3 py-2"
+                            style={{
+                              borderTop: i > 0 ? '1px solid rgba(148,163,184,0.12)' : 'none',
+                              background: p.best ? 'rgba(34,197,94,0.07)' : 'transparent',
+                            }}
                           >
-                            {p.index}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold" style={{ color: direct ? '#fcd34d' : '#e2e8f0' }}>{timing}</div>
-                            <div className="text-[10px] capitalize" style={{ color: '#64748b' }}>
-                              {p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}{p.incident.noRoad ? ' · no road' : ''}
-                            </div>
-                          </div>
-                          {onViewOnMap && (
-                            <button
-                              onClick={() => onViewOnMap({ lat: p.lat, lng: p.lng, label: `Exit ${p.index}` })}
-                              title="View on map"
-                              className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg"
-                              style={{ background: 'rgba(147,197,253,0.12)', color: '#93c5fd' }}
+                            <span
+                              className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                              style={{ background: `${accent}2e`, color: accent }}
                             >
-                              <Eye className="w-3 h-3" /> View
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                              {p.index}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              {/* Walk and bike side by side — never averaged. */}
+                              {direct ? (
+                                <div className="text-xs font-bold" style={{ color: '#fcd34d' }}>
+                                  {fmtMeters(p.incident.distanceMeters)} straight line — no route
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-3 text-xs font-bold" style={{ color: '#e2e8f0' }}>
+                                  {p.incident.foot && <span title="On foot">🚶 {fmtMinutes(p.incident.foot.durationMs)}</span>}
+                                  {p.incident.bike && <span title="By bike">🚲 {fmtMinutes(p.incident.bike.durationMs)}</span>}
+                                  <span className="font-medium" style={{ color: '#7e93ac' }}>{fmtMeters(p.incident.distanceMeters)}</span>
+                                </div>
+                              )}
+                              <div className="text-[10px] capitalize flex items-center gap-1.5 flex-wrap" style={{ color: '#64748b' }}>
+                                <span>{p.roadHint ? p.roadHint.replace(/_/g, ' ') : 'paved road'}</span>
+                                {p.confidence === 'unknown' && (
+                                  <span className="normal-case font-bold" style={{ color: '#fbbf24' }}>· surface unverified</span>
+                                )}
+                                {p.incident.offPathSignificant && p.incident.offPathMeters ? (
+                                  <span className="normal-case">· first {fmtMeters(p.incident.offPathMeters)} off-path</span>
+                                ) : null}
+                              </div>
+                            </div>
+                            {onViewOnMap && (
+                              <button
+                                onClick={() => onViewOnMap({ lat: p.lat, lng: p.lng, label: `Exit ${p.index}` })}
+                                title="View on map"
+                                className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
+                                style={{ background: 'rgba(147,197,253,0.12)', color: '#93c5fd' }}
+                              >
+                                <Eye className="w-3 h-3" /> View
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
 

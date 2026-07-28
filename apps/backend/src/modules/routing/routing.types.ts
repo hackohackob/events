@@ -93,25 +93,64 @@ export interface AsphaltAccessPath {
   elevations?: number[];
   ascentMeters?: number;
   descentMeters?: number;
+  /**
+   * Index into `geometry` where the routed network begins. Vertex 0 is always
+   * the incident itself; everything before this index is the off-path carry, so
+   * the client can draw that stretch differently (dashed).
+   */
+  routeStartIndex?: number;
+}
+
+/** How much we trust that the point really is asphalt. See surface-classification. */
+export type PavedConfidence = "confirmed" | "likely" | "unknown";
+
+/** One measured leg on a given profile. */
+export interface AsphaltAccessLeg {
+  /** Metres, including the off-path carry at the start. */
+  distanceMeters: number;
+  /** Milliseconds, including the off-path carry at the start. */
+  durationMs: number;
 }
 
 /** One paved-road access ("exit") point near an incident. */
 export interface AsphaltAccessPoint {
-  /** 1-based exit number — routed points first (fastest first), then straight-line ones. */
+  /** 1-based exit number — best first, then by time; straight-line ones last. */
   index: number;
   lat: number;
   lng: number;
   /** Road class when GraphHopper knows it (e.g. "residential"). */
   roadHint?: string;
+  /** OSM `surface` tag at the point, when tagged. */
+  surfaceHint?: string;
+  /** Tag-confidence tier — the client shows unverified surfaces differently. */
+  confidence: PavedConfidence;
+  /** Set on the single recommended point. */
+  best?: boolean;
   /**
    * Incident → point leg.
-   * - routed (`direct: false`): distance/duration follow the walk path;
-   *   duration is a foot/bike blend (average of both profiles).
-   * - straight-line (`direct: true`): distance is the crow-flies distance and
-   *   the client draws a straight line. `noRoad` marks the ones where no
-   *   walkable route exists at all.
+   *
+   * `foot` and `bike` are reported separately and deliberately NOT blended: the
+   * two profiles route over different networks, so an average matched neither
+   * and hid which one the number came from. A stretcher party reads `foot`; a
+   * medic on a bike reads `bike`.
+   *
+   * `direct: true` means no route exists and the client draws a straight line;
+   * `distanceMeters` is then the crow-flies distance.
    */
-  incident: { distanceMeters: number; durationMs?: number; direct: boolean; noRoad?: boolean };
+  incident: {
+    /** Best available distance — the foot leg when routed, else crow-flies. */
+    distanceMeters: number;
+    /** Fastest of the routed profiles, ms. Absent when nothing routed. */
+    durationMs?: number;
+    /** Straight-line metres from the incident to where the route begins. */
+    offPathMeters: number;
+    /** True when the carry is long enough to be worth calling out. */
+    offPathSignificant?: boolean;
+    foot?: AsphaltAccessLeg;
+    bike?: AsphaltAccessLeg;
+    direct: boolean;
+    noRoad?: boolean;
+  };
   /** Caller → point by car, when the caller's position was provided and routable. */
   fromMe?: { distanceMeters: number; durationMs: number };
   /** Drawable walk path — present for routed points only. */
@@ -121,4 +160,6 @@ export interface AsphaltAccessPoint {
 export interface ClosestAsphaltResponse {
   origin: { lat: number; lng: number };
   points: AsphaltAccessPoint[];
+  /** How far out the expanding search had to reach before it had enough, metres. */
+  searchRadiusMeters?: number;
 }

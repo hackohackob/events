@@ -57,7 +57,12 @@ import { ChatTabBadge } from "../chat/ChatTabBadge";
 import { useEventChatStore } from "../chat/event-chat-store";
 import type { EventMessageDto } from "../chat/event-chat-api";
 import { AssignDestinationBar } from "./AssignDestinationBar";
-import { IncidentSheet, type AsphaltPoint } from "../incidents/IncidentSheet";
+import {
+  IncidentSheet,
+  exitColor,
+  formatDistance as formatExitDistance,
+  type AsphaltPoint,
+} from "../incidents/IncidentSheet";
 import { ExitPointPreview } from "../incidents/ExitPointPreview";
 import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
@@ -79,6 +84,13 @@ import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
 import { useZoneEntryAlarm } from "./zones/zone-alarm";
 import { deleteZone, updateZone } from "./zones/zone-api";
 import { isMapGestureActive, noteMapGesture } from "./map-gesture";
+import {
+  buildElevationGradientSegments,
+  gradeRatioToNormalizedSlope,
+  mixHexColor,
+  normalizedSlopeToGradeRatio,
+  slopeColor,
+} from "./slope-shading";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
 import { showChatNotification } from "../notifications/chat-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
@@ -1019,35 +1031,6 @@ function buildSegmentSlopesFromSections(
   return slopes;
 }
 
-function mixHexColor(baseHex: string, mixHex: string, ratio: number): string {
-  const clampRatio = Math.max(0, Math.min(1, ratio));
-  const base = baseHex.replace("#", "");
-  const mix = mixHex.replace("#", "");
-  const baseInt = Number.parseInt(base, 16);
-  const mixInt = Number.parseInt(mix, 16);
-  const baseR = (baseInt >> 16) & 0xff;
-  const baseG = (baseInt >> 8) & 0xff;
-  const baseB = baseInt & 0xff;
-  const mixR = (mixInt >> 16) & 0xff;
-  const mixG = (mixInt >> 8) & 0xff;
-  const mixB = mixInt & 0xff;
-
-  const red = Math.round(baseR + (mixR - baseR) * clampRatio);
-  const green = Math.round(baseG + (mixG - baseG) * clampRatio);
-  const blue = Math.round(baseB + (mixB - baseB) * clampRatio);
-  return `rgb(${red}, ${green}, ${blue})`;
-}
-
-function slopeColor(baseColor: string, normalizedSlope: number): string {
-  if (normalizedSlope > 0) {
-    return mixHexColor(baseColor, "#141d2a", Math.min(0.45, normalizedSlope * 0.45));
-  }
-  if (normalizedSlope < 0) {
-    return mixHexColor(baseColor, "#f1f4f9", Math.min(0.49, Math.abs(normalizedSlope) * 0.49));
-  }
-  return baseColor;
-}
-
 function normalizedSegmentSlopes(rawSlopes: number[], segmentCount: number): number[] {
   if (segmentCount <= 0) {
     return [];
@@ -1070,14 +1053,6 @@ function normalizedSegmentSlopes(rawSlopes: number[], segmentCount: number): num
     const sourceIndex = Math.round((index / (segmentCount - 1)) * (rawSlopes.length - 1));
     return rawSlopes[sourceIndex] ?? 0;
   });
-}
-
-function normalizedSlopeToGradeRatio(normalizedSlope: number): number {
-  return normalizedSlope * 0.16;
-}
-
-function gradeRatioToNormalizedSlope(gradeRatio: number): number {
-  return Math.max(-1, Math.min(1, gradeRatio / 0.16));
 }
 
 function getTrackSegmentNormalizedSlopes(track: EventTrackResponse, segmentCount: number): number[] {
@@ -1418,6 +1393,19 @@ function buildTrackVisuals(tracks: EventTrackResponse[]): TrackVisual[] {
       ),
     };
   });
+}
+
+/** Shared line styling for the exit-point leg layers. */
+const EXIT_LINE_LAYOUT = { "line-join": "round", "line-cap": "round" } as const;
+/** Dark casing so a coloured line still reads over satellite imagery. */
+const EXIT_CASING_COLOR = "rgba(4, 12, 24, 0.85)";
+
+/** `[lng, lat][]` → a one-feature LineString collection. */
+function lineFeature(coordinates: Array<[number, number]>): FeatureCollection<LineFeature> {
+  return {
+    type: "FeatureCollection",
+    features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates } }],
+  };
 }
 
 function lineFeatureFromCoordinates(
@@ -3846,71 +3834,120 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
-        {/* Selected exit-point leg: the real walk path for routed points, or a
-            dashed straight line for the straight-line (amber) ones. */}
+        {/* Selected exit-point leg. A routed point draws its real path, shaded by
+            climb/descent exactly like the race tracks; the off-path stretch the
+            router used to hide is drawn dashed, because that part is a carry over
+            open ground rather than a way on the map. Unroutable (amber) points
+            fall back to a dashed straight line. */}
         {selectedExitPoint && selectedIncident ? (() => {
-          const routed = !selectedExitPoint.incident.direct && (selectedExitPoint.path?.geometry.length ?? 0) >= 2;
-          const coordinates: Array<[number, number]> = routed
-            ? (selectedExitPoint.path!.geometry as Array<[number, number]>)
-            : [
-                [selectedIncident.lng, selectedIncident.lat],
-                [selectedExitPoint.lng, selectedExitPoint.lat],
-              ];
-          const color = routed ? "#818cf8" : "#f59e0b";
+          const path = selectedExitPoint.path;
+          const routed = !selectedExitPoint.incident.direct && (path?.geometry.length ?? 0) >= 2;
+          const accent = exitColor(selectedExitPoint);
+
+          if (!routed) {
+            return (
+              <GeoJSONSource
+                id="exit-leg-source"
+                data={lineFeature([
+                  [selectedIncident.lng, selectedIncident.lat],
+                  [selectedExitPoint.lng, selectedExitPoint.lat],
+                ])}
+              >
+                <Layer id="exit-leg-casing" type="line" layout={EXIT_LINE_LAYOUT}
+                  paint={{ "line-color": EXIT_CASING_COLOR, "line-width": 8 }} />
+                <Layer id="exit-leg-line" type="line" layout={EXIT_LINE_LAYOUT}
+                  paint={{ "line-color": accent, "line-width": 4.5, "line-dasharray": [2, 1.6] }} />
+              </GeoJSONSource>
+            );
+          }
+
+          const geometry = path!.geometry as Array<[number, number]>;
+          const startIndex = Math.min(path!.routeStartIndex ?? 0, Math.max(0, geometry.length - 1));
+          const carry = startIndex > 0 ? geometry.slice(0, startIndex + 1) : null;
+          const onNetwork = geometry.slice(startIndex);
+          const shaded = trackGradientEnabled
+            ? buildElevationGradientSegments(onNetwork, path!.elevations?.slice(startIndex), accent)
+            : [{ coordinates: onNetwork, color: accent }];
+
           return (
-            <GeoJSONSource
-              id="exit-leg-source"
-              data={{
-                type: "Feature",
-                properties: {},
-                geometry: { type: "LineString", coordinates },
-              }}
-            >
-              {/* Dark casing so the line reads over satellite imagery too. */}
-              <Layer
-                id="exit-leg-casing"
-                type="line"
-                layout={{ "line-join": "round", "line-cap": "round" }}
-                paint={{ "line-color": "rgba(4, 12, 24, 0.85)", "line-width": 8 }}
-              />
-              <Layer
-                id="exit-leg-line"
-                type="line"
-                layout={{ "line-join": "round", "line-cap": "round" }}
-                paint={{
-                  "line-color": color,
-                  "line-width": 4.5,
-                  ...(routed ? {} : { "line-dasharray": [2, 1.6] }),
-                }}
-              />
-            </GeoJSONSource>
+            <>
+              {/* One casing under the whole leg, so the shaded runs don't each
+                  get their own outline and shimmer at the joins. */}
+              <GeoJSONSource id="exit-leg-casing-source" data={lineFeature(geometry)}>
+                <Layer id="exit-leg-casing" type="line" layout={EXIT_LINE_LAYOUT}
+                  paint={{ "line-color": EXIT_CASING_COLOR, "line-width": 9 }} />
+              </GeoJSONSource>
+
+              {carry ? (
+                <GeoJSONSource id="exit-leg-carry-source" data={lineFeature(carry)}>
+                  <Layer id="exit-leg-carry" type="line" layout={EXIT_LINE_LAYOUT}
+                    paint={{ "line-color": accent, "line-width": 4, "line-dasharray": [1.4, 1.2], "line-opacity": 0.85 }} />
+                </GeoJSONSource>
+              ) : null}
+
+              {shaded.map((segment, i) => (
+                <GeoJSONSource
+                  key={`exit-leg-shade-${i}`}
+                  id={`exit-leg-shade-source-${i}`}
+                  data={lineFeature(segment.coordinates)}
+                >
+                  <Layer
+                    id={`exit-leg-shade-${i}`}
+                    type="line"
+                    layout={EXIT_LINE_LAYOUT}
+                    paint={{ "line-color": segment.color, "line-width": 5 }}
+                  />
+                </GeoJSONSource>
+              ))}
+            </>
           );
         })() : null}
 
         {/* Numbered "closest asphalt" exit pins — visible while the incident
             sheet's exit-points view is open. Direct (no-road) points are amber. */}
-        {asphaltPins?.map((pin) => (
-          <Marker key={`asphalt-${pin.index}`} lngLat={[pin.lng, pin.lat]} pointerEvents="none">
-            <View style={styles.exitPinWrap} pointerEvents="none">
-              <View
-                style={[
-                  styles.exitPin,
-                  pin.incident.direct && styles.exitPinDirect,
-                  selectedExitPoint?.index === pin.index && styles.exitPinSelected,
-                ]}
-              >
-                <Text style={styles.exitPinText} allowFontScaling={false}>{pin.index}</Text>
+        {asphaltPins?.map((pin) => {
+          const accent = exitColor(pin);
+          const selected = selectedExitPoint?.index === pin.index;
+          const foot = pin.incident.foot?.durationMs;
+          const bike = pin.incident.bike?.durationMs;
+          return (
+            <Marker key={`asphalt-${pin.index}`} lngLat={[pin.lng, pin.lat]} pointerEvents="none">
+              <View style={styles.exitPinWrap} pointerEvents="none">
+                <View
+                  style={[
+                    styles.exitPin,
+                    { backgroundColor: accent, shadowColor: accent },
+                    selected && styles.exitPinSelected,
+                  ]}
+                >
+                  <Text
+                    style={[styles.exitPinText, pin.best && styles.exitPinTextBest]}
+                    allowFontScaling={false}
+                  >
+                    {pin.index}
+                  </Text>
+                </View>
+                <View style={[styles.exitPinLabel, { borderColor: `${accent}55` }]}>
+                  <Text
+                    style={[styles.exitPinLabelText, { color: accent }]}
+                    allowFontScaling={false}
+                    numberOfLines={1}
+                  >
+                    {/* Walk and bike side by side — never averaged into one figure. */}
+                    {pin.incident.direct
+                      ? `${formatExitDistance(pin.incident.distanceMeters)} direct`
+                      : [
+                          foot != null ? `🚶 ${Math.max(1, Math.round(foot / 60000))}` : null,
+                          bike != null ? `🚲 ${Math.max(1, Math.round(bike / 60000))}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join("  ") || "—"}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.exitPinLabel}>
-                <Text style={styles.exitPinLabelText} allowFontScaling={false} numberOfLines={1}>
-                  {pin.incident.direct
-                    ? `${pin.incident.distanceMeters >= 1000 ? `${(pin.incident.distanceMeters / 1000).toFixed(1)} km` : `${pin.incident.distanceMeters} m`} direct`
-                    : `${Math.max(1, Math.round((pin.incident.durationMs ?? 0) / 60000))} min`}
-                </Text>
-              </View>
-            </View>
-          </Marker>
-        ))}
+            </Marker>
+          );
+        })}
 
         {/* Temporary preview pin (search result / inspected point); tap to dismiss. */}
         {previewPoint ? (
@@ -6263,19 +6300,19 @@ const styles = StyleSheet.create({
     shadowRadius: 7,
     elevation: 8,
   },
-  exitPinDirect: { backgroundColor: "#d97706", shadowColor: "#d97706" },
   exitPinSelected: { transform: [{ scale: 1.25 }], borderWidth: 3, shadowOpacity: 0.95, shadowRadius: 11 },
   exitPinText: { color: "#ffffff", fontSize: 13, fontWeight: "900", includeFontPadding: false },
+  // Green pin: dark digit reads better than white on the lighter fill.
+  exitPinTextBest: { color: "#04121f" },
   exitPinLabel: {
     backgroundColor: "rgba(8,15,28,0.9)",
     borderRadius: 6,
     paddingVertical: 1.5,
     paddingHorizontal: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(129,140,248,0.45)",
-    maxWidth: 90,
+    maxWidth: 104,
   },
-  exitPinLabelText: { color: "#c7d2fe", fontSize: 9.5, fontWeight: "800" },
+  exitPinLabelText: { fontSize: 9.5, fontWeight: "800" },
 
   // Temporary preview pin (search result)
   previewPinWrap: { alignItems: "center", gap: 3 },

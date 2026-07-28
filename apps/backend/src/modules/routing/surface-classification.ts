@@ -18,6 +18,8 @@ export interface PathDetails {
   surface?: DetailInterval[];
   track_type?: DetailInterval[];
   road_environment?: DetailInterval[];
+  /** OSM access restriction — a `private` service road is not an exit point. */
+  road_access?: DetailInterval[];
   smoothness?: DetailInterval[];
   /** Hiking difficulty — any value means it is a walking path. */
   hike_rating?: DetailInterval[];
@@ -80,6 +82,7 @@ interface PointTags {
   roadClass?: string;
   surface?: string;
   trackType?: string;
+  roadAccess?: string;
   isHike: boolean;
   isMtbTrail: boolean;
 }
@@ -91,16 +94,30 @@ function lower(value: unknown): string | undefined {
   return normalized;
 }
 
-/** Spread a list of `[from, to, value]` intervals onto a per-point array. */
+/**
+ * Spread a list of `[from, to, value]` intervals onto a per-point array.
+ *
+ * GraphHopper's intervals are **half-open**: the `to` of one run is the `from`
+ * of the next, so writing through `to` stamps the boundary vertex with the
+ * previous run's tags. That is not cosmetic — a vertex where a forest track
+ * meets tarmac would inherit `track_type=grade3` from the track and be rejected
+ * as an access point, pushing the reported exit one vertex further along.
+ *
+ * Each run therefore covers `[from, to)`, and the final run is extended to
+ * include the last point so the destination is never left untagged.
+ */
 function applyInterval(
   target: PointTags[],
   intervals: DetailInterval[] | undefined,
   assign: (tags: PointTags, value: unknown) => void,
 ): void {
-  if (!intervals) return;
+  if (!intervals || target.length === 0) return;
+  const lastIndex = target.length - 1;
   for (const [from, to, value] of intervals) {
     const start = Math.max(0, Math.floor(from));
-    const end = Math.min(target.length - 1, Math.floor(to));
+    const exclusiveEnd = Math.floor(to);
+    // The run that reaches the end of the path owns the final point too.
+    const end = exclusiveEnd >= lastIndex ? lastIndex : Math.min(lastIndex, exclusiveEnd - 1);
     for (let index = start; index <= end; index += 1) {
       assign(target[index], value);
     }
@@ -138,37 +155,126 @@ const IMPLICITLY_PAVED_ROAD_CLASSES = new Set([
 ]);
 
 /**
- * Index of the first route point that sits on a paved road a VEHICLE can use —
- * the whole point of an extraction/exit point — or null when the path never
- * reaches one.
- *
- * Two passes, because rural OSM data often omits `surface` entirely:
- *   1. strict  — a drivable road class that is explicitly paved, or a class
- *                that is asphalt in practice (primary…residential);
- *   2. lenient — any drivable road class not explicitly tagged unpaved.
- * Footways/paths/cycleways never qualify, even when they are asphalt: an
- * ambulance cannot stage on a park alley.
+ * Track grades that a road ambulance can still stage on. `grade1` is a solid,
+ * usually sealed surface — rejecting every `tracktype` outright (as this module
+ * used to) threw away a large share of the genuinely usable rural access roads.
  */
-export function firstPavedPointIndex(pointCount: number, details: PathDetails | undefined): number | null {
+const VEHICLE_TRACK_TYPES = new Set(["grade1"]);
+
+/** Road access values that make a way unusable for a rescue vehicle. */
+const BLOCKED_ACCESS = new Set(["private", "no", "customers", "delivery"]);
+
+/**
+ * How much we trust that a candidate point really is asphalt.
+ * - `confirmed` — an explicit paved `surface` tag.
+ * - `likely`    — a road class that is sealed in practice (primary…living_street)
+ *                 or `tracktype=grade1`, with no contradicting surface tag.
+ * - `unknown`   — drivable class, no surface information at all. Common on rural
+ *                 `service`/`unclassified` roads, and frequently gravel.
+ *
+ * The tier is surfaced to the client rather than collapsed away, so the medic
+ * decides how much to trust it instead of the backend silently guessing.
+ */
+export type PavedConfidence = "confirmed" | "likely" | "unknown";
+
+const CONFIDENCE_RANK: Record<PavedConfidence, number> = { confirmed: 0, likely: 1, unknown: 2 };
+
+/** A point on the probe path that a vehicle could stage on. */
+export interface PavedPoint {
+  index: number;
+  confidence: PavedConfidence;
+  roadClass?: string;
+  surfaceTag?: string;
+}
+
+/** Resolve per-point tags once — every scan below shares this. */
+function pointTags(pointCount: number, details: PathDetails | undefined): PointTags[] {
   const tags: PointTags[] = Array.from({ length: pointCount }, () => ({ isHike: false, isMtbTrail: false }));
   if (details) {
     applyInterval(tags, details.road_class, (t, v) => (t.roadClass = lower(v)));
     applyInterval(tags, details.surface, (t, v) => (t.surface = lower(v)));
     applyInterval(tags, details.track_type, (t, v) => (t.trackType = lower(v)));
+    applyInterval(tags, details.road_access, (t, v) => (t.roadAccess = lower(v)));
   }
+  return tags;
+}
 
-  let lenient: number | null = null;
+/** Confidence that this single point is vehicle-usable asphalt, or null if not. */
+function pavedConfidenceAt(tags: PointTags): PavedConfidence | null {
+  const { surface, roadClass, trackType, roadAccess } = tags;
+  // Must be a road for vehicles — ROAD_CLASSES excludes footway/path/steps.
+  if (!roadClass || !ROAD_CLASSES.has(roadClass)) return null;
+  // A locked service road is not an extraction point.
+  if (roadAccess && BLOCKED_ACCESS.has(roadAccess)) return null;
+  if (surface && UNPAVED_SURFACES.has(surface)) return null;
+  // A graded track only counts at grade1 (solid/sealed).
+  if (trackType && !VEHICLE_TRACK_TYPES.has(trackType)) return null;
+
+  if (surface && PAVED_SURFACES.has(surface)) return "confirmed";
+  if (IMPLICITLY_PAVED_ROAD_CLASSES.has(roadClass)) return "likely";
+  if (trackType && VEHICLE_TRACK_TYPES.has(trackType)) return "likely";
+  return "unknown";
+}
+
+/**
+ * Every point along a path where a vehicle could stage, best-confidence first
+ * within each contiguous run of the same road.
+ *
+ * Taking only the FIRST paved point (what this module used to expose) threw away
+ * most of a probe's value: one path down a valley can cross three different
+ * roads, and the junction 100 m further along is often the better staging spot
+ * than the point where the path first touches tarmac.
+ *
+ * Consecutive points on the same road/surface collapse into one entry — the
+ * caller wants distinct roads, not every vertex of the same one.
+ */
+export function pavedPoints(pointCount: number, details: PathDetails | undefined): PavedPoint[] {
+  const tags = pointTags(pointCount, details);
+  const runs: PavedPoint[] = [];
+  let current: PavedPoint | null = null;
+  let currentKey: string | null = null;
+
   for (let index = 0; index < tags.length; index += 1) {
-    const { surface, roadClass, trackType } = tags[index];
-    // Must be a road for vehicles — ROAD_CLASSES excludes footway/path/track.
-    if (!roadClass || !ROAD_CLASSES.has(roadClass)) continue;
-    if (surface && UNPAVED_SURFACES.has(surface)) continue;
-    if (trackType) continue; // graded forest track, not asphalt
-    if (surface && PAVED_SURFACES.has(surface)) return index;
-    if (IMPLICITLY_PAVED_ROAD_CLASSES.has(roadClass)) return index;
-    if (lenient === null) lenient = index; // service/unclassified, surface unknown
+    const confidence = pavedConfidenceAt(tags[index]);
+    if (confidence === null) {
+      current = null;
+      currentKey = null;
+      continue;
+    }
+    const key = `${tags[index].roadClass ?? ""}|${tags[index].surface ?? ""}`;
+    if (current && key === currentKey) {
+      // Same road — keep the best-tagged vertex of the run.
+      if (CONFIDENCE_RANK[confidence] < CONFIDENCE_RANK[current.confidence]) {
+        current.confidence = confidence;
+        current.index = index;
+      }
+      continue;
+    }
+    current = {
+      index,
+      confidence,
+      roadClass: tags[index].roadClass,
+      surfaceTag: tags[index].surface,
+    };
+    currentKey = key;
+    runs.push(current);
   }
-  return lenient;
+  return runs;
+}
+
+/**
+ * Index of the first route point on a vehicle-usable paved road, or null.
+ * Thin wrapper over {@link pavedPoints}, kept for callers that only need the
+ * single best-effort answer.
+ */
+export function firstPavedPointIndex(pointCount: number, details: PathDetails | undefined): number | null {
+  const points = pavedPoints(pointCount, details);
+  if (points.length === 0) return null;
+  // Prefer a confidently-paved hit over an earlier unknown-surface one.
+  const best = [...points].sort(
+    (a, b) => CONFIDENCE_RANK[a.confidence] - CONFIDENCE_RANK[b.confidence] || a.index - b.index,
+  )[0];
+  return best.index;
 }
 
 /**

@@ -4,7 +4,8 @@ import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { createPoi, type PoiDto } from "../ui/event-actions";
 import { debugLog } from "../debug/debug-log";
-import { exitLabel, type AsphaltPoint } from "./IncidentSheet";
+import { exitColor, exitLabel, formatDistance, formatMinutes, surfaceNote, type AsphaltPoint } from "./IncidentSheet";
+import { slopeColor } from "../map/slope-shading";
 
 interface Props {
   point: AsphaltPoint;
@@ -15,13 +16,7 @@ interface Props {
   onPoiCreated?: (poi: PoiDto) => void;
 }
 
-const ROUTED_COLOR = "#818cf8";
-const DIRECT_COLOR = "#f59e0b";
-const CHART_HEIGHT = 24;
-
-function formatDistance(meters: number): string {
-  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
-}
+const CHART_HEIGHT = 26;
 
 /**
  * Floating preview for the selected "closest asphalt" exit point. Lives OUTSIDE
@@ -33,7 +28,7 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
   const [savingPoi, setSavingPoi] = useState(false);
   const [poiSaved, setPoiSaved] = useState(false);
   const direct = point.incident.direct;
-  const accent = direct ? DIRECT_COLOR : ROUTED_COLOR;
+  const accent = exitColor(point);
 
   // Elevation series → stepped bars. Same trick the track profile uses (no SVG
   // dependency in this app): one thin View per sample, height = normalised gain.
@@ -47,8 +42,18 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
     const sampled = Array.from({ length: SAMPLES }, (_, i) => elevations[Math.round(i * step)]);
     const min = Math.min(...sampled);
     const span = Math.max(1, Math.max(...sampled) - min);
-    return sampled.map((value) => Math.max(2, ((value - min) / span) * CHART_HEIGHT));
-  }, [point.path]);
+    // Each bar is shaded by its own rise/fall, with the same climb-dark /
+    // descent-light language the map line and the race tracks use — so the
+    // profile and the drawn path read as one picture.
+    const maxDelta = Math.max(
+      1,
+      ...sampled.slice(1).map((value, i) => Math.abs(value - sampled[i])),
+    );
+    return sampled.map((value, i) => ({
+      height: Math.max(2, ((value - min) / span) * CHART_HEIGHT),
+      color: slopeColor(accent, i === 0 ? 0 : (value - sampled[i - 1]) / maxDelta),
+    }));
+  }, [point.path, accent]);
 
   const addExtractionPoi = async () => {
     if (savingPoi || poiSaved) return;
@@ -61,9 +66,21 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
         // The ambulance type renders the ambulance glyph on every client.
         type: "ambulance",
         name: `Extraction point ${point.index}`,
+        // Spell out both paces + the carry: this text is what the rest of the
+        // team reads off the map later, without the drawer's context.
         description: direct
-          ? `Straight-line access, ${formatDistance(point.incident.distanceMeters)} from the incident.`
-          : `${formatDistance(point.incident.distanceMeters)} on foot from the incident.`,
+          ? `Straight-line access, ${formatDistance(point.incident.distanceMeters)} from the incident — no route.`
+          : [
+              `${formatDistance(point.incident.distanceMeters)} from the incident`,
+              point.incident.foot ? `${formatMinutes(point.incident.foot.durationMs)} on foot` : null,
+              point.incident.bike ? `${formatMinutes(point.incident.bike.durationMs)} by bike` : null,
+              point.incident.offPathSignificant && point.incident.offPathMeters
+                ? `first ${formatDistance(point.incident.offPathMeters)} off-path`
+                : null,
+              point.confidence === "unknown" ? "surface unverified" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") + ".",
       });
       setPoiSaved(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -76,24 +93,71 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
     }
   };
 
+  const surface = surfaceNote(point);
+  const footnote = [
+    point.incident.offPathSignificant && point.incident.offPathMeters
+      ? `first ${formatDistance(point.incident.offPathMeters)} off-path`
+      : null,
+    point.confidence === "unknown" ? "surface unverified" : surface,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+
   return (
     <View style={[styles.card, { bottom, borderColor: `${accent}66` }]} pointerEvents="box-none">
       <View style={styles.headerRow}>
         <View style={[styles.badge, { backgroundColor: accent }]}>
-          <Text style={styles.badgeText} allowFontScaling={false}>{point.index}</Text>
+          <Text
+            style={[styles.badgeText, point.best && styles.badgeTextBest]}
+            allowFontScaling={false}
+          >
+            {point.index}
+          </Text>
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.title} numberOfLines={1}>{exitLabel(point)}</Text>
-          <Text style={[styles.subtitle, { color: accent }]} numberOfLines={1}>
-            {direct
-              ? `${formatDistance(point.incident.distanceMeters)} straight line${point.incident.noRoad ? " · no path" : ""}`
-              : point.incident.distanceMeters < 30
-                ? "Incident is already on this road"
-                : `${Math.max(1, Math.round((point.incident.durationMs ?? 0) / 60000))} min · ${formatDistance(point.incident.distanceMeters)} on foot`}
-            {point.fromMe
-              ? ` · 🚗 ${Math.max(1, Math.round(point.fromMe.durationMs / 60000))} min`
-              : ""}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title} numberOfLines={1}>{exitLabel(point)}</Text>
+            {point.best ? (
+              <View style={[styles.chip, { backgroundColor: accent }]}>
+                <Text style={styles.chipText} allowFontScaling={false}>BEST</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Foot and bike each keep their own number — the two profiles route
+              over different networks, so a single blended figure fitted neither. */}
+          {direct ? (
+            <Text style={[styles.subtitle, { color: accent }]} numberOfLines={1}>
+              {formatDistance(point.incident.distanceMeters)} straight line · no route
+            </Text>
+          ) : point.incident.distanceMeters < 30 ? (
+            <Text style={[styles.subtitle, { color: accent }]} numberOfLines={1}>
+              Incident is already on this road
+            </Text>
+          ) : (
+            <View style={styles.paceRow}>
+              {point.incident.foot ? (
+                <View style={styles.pace}>
+                  <MaterialCommunityIcons name="walk" size={12} color={accent} />
+                  <Text style={[styles.paceText, { color: accent }]} allowFontScaling={false}>
+                    {formatMinutes(point.incident.foot.durationMs)}
+                  </Text>
+                </View>
+              ) : null}
+              {point.incident.bike ? (
+                <View style={styles.pace}>
+                  <MaterialCommunityIcons name="bike" size={12} color={accent} />
+                  <Text style={[styles.paceText, { color: accent }]} allowFontScaling={false}>
+                    {formatMinutes(point.incident.bike.durationMs)}
+                  </Text>
+                </View>
+              ) : null}
+              <Text style={styles.paceMeta} numberOfLines={1}>
+                {formatDistance(point.incident.distanceMeters)}
+                {point.fromMe ? `  ·  🚗 ${formatMinutes(point.fromMe.durationMs)}` : ""}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Drop an "extraction point" POI here (pin-with-plus). */}
@@ -124,8 +188,8 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
       {bars ? (
         <View style={styles.chartRow}>
           <View style={styles.chartBars}>
-            {bars.map((height, i) => (
-              <View key={i} style={[styles.bar, { height, backgroundColor: accent }]} />
+            {bars.map((bar, i) => (
+              <View key={i} style={[styles.bar, { height: bar.height, backgroundColor: bar.color }]} />
             ))}
           </View>
           <Text style={styles.chartLabel} allowFontScaling={false}>
@@ -135,8 +199,10 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
           </Text>
         </View>
       ) : direct ? (
-        <Text style={styles.noChartText}>Straight-line distance — no path.</Text>
+        <Text style={styles.noChartText}>Straight-line distance — no route.</Text>
       ) : null}
+
+      {footnote ? <Text style={styles.noChartText} numberOfLines={1}>{footnote}</Text> : null}
     </View>
   );
 }
@@ -175,9 +241,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   badgeText: { color: "#ffffff", fontSize: 11, fontWeight: "900", includeFontPadding: false },
+  badgeTextBest: { color: "#04121f" },
   headerText: { flex: 1, minWidth: 0 },
-  title: { color: "#E9F1FA", fontSize: 13, fontWeight: "900", textTransform: "capitalize" },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  title: { color: "#E9F1FA", fontSize: 13, fontWeight: "900", textTransform: "capitalize", flexShrink: 1 },
+  chip: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 },
+  chipText: { color: "#04121f", fontSize: 8, fontWeight: "900", letterSpacing: 0.5 },
   subtitle: { fontSize: 11, fontWeight: "700" },
+  paceRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 1 },
+  pace: { flexDirection: "row", alignItems: "center", gap: 3 },
+  paceText: { fontSize: 12.5, fontWeight: "800", includeFontPadding: false },
+  paceMeta: { color: "#7e93ac", fontSize: 10.5, fontWeight: "600", flexShrink: 1 },
   actionBtn: {
     width: 28,
     height: 28,

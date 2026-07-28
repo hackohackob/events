@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Linking, Modal, Pressable, StyleSheet,
 // gestures inside a @gorhom/bottom-sheet — the sheet swallows them.
 import { ScrollView } from "react-native-gesture-handler";
 import { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -122,6 +122,21 @@ export interface AsphaltPath {
   elevations?: number[];
   ascentMeters?: number;
   descentMeters?: number;
+  /**
+   * Index into `geometry` where the routed network begins. Vertex 0 is the
+   * incident itself, so anything before this is the off-path carry and is drawn
+   * dashed rather than as a mapped way.
+   */
+  routeStartIndex?: number;
+}
+
+/** How much the backend trusts that the point really is asphalt. */
+export type PavedConfidence = "confirmed" | "likely" | "unknown";
+
+/** One measured leg (foot or bike), including the off-path carry at the start. */
+export interface AsphaltLeg {
+  distanceMeters: number;
+  durationMs: number;
 }
 
 /** One paved-road access ("exit") point from /routing/closest-asphalt. */
@@ -130,18 +145,53 @@ export interface AsphaltPoint {
   lat: number;
   lng: number;
   roadHint?: string;
-  incident: { distanceMeters: number; durationMs?: number; direct: boolean; noRoad?: boolean };
+  surfaceHint?: string;
+  confidence?: PavedConfidence;
+  /** Set on the single recommended point — drawn green everywhere. */
+  best?: boolean;
+  incident: {
+    distanceMeters: number;
+    durationMs?: number;
+    /** Straight-line metres from the incident to where the route begins. */
+    offPathMeters?: number;
+    offPathSignificant?: boolean;
+    /** Reported separately, never blended — the two profiles route differently. */
+    foot?: AsphaltLeg;
+    bike?: AsphaltLeg;
+    direct: boolean;
+    noRoad?: boolean;
+  };
   fromMe?: { distanceMeters: number; durationMs: number };
   /** Present for routed points; direct ones are drawn as a straight line. */
   path?: AsphaltPath;
 }
 
-function formatDistance(meters: number): string {
+export function formatDistance(meters: number): string {
   return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
 }
 
-function formatMinutes(ms: number): string {
+export function formatMinutes(ms: number): string {
   return `${Math.max(1, Math.round(ms / 60000))} min`;
+}
+
+/** Accent per exit point: green = recommended, indigo = routed, amber = no route. */
+export const EXIT_BEST_COLOR = "#22c55e";
+export const EXIT_ROUTED_COLOR = "#818cf8";
+export const EXIT_DIRECT_COLOR = "#f59e0b";
+
+export function exitColor(point: AsphaltPoint): string {
+  if (point.incident.direct) return EXIT_DIRECT_COLOR;
+  return point.best ? EXIT_BEST_COLOR : EXIT_ROUTED_COLOR;
+}
+
+/** Short human note about how trustworthy the surface tagging is. */
+export function surfaceNote(point: AsphaltPoint): string | null {
+  if (point.confidence === "confirmed") {
+    return point.surfaceHint ? point.surfaceHint.replace(/_/g, " ") : "asphalt";
+  }
+  if (point.confidence === "likely") return "sealed (typical for this road class)";
+  if (point.confidence === "unknown") return "surface unverified";
+  return null;
 }
 
 /** "Exit 2 · residential" — shared by the nav destination label and the POI name. */
@@ -175,6 +225,8 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
 
   // ── Closest asphalt (in-drawer "exit points" view) ────────────────────────
   const [asphaltPoints, setAsphaltPoints] = useState<AsphaltPoint[] | null>(null);
+  /** How far the expanding search had to reach — shown so the numbers have context. */
+  const [asphaltRadius, setAsphaltRadius] = useState<number | null>(null);
   const [asphaltLoading, setAsphaltLoading] = useState(false);
   const [asphaltView, setAsphaltView] = useState(false);
 
@@ -223,7 +275,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
     setAsphaltLoading(true);
     try {
       const myFix = useLocationStatus.getState().lastFix;
-      const res = await apiFetch<{ points: AsphaltPoint[] }>("/routing/closest-asphalt", {
+      const res = await apiFetch<{ points: AsphaltPoint[]; searchRadiusMeters?: number }>("/routing/closest-asphalt", {
         method: "POST",
         body: JSON.stringify({
           lat: incident.lat,
@@ -232,6 +284,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
         }),
       });
       setAsphaltPoints(res.points);
+      setAsphaltRadius(res.searchRadiusMeters ?? null);
       openAsphaltView(res.points);
     } catch (err) {
       debugLog("api", "error", "closest asphalt failed", String(err));
@@ -546,7 +599,8 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
           <View style={styles.headerText}>
             <Text style={styles.asphaltViewTitle}>Closest asphalt</Text>
             <Text style={styles.asphaltViewSub} numberOfLines={1}>
-              {asphaltPoints.length} exit point{asphaltPoints.length > 1 ? "s" : ""} around “{incident.name ?? incident.label}”
+              {asphaltPoints.length} exit point{asphaltPoints.length > 1 ? "s" : ""}
+              {asphaltRadius ? ` · searched to ${formatDistance(asphaltRadius)}` : ""}
             </Text>
           </View>
           <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
@@ -559,35 +613,95 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             const direct = point.incident.direct;
             const selected = selectedExit === point.index;
             const label = exitLabel(point);
+            const accent = exitColor(point);
+            const surface = surfaceNote(point);
+            const onRoadAlready = !direct && point.incident.distanceMeters < 30;
             return (
               <Pressable
                 key={point.index}
                 style={[
                   styles.exitCard,
-                  direct && styles.exitCardDirect,
-                  selected && (direct ? styles.exitCardDirectSelected : styles.exitCardSelected),
+                  { borderColor: selected ? `${accent}88` : `${accent}2e`, backgroundColor: `${accent}0f` },
+                  selected && styles.exitCardSelected,
                 ]}
                 onPress={() => toggleExit(point)}
               >
-                <View style={[styles.exitBadge, direct && styles.exitBadgeDirect]}>
+                {/* The number is the distance rank, so it always shows; being the
+                    recommended point is carried by the green accent + chip. */}
+                <View style={[styles.exitBadge, { backgroundColor: accent }]}>
                   <Text style={styles.exitBadgeText} allowFontScaling={false}>{point.index}</Text>
                 </View>
+
                 <View style={styles.exitInfo}>
-                  <Text style={styles.exitTitle} numberOfLines={1}>
-                    {point.roadHint ? point.roadHint.replace(/_/g, " ") : "Paved road"}
-                    {point.incident.noRoad ? "  ·  no road" : ""}
-                  </Text>
-                  {/* Incident → point */}
-                  <View style={styles.exitMetricRow}>
-                    <Feather name={direct ? "arrow-up-right" : "trending-up"} size={11} color={direct ? "#fbbf24" : "#94a3b8"} />
-                    <Text style={[styles.exitMetric, direct && { color: "#fcd34d" }]} numberOfLines={1}>
-                      {direct
-                        ? `${formatDistance(point.incident.distanceMeters)} straight line${point.incident.noRoad ? " — no path" : ""}`
-                        : point.incident.distanceMeters < 30
-                          ? "The incident is already on this road"
-                          : `From incident: ${formatMinutes(point.incident.durationMs ?? 0)} · ${formatDistance(point.incident.distanceMeters)}`}
+                  <View style={styles.exitTitleRow}>
+                    <Text style={styles.exitTitle} numberOfLines={1}>
+                      {point.roadHint ? point.roadHint.replace(/_/g, " ") : "Paved road"}
                     </Text>
+                    {point.best ? (
+                      <View style={[styles.exitChip, { backgroundColor: accent }]}>
+                        <Text style={styles.exitChipTextDark} allowFontScaling={false}>BEST</Text>
+                      </View>
+                    ) : null}
+                    {point.confidence === "unknown" ? (
+                      <View style={styles.exitChipWarn}>
+                        <Feather name="alert-triangle" size={8.5} color="#fbbf24" />
+                        <Text style={styles.exitChipTextWarn} allowFontScaling={false}>UNVERIFIED</Text>
+                      </View>
+                    ) : null}
                   </View>
+
+                  {/* Foot and bike are shown side by side rather than blended —
+                      the two profiles follow different networks. */}
+                  {onRoadAlready ? (
+                    <Text style={styles.exitMetric}>The incident is already on this road</Text>
+                  ) : direct ? (
+                    <View style={styles.exitMetricRow}>
+                      <Feather name="arrow-up-right" size={11} color="#fbbf24" />
+                      <Text style={[styles.exitMetric, { color: "#fcd34d" }]} numberOfLines={1}>
+                        {formatDistance(point.incident.distanceMeters)} straight line — no route
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.exitPaceRow}>
+                      {point.incident.foot ? (
+                        <View style={styles.exitPace}>
+                          <MaterialCommunityIcons name="walk" size={13} color="#cbd5e1" />
+                          <Text style={styles.exitPaceText} allowFontScaling={false}>
+                            {formatMinutes(point.incident.foot.durationMs)}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {point.incident.bike ? (
+                        <View style={styles.exitPace}>
+                          <MaterialCommunityIcons name="bike" size={13} color="#cbd5e1" />
+                          <Text style={styles.exitPaceText} allowFontScaling={false}>
+                            {formatMinutes(point.incident.bike.durationMs)}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.exitPaceDistance} numberOfLines={1}>
+                        {formatDistance(point.incident.distanceMeters)}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* The stretch the router used to hide: incident → trailhead. */}
+                  {point.incident.offPathSignificant && point.incident.offPathMeters ? (
+                    <View style={styles.exitMetricRow}>
+                      <Feather name="corner-right-up" size={11} color="#94a3b8" />
+                      <Text style={styles.exitMetric} numberOfLines={1}>
+                        first {formatDistance(point.incident.offPathMeters)} off-path
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {surface ? (
+                    <View style={styles.exitMetricRow}>
+                      <Feather name="layers" size={11} color="#94a3b8" />
+                      <Text style={styles.exitMetric} numberOfLines={1}>{surface}</Text>
+                    </View>
+                  ) : null}
+
                   {/* Me → point (car) */}
                   {point.fromMe ? (
                     <View style={styles.exitMetricRow}>
@@ -598,8 +712,9 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                     </View>
                   ) : null}
                 </View>
+
                 <Pressable
-                  style={styles.exitNavBtn}
+                  style={[styles.exitNavBtn, { backgroundColor: accent }]}
                   hitSlop={4}
                   onPress={() => {
                     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -614,8 +729,10 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
             );
           })}
           <Text style={styles.exitFootnote}>
-            Routed times are a foot/bike blend. Tap a card to draw its path; amber
-            points are straight-line only.
+            Numbered by distance from the incident; the green one is the fastest
+            you can actually reach. Walk and bike times are separate — they follow
+            different networks. Tap a card to draw its path, shaded by climb and
+            descent. Amber points have no route at all.
           </Text>
         </BottomSheetScrollView>
       </View>
@@ -1466,41 +1583,52 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "rgba(99,102,241,0.06)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(129,140,248,0.25)",
-    paddingVertical: 12,
+    paddingVertical: 11,
     paddingHorizontal: 13,
   },
-  exitCardDirect: {
-    backgroundColor: "rgba(245,158,11,0.06)",
-    borderColor: "rgba(245,158,11,0.3)",
-    borderStyle: "dashed",
-  },
-  exitCardSelected: { borderColor: "#818cf8", backgroundColor: "rgba(99,102,241,0.16)", borderWidth: 1.5 },
-  exitCardDirectSelected: { borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,0.16)", borderWidth: 1.5 },
+  // Colour comes from the point's accent (green best / indigo routed / amber
+  // unroutable) so the card, the map pin and the drawn path always agree.
+  exitCardSelected: { borderWidth: 1.5 },
   exitBadge: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "#6366f1",
     borderWidth: 2,
     borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
-  exitBadgeDirect: { backgroundColor: "#d97706" },
   exitBadgeText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
   exitInfo: { flex: 1, minWidth: 0, gap: 3 },
-  exitTitle: { color: "#E9F1FA", fontSize: 14, fontWeight: "800", textTransform: "capitalize" },
+  exitTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  exitTitle: { color: "#E9F1FA", fontSize: 14, fontWeight: "800", textTransform: "capitalize", flexShrink: 1 },
+  exitChip: { paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 5 },
+  exitChipTextDark: { color: "#04121f", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.5 },
+  exitChipWarn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 5,
+    backgroundColor: "rgba(245,158,11,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.4)",
+  },
+  exitChipTextWarn: { color: "#fbbf24", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.4 },
+  // Walk / bike times sit side by side, each behind its own glyph.
+  exitPaceRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 1 },
+  exitPace: { flexDirection: "row", alignItems: "center", gap: 4 },
+  exitPaceText: { color: "#E9F1FA", fontSize: 13.5, fontWeight: "800", includeFontPadding: false },
+  exitPaceDistance: { color: "#7e93ac", fontSize: 12, fontWeight: "600", flexShrink: 1 },
   exitMetricRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   exitMetric: { color: "#94a3b8", fontSize: 12, fontWeight: "600", flex: 1 },
   exitNavBtn: {
     width: 38,
     height: 38,
     borderRadius: 13,
-    backgroundColor: "#34d399",
     alignItems: "center",
     justifyContent: "center",
   },

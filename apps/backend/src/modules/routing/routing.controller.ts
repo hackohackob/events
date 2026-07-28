@@ -3,13 +3,17 @@ import { AuthGuard } from "../common/guards/auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
 import { RouteRequestDto } from "./dto/route-request.dto";
+import { ExitPointsService } from "./exit-points.service";
 import { RoutingService } from "./routing.service";
 import type { LngLat, RouteResponse } from "./routing.types";
 
 @Controller("routing")
 @UseGuards(AuthGuard)
 export class RoutingController {
-  constructor(private readonly routingService: RoutingService) {}
+  constructor(
+    private readonly routingService: RoutingService,
+    private readonly exitPoints: ExitPointsService,
+  ) {}
 
   /**
    * Compute colour-classified route variants for the navigation feature.
@@ -36,7 +40,7 @@ export class RoutingController {
       body.from && Number.isFinite(Number(body.from.lat)) && Number.isFinite(Number(body.from.lng))
         ? validatePoint([Number(body.from.lng), Number(body.from.lat)], 1)
         : undefined;
-    return this.routingService.closestAsphalt(point, from);
+    return this.exitPoints.closestAsphalt(point, from);
   }
 }
 
