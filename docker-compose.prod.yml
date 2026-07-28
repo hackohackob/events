@@ -118,7 +118,12 @@ services:
       - "--host"
       - "0.0.0.0"
     environment:
-      JAVA_OPTS: "-Xmx4g -Xms1g"
+      # The VPS has 1.9 GB of RAM. -Xmx4g let the JVM believe it had four, so an
+      # import could balloon past physical memory and get OOM-killed by the
+      # kernel — which takes routing down with no clean error. Capped below the
+      # host so the JVM collects instead, and a genuine shortfall surfaces as an
+      # OutOfMemoryError we can act on.
+      JAVA_OPTS: "-Xmx1500m -Xms512m"
     volumes:
       - ./graphhopper:/gh
     healthcheck:

@@ -66,7 +66,21 @@ graphhopper:
   graph.elevation.provider: srtm
   graph.elevation.cache_dir: /gh/data/elevation-cache
 
-  prepare.min_network_size: 200
+  # Subnetworks smaller than this are pruned from the graph, per profile. The
+  # default (200) throws away a lot of Bulgarian mountain trail systems, which is
+  # why the `foot` profile often could not reach a road that `mtb` could: the
+  # trail simply was not in the graph. Lowered to keep those.
+  #
+  # The trade-off is that a tiny orphan fragment can now capture a snap and then
+  # route nowhere. That is survivable: the exit-point search treats "no probe
+  # succeeded" as a signal to re-anchor on the nearest routable point
+  # (ExitPointsService.resolveAnchor), and the routing proxy surfaces
+  # ConnectionNotFound as a normal "no route" answer.
+  #
+  # NOTE: this is a graph *preparation* setting — changing it has no effect until
+  # graphhopper/data/graph-cache is deleted and the extract re-imported. The
+  # deploy script deliberately reuses the cache, so the re-import is manual.
+  prepare.min_network_size: 30
   routing.non_ch.max_waypoint_distance: 1000000
   graph.dataaccess.default_type: RAM_STORE
   # Keep all highway types (we route foot + mtb on paths/tracks).
