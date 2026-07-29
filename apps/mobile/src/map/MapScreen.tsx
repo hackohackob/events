@@ -83,6 +83,7 @@ import { ZoneSketchLayer } from "./zones/ZoneSketchLayer";
 import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
 import { useZoneEntryAlarm } from "./zones/zone-alarm";
 import { deleteZone, updateZone } from "./zones/zone-api";
+import { useSharedValue } from "react-native-reanimated";
 import { isMapGestureActive, noteMapGesture } from "./map-gesture";
 import {
   buildElevationGradientSegments,
@@ -1594,6 +1595,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [participantsSheetIndex, setParticipantsSheetIndex] = useState(-1);
   const [hospitalsSheetIndex, setHospitalsSheetIndex] = useState(-1);
   const [markerSheetIndex, setMarkerSheetIndex] = useState(0);
+  /**
+   * The marker sheet's real top edge, in container coordinates. Percentage snap
+   * points are relative to the sheet's CONTAINER, not the window, so deriving the
+   * drawer height from `SCREEN_HEIGHT * snapFraction` overshot by the bottom
+   * inset and left the exit-point card floating above the drawer instead of
+   * sitting on it. Reading the sheet's own position is exact, and it tracks the
+   * drawer while it is being dragged.
+   */
+  const markerSheetPosition = useSharedValue(SCREEN_HEIGHT);
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -4717,7 +4727,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         enableContentPanningGesture={false}
         onClose={closeSelection}
         onChange={(i) => setMarkerSheetIndex(i)}
-        backgroundStyle={styles.markerSheetBg}
+        animatedPosition={markerSheetPosition}
+        // The exit-point card butts against this edge, so drop the rounded
+        // corners while it is there — otherwise the two surfaces don't meet.
+        backgroundStyle={[styles.markerSheetBg, selectedExitPoint ? styles.markerSheetBgFlush : null]}
         handleStyle={styles.sheetHandleContainer}
         handleIndicatorStyle={styles.sheetHandle}
       >
@@ -4958,7 +4971,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {selectedExitPoint ? (
         <ExitPointPreview
           point={selectedExitPoint}
-          bottom={Math.round(SCREEN_HEIGHT * snapFraction(markerSheetSnapPoints, markerSheetIndex)) - 1}
+          sheetTop={markerSheetPosition}
           onClose={() => setSelectedExitPoint(null)}
           onPoiCreated={(poi: PoiDto) => {
             const existing = useMapStore.getState().markers;
@@ -5996,6 +6009,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(180, 201, 223, 0.28)",
     zIndex: 30,
   },
+  markerSheetBgFlush: { borderTopLeftRadius: 0, borderTopRightRadius: 0 },
   markerSheetBg: {
     backgroundColor: "rgba(4, 11, 24, 0.985)",
     borderTopLeftRadius: 26,

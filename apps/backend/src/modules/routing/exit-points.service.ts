@@ -90,16 +90,30 @@ const roadTier = (roadClass?: string): number => ROAD_CLASS_TIER[roadClass ?? ""
 const IN_RING_TOLERANCE = 1.25;
 
 /**
- * Reject a routed leg whose length is wildly out of proportion to the
- * straight-line distance. Measured against the real Bulgaria graph, an incident
- * off the footpath network makes GraphHopper snap over a kilometre away and then
- * loop around the mountain: a road 1.5 km from the casualty came back as a
- * 24 km, six-and-a-half-hour "walk". That is not a route anybody would take, and
- * presenting it as the recommended extraction is worse than admitting there is
- * no walkable route at all — such points fall back to straight-line.
+ * Refuse a routed leg whose length is out of proportion to the straight-line
+ * distance: the router went round because the direct line is not in the map. A
+ * road 1.5 km from the casualty coming back as a 24 km, six-and-a-half-hour
+ * "walk" is not a route anybody would take, and offering it as the recommended
+ * extraction is worse than saying there is no walkable route — those points fall
+ * back to straight-line.
+ *
+ * The ceiling is affine, not a flat ratio: `DETOUR_SLOPE * straight + DETOUR_ALLOWANCE`.
+ *
+ * A flat multiplier gets the shape wrong at both ends. Over 500 m a 3x detour is
+ * ordinary — you walk around a gorge. Over 3 km it means the router went round a
+ * mountain. Incident 29 is the case that proved it: a secondary road 2.7 km away
+ * came back as a 10.5 km, 125-minute foot route looping past another exit point,
+ * and slipped under a flat 4x by 326 m — while the *same point* had its mtb leg
+ * (15.2 km) rejected. Same road, two verdicts.
+ *
+ * With the affine form that point is refused on both profiles and reported for
+ * what it is: 2.7 km away with no usable route. Verified on the production graph
+ * that legitimate mountain detours (Rhodopes 578 m -> 1.9 km, Musala 8.9 km ->
+ * 10.6 km) still pass.
  */
-const DETOUR_LIMIT = 4;
-/** Short hops legitimately zig-zag, so only apply the ratio beyond this. */
+const DETOUR_SLOPE = 2.2;
+const DETOUR_ALLOWANCE_M = 1200;
+/** Short hops legitimately zig-zag, so never reject below this. */
 const DETOUR_FLOOR_M = 600;
 
 /**
@@ -172,6 +186,15 @@ interface Measured extends Candidate {
   foot: MeasuredLeg | null;
   bike: MeasuredLeg | null;
   fromMe?: { distanceMeters: number; durationMs: number };
+}
+
+/**
+ * Is a routed leg of `legMeters` believable for a road `straightMeters` away, or
+ * did the router go the long way round because the direct line is not mapped?
+ * Pure so the tuning can be regression-tested against real measurements.
+ */
+export function isPlausibleDetour(legMeters: number, straightMeters: number): boolean {
+  return legMeters <= Math.max(DETOUR_FLOOR_M, straightMeters * DETOUR_SLOPE + DETOUR_ALLOWANCE_M);
 }
 
 /** Whichever profile produced a drawable path — foot preferred, bike as backup. */
@@ -439,13 +462,15 @@ export class ExitPointsService {
 
   /**
    * Does this leg describe a route a person would actually walk/ride, or did the
-   * router escape through a disconnected part of the network? See DETOUR_LIMIT.
+   * router go the long way round because the direct line is not mapped?
+   * See {@link DETOUR_SLOPE}.
    */
   private isPlausible(leg: AsphaltAccessLeg, straightMeters: number): boolean {
-    const ceiling = Math.max(DETOUR_FLOOR_M, straightMeters * DETOUR_LIMIT);
-    if (leg.distanceMeters <= ceiling) return true;
+    if (isPlausibleDetour(leg.distanceMeters, straightMeters)) return true;
+    const ceiling = Math.max(DETOUR_FLOOR_M, straightMeters * DETOUR_SLOPE + DETOUR_ALLOWANCE_M);
     this.logger.debug(
-      `exit points: dropped implausible leg — ${leg.distanceMeters} m for ${straightMeters} m straight-line`,
+      `exit points: refused ${leg.distanceMeters} m leg for a road ${straightMeters} m away ` +
+        `(ceiling ${Math.round(ceiling)} m) — the direct line is not in the map`,
     );
     return false;
   }

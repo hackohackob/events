@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { createPoi, type PoiDto } from "../ui/event-actions";
@@ -9,8 +10,11 @@ import { slopeColor } from "../map/slope-shading";
 
 interface Props {
   point: AsphaltPoint;
-  /** Distance from the screen bottom — sits just above the open drawer. */
-  bottom: number;
+  /**
+   * The drawer's live top edge (container coordinates). The card rides on it, so
+   * it stays welded to the drawer at every snap point and while it is dragged.
+   */
+  sheetTop: SharedValue<number>;
   onClose: () => void;
   /** A POI was created here (parent drops it on the map immediately). */
   onPoiCreated?: (poi: PoiDto) => void;
@@ -24,8 +28,11 @@ const CHART_HEIGHT = 26;
  * point's metrics, a compact elevation profile of the walk path, and a
  * one-tap "extraction point" POI drop.
  */
-export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props) {
+export function ExitPointPreview({ point, sheetTop, onClose, onPoiCreated }: Props) {
   const [savingPoi, setSavingPoi] = useState(false);
+  // Measured so the card can sit exactly on the drawer regardless of how many
+  // rows it ends up with (chart, off-path note, surface note).
+  const [height, setHeight] = useState(0);
   const [poiSaved, setPoiSaved] = useState(false);
   const direct = point.incident.direct;
   const accent = exitColor(point);
@@ -103,8 +110,19 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
     .filter(Boolean)
     .join("  ·  ");
 
+  // Hidden for the single frame before onLayout reports a height, so the card
+  // doesn't flash at the wrong offset on open.
+  const glued = useAnimatedStyle(() => ({
+    opacity: height > 0 ? 1 : 0,
+    transform: [{ translateY: sheetTop.value - height }],
+  }));
+
   return (
-    <View style={[styles.card, { bottom, borderColor: `${accent}66` }]} pointerEvents="box-none">
+    <Animated.View
+      style={[styles.card, glued, { borderColor: `${accent}66` }]}
+      onLayout={(e) => setHeight(e.nativeEvent.layout.height)}
+      pointerEvents="box-none"
+    >
       <View style={styles.headerRow}>
         <View style={[styles.badge, { backgroundColor: accent }]}>
           <Text
@@ -203,7 +221,7 @@ export function ExitPointPreview({ point, bottom, onClose, onPoiCreated }: Props
       ) : null}
 
       {footnote ? <Text style={styles.noChartText} numberOfLines={1}>{footnote}</Text> : null}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -212,6 +230,7 @@ const styles = StyleSheet.create({
   // the two read as one stacked surface — hence square bottom corners.
   card: {
     position: "absolute",
+    top: 0,
     left: 8,
     right: 8,
     zIndex: 40,
