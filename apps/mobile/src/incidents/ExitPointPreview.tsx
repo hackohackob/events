@@ -226,27 +226,32 @@ export function ExitPointPreview({ point, sheetTop, onClose, onPoiCreated }: Pro
 }
 
 const styles = StyleSheet.create({
-  // Parked flush on top of the open drawer (`bottom` is the drawer height), so
-  // the two read as one stacked surface — hence square bottom corners.
+  /**
+   * Rides on the drawer's top edge as a continuation of it, not as a floating
+   * card: full bleed to both edges, the drawer's own background colour, and the
+   * rounded top corners the drawer gives up while this is attached. Side insets
+   * and a lighter fill were what made it read as a separate panel with a margin.
+   */
   card: {
     position: "absolute",
     top: 0,
-    left: 8,
-    right: 8,
+    left: 0,
+    right: 0,
     zIndex: 40,
-    backgroundColor: "rgba(8, 15, 28, 0.97)",
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-    paddingHorizontal: 10,
-    paddingTop: 7,
-    paddingBottom: 6,
+    backgroundColor: "rgba(4, 11, 24, 0.985)",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    // Only the top edge is drawn — the accent tints it, and the sides/bottom
+    // must stay open so the surface flows into the drawer.
+    borderTopWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingTop: 9,
+    paddingBottom: 7,
     gap: 5,
     shadowColor: "#000",
     shadowOpacity: 0.45,
     shadowRadius: 12,
-    shadowOffset: { width: 0, height: -2 },
+    shadowOffset: { width: 0, height: -3 },
     elevation: 12,
   },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 8 },

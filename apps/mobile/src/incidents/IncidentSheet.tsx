@@ -1064,7 +1064,14 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                   const mine = m.authorId === myId;
                   const playing = playingMessageId === m.id;
                   return (
-                    <View key={m.id} style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
+                    <View
+                      key={m.id}
+                      style={[
+                        styles.bubble,
+                        mine ? styles.bubbleMine : styles.bubbleOther,
+                        (m.kind === "voice" || m.audioUrl) && styles.bubbleVoice,
+                      ]}
+                    >
                       {!mine ? <Text style={styles.bubbleAuthor}>{m.authorName}</Text> : null}
                       {m.audioUrl ? (
                         <>
@@ -1451,6 +1458,8 @@ const styles = StyleSheet.create({
   handoverValue: { color: "#dbe7f3", fontSize: 11.5, fontWeight: "600", lineHeight: 16 },
   handoverEmpty: { color: "#7d8ea4", fontSize: 11.5, fontWeight: "600" },
   bubble: { maxWidth: "85%", borderRadius: 13, paddingVertical: 7, paddingHorizontal: 11 },
+  /** Voice notes: the transcript is the content, so give it nearly the full row. */
+  bubbleVoice: { maxWidth: "97%" },
   bubbleMine: { alignSelf: "flex-end", backgroundColor: "rgba(34,197,94,0.16)", borderTopRightRadius: 4 },
   bubbleOther: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.05)", borderTopLeftRadius: 4 },
   bubbleAuthor: { color: "#93c5fd", fontSize: 10.5, fontWeight: "900", marginBottom: 2 },
@@ -1473,7 +1482,7 @@ const styles = StyleSheet.create({
   voiceWaveBarActive: { backgroundColor: "#34d399" },
   voiceDuration: { color: "#9fb3cc", fontSize: 11, fontWeight: "800" },
   voiceTranscript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic" },
-  voiceTranscriptBox: { marginTop: 6, maxWidth: 230 },
+  voiceTranscriptBox: { marginTop: 6, alignSelf: "stretch" },
   composer: { flexDirection: "row", gap: 8, alignItems: "center" },
   composerInput: {
     flex: 1,

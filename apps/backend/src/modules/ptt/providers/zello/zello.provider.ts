@@ -206,10 +206,11 @@ export class ZelloProvider implements PttProvider {
         }
         const { packets } = unpackOggOpus(ogg);
         if (packets.length === 0) throw new Error("voice encoded to zero packets");
+        // Audio only. The transcript deliberately does NOT follow it: Zello
+        // users hear the message, so posting the text as well just doubles every
+        // transmission on the channel. (The no-encoder branch above still falls
+        // back to text, since there the alternative is relaying nothing at all.)
         await client.sendVoice(packets, PTT_OPUS_PROFILE);
-        if (message.transcript?.trim()) {
-          await client.sendText(`${message.author} (voice): ${message.transcript.trim()}`).catch(() => undefined);
-        }
         return;
       }
     }

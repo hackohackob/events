@@ -5159,7 +5159,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       </BottomSheet>
       {activeTab === "chat" ? (
         <View style={styles.tabOverlay}>
-          <EventChatScreen onClose={() => setActiveTab("map")} bottomInset={BOTTOM_BAR_HEIGHT} />
+          <EventChatScreen
+            onClose={() => setActiveTab("map")}
+            bottomInset={BOTTOM_BAR_HEIGHT}
+            // A location shared into chat opens on the team map, where the
+            // incidents, medics and tracks are — same framing the search uses.
+            onFocusLocation={(target) => {
+              setActiveTab("map");
+              setPreviewPoint({ ...target, icon: "map-pin" });
+              cameraRef.current?.easeTo({
+                center: [target.lng, target.lat],
+                zoom: Math.max(mapZoom, 14),
+                duration: 600,
+              });
+            }}
+          />
         </View>
       ) : null}
 

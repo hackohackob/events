@@ -99,7 +99,16 @@ interface Row {
 
 const MIN_VOICE_MS = 800;
 
-export function EventChatScreen({ onClose, bottomInset = 0 }: { onClose: () => void; bottomInset?: number }) {
+export function EventChatScreen({
+  onClose,
+  bottomInset = 0,
+  onFocusLocation,
+}: {
+  onClose: () => void;
+  bottomInset?: number;
+  /** Frame a shared location on the app's own map (preferred over leaving). */
+  onFocusLocation?: (point: { lat: number; lng: number; label: string }) => void;
+}) {
   const myId = useSessionStore((s) => s.userId);
   const [messages, setMessages] = useState<EventMessageDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,7 +213,7 @@ export function EventChatScreen({ onClose, bottomInset = 0 }: { onClose: () => v
           data={rows}
           keyExtractor={(r) => r.msg.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => <MessageRow row={item} />}
+          renderItem={({ item }) => <MessageRow row={item} onFocusLocation={onFocusLocation} />}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
@@ -228,7 +237,13 @@ export function EventChatScreen({ onClose, bottomInset = 0 }: { onClose: () => v
   );
 }
 
-function MessageRow({ row }: { row: Row }) {
+function MessageRow({
+  row,
+  onFocusLocation,
+}: {
+  row: Row;
+  onFocusLocation?: (point: { lat: number; lng: number; label: string }) => void;
+}) {
   const { msg } = row;
   return (
     <View>
@@ -242,7 +257,7 @@ function MessageRow({ row }: { row: Row }) {
       {msg.kind === "system" ? (
         <SystemCard msg={msg} />
       ) : (
-        <ChatBubble row={row} />
+        <ChatBubble row={row} onFocusLocation={onFocusLocation} />
       )}
     </View>
   );
@@ -286,10 +301,17 @@ function SystemCard({ msg }: { msg: EventMessageDto }) {
   );
 }
 
-function ChatBubble({ row }: { row: Row }) {
+function ChatBubble({
+  row,
+  onFocusLocation,
+}: {
+  row: Row;
+  onFocusLocation?: (point: { lat: number; lng: number; label: string }) => void;
+}) {
   const { msg, mine, showHeader } = row;
   const name = msg.authorName || "Team";
   const origin = originOf(msg);
+  const isVoice = msg.kind === "voice" || Boolean(msg.audioUrl);
 
   return (
     <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : styles.bubbleRowOther]}>
@@ -308,7 +330,9 @@ function ChatBubble({ row }: { row: Row }) {
           ) : null}
         </View>
       ) : null}
-      <View style={{ maxWidth: "78%" }}>
+      {/* Voice notes get a much wider bubble: the transcript is the content, and
+          at 78% a normal sentence wrapped to three lines and collapsed. */}
+      <View style={{ maxWidth: isVoice ? "94%" : "78%", flexShrink: 1 }}>
         {showHeader && !mine ? (
           <View style={styles.authorRow}>
             <Text style={[styles.author, origin ? { color: origin.color } : null]}>{name}</Text>
@@ -335,7 +359,7 @@ function ChatBubble({ row }: { row: Row }) {
           ) : msg.kind === "image" || msg.imageUrl ? (
             <PhotoContent msg={msg} mine={mine} />
           ) : msg.kind === "location" || msg.location ? (
-            <LocationContent msg={msg} mine={mine} />
+            <LocationContent msg={msg} mine={mine} onFocus={onFocusLocation} />
           ) : (
             <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{msg.text}</Text>
           )}
@@ -393,7 +417,15 @@ function PhotoContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
   );
 }
 
-function LocationContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
+function LocationContent({
+  msg,
+  mine,
+  onFocus,
+}: {
+  msg: EventMessageDto;
+  mine: boolean;
+  onFocus?: (point: { lat: number; lng: number; label: string }) => void;
+}) {
   const loc = msg.location;
   // A bridged location can arrive without usable coordinates; show the message
   // for what it is rather than crashing on `.toFixed` or rendering an empty row.
@@ -407,33 +439,56 @@ function LocationContent({ msg, mine }: { msg: EventMessageDto; mine: boolean })
     ? caption ?? (loc.accuracyM ? `±${loc.accuracyM} m` : loc.address ? coords! : "Shared location")
     : caption ?? "No coordinates received";
 
+  const openExternally = () => {
+    if (!hasFix) return;
+    void Haptics.selectionAsync();
+    const url = Platform.select({
+      ios: `maps://?ll=${loc.lat},${loc.lng}&q=${encodeURIComponent(label)}`,
+      default: `geo:${loc.lat},${loc.lng}?q=${loc.lat},${loc.lng}(${encodeURIComponent(label)})`,
+    });
+    void Linking.openURL(url!);
+  };
+
   return (
-    <Pressable
-      style={styles.locationRow}
-      disabled={!hasFix}
-      onPress={() => {
-        if (!hasFix) return;
-        void Haptics.selectionAsync();
-        // Hand off to the OS maps app rather than embedding a second map here.
-        const url = Platform.select({
-          ios: `maps://?ll=${loc.lat},${loc.lng}&q=${encodeURIComponent(label)}`,
-          default: `geo:${loc.lat},${loc.lng}?q=${loc.lat},${loc.lng}(${encodeURIComponent(label)})`,
-        });
-        void Linking.openURL(url!);
-      }}
-    >
-      <View style={[styles.locationIcon, { backgroundColor: mine ? "rgba(4,18,31,0.15)" : "rgba(52,211,153,0.16)" }]}>
-        <Feather name="map-pin" size={15} color={mine ? "#04121f" : "#34d399"} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[styles.locationLabel, mine && { color: "#04121f" }]} numberOfLines={2}>
-          {label}
-        </Text>
-        <Text style={[styles.locationSub, mine && { color: "rgba(4,18,31,0.6)" }]} numberOfLines={2}>
-          {sub}
-        </Text>
-      </View>
-    </Pressable>
+    <View style={styles.locationRow}>
+      {/* Tapping the card frames the point on OUR map — the team map has the
+          incidents, medics and tracks on it, which a handoff to Apple/Google
+          Maps throws away. The arrow button is there for when you actually want
+          turn-by-turn from the OS. */}
+      <Pressable
+        style={styles.locationMain}
+        disabled={!hasFix}
+        onPress={() => {
+          if (!hasFix) return;
+          void Haptics.selectionAsync();
+          if (onFocus) onFocus({ lat: loc.lat, lng: loc.lng, label });
+          else openExternally();
+        }}
+      >
+        <View style={[styles.locationIcon, { backgroundColor: mine ? "rgba(4,18,31,0.15)" : "rgba(52,211,153,0.16)" }]}>
+          <Feather name="map-pin" size={15} color={mine ? "#04121f" : "#34d399"} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[styles.locationLabel, mine && { color: "#04121f" }]} numberOfLines={2}>
+            {label}
+          </Text>
+          <Text style={[styles.locationSub, mine && { color: "rgba(4,18,31,0.6)" }]} numberOfLines={2}>
+            {sub}
+          </Text>
+        </View>
+      </Pressable>
+
+      {hasFix && onFocus ? (
+        <Pressable
+          style={[styles.locationExternal, mine && styles.locationExternalMine]}
+          onPress={openExternally}
+          hitSlop={8}
+          accessibilityLabel="Open in maps app"
+        >
+          <Feather name="external-link" size={14} color={mine ? "rgba(4,18,31,0.7)" : "#9fb3cc"} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -804,12 +859,22 @@ const styles = StyleSheet.create({
   waveBar: { width: 2.5, borderRadius: 2 },
   voiceDur: { fontSize: 11, fontWeight: "800", fontVariant: ["tabular-nums"] },
   transcript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic" },
-  transcriptBox: { marginTop: 6, maxWidth: 230 },
+  transcriptBox: { marginTop: 6, alignSelf: "stretch" },
 
   photo: { width: 216, height: 162, borderRadius: 12, backgroundColor: "#0b1626" },
   photoFallback: { alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12 },
   photoFallbackText: { color: "#6b8199", fontSize: 11.5, fontWeight: "700", textAlign: "center" },
-  locationRow: { flexDirection: "row", alignItems: "center", gap: 9, minWidth: 190, paddingVertical: 2 },
+  locationRow: { flexDirection: "row", alignItems: "center", gap: 6, minWidth: 190, paddingVertical: 2 },
+  locationMain: { flexDirection: "row", alignItems: "center", gap: 9, flex: 1, minWidth: 0 },
+  locationExternal: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  locationExternalMine: { backgroundColor: "rgba(4,18,31,0.12)" },
   locationIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   locationLabel: { color: "#e6eef9", fontSize: 13.5, fontWeight: "700" },
   locationSub: { color: "#7e93ac", fontSize: 11, fontWeight: "600", marginTop: 1 },
