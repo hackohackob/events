@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -6,6 +6,8 @@ import { useSessionStore } from "../security/session-store";
 import { useMapStore } from "./map-store";
 import { assignDestination, setMyStatus } from "../ui/event-actions";
 import { debugLog } from "../debug/debug-log";
+import { useSettingsStore } from "../settings/settings-store";
+import { refreshTrackingInterval } from "../location/location-tracker";
 
 type Status = "available" | "stationary" | "rest" | "going_to" | "sweeper";
 
@@ -37,6 +39,16 @@ export function MedicStatusControl() {
   const status = (mine?.status as Status | undefined) ?? "available";
   const meta = STATUS_META[status];
   const isMedic = role === "medic" || role === "paramedic";
+
+  // "Stationary" = holding a post, so throttle location reporting to the
+  // stationary floor. Driven off the live status (not just the button press) so
+  // a status set from the dashboard — or restored on relaunch — applies too.
+  const isMedicOnStation = isMedic && status === "stationary";
+  useEffect(() => {
+    if (useSettingsStore.getState().stationaryMode === isMedicOnStation) return;
+    useSettingsStore.getState().setStationaryMode(isMedicOnStation);
+    void refreshTrackingInterval();
+  }, [isMedicOnStation]);
 
   const patchMine = (patch: Record<string, unknown>) => {
     const current = useMapStore.getState().markers;

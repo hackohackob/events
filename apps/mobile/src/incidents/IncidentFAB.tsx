@@ -31,7 +31,12 @@ export function IncidentFAB({ onAddPoint }: Props) {
   // in progress) and does not auto-resume on remount — so re-arm it on idle.
   // While the menu is open the pulse would fight the fanned-out actions.
   useEffect(() => {
-    if (phase !== "idle" || open) return;
+    if (phase !== "idle" || open) {
+      // Opening stops the loop mid-cycle; clear the ring so no half-faded
+      // remnant hangs around the (now neutral) close button.
+      if (open) pulseOpacity.setValue(0);
+      return;
+    }
     pulseScale.setValue(1);
     pulseOpacity.setValue(0.7);
     const loop = Animated.loop(
@@ -96,7 +101,8 @@ export function IncidentFAB({ onAddPoint }: Props) {
       <View style={styles.column} pointerEvents="box-none">
         <FanAction
           fan={fan}
-          index={1}
+          lift={INCIDENT_SIZE + 12 + MINI_SIZE + 12}
+          size={INCIDENT_SIZE}
           open={open}
           label="Add incident"
           icon="alert-triangle"
@@ -105,7 +111,8 @@ export function IncidentFAB({ onAddPoint }: Props) {
         />
         <FanAction
           fan={fan}
-          index={0}
+          lift={MINI_SIZE + 12}
+          size={MINI_SIZE}
           open={open}
           label="Add point"
           icon="map-pin"
@@ -120,7 +127,13 @@ export function IncidentFAB({ onAddPoint }: Props) {
           />
           <Pressable onPress={toggle} onPressIn={() => setPressing(true)} onPressOut={() => setPressing(false)}>
             <Animated.View
-              style={[styles.fab, pressing && styles.fabPressed, { transform: [{ scale: fabScale }] }]}
+              style={[
+                styles.fab,
+                // Open = the cross is an "×", i.e. a plain dismiss control. Red
+                // there reads as "raise an incident", so drop it while open.
+                open ? styles.fabOpen : pressing && styles.fabPressed,
+                { transform: [{ scale: fabScale }] },
+              ]}
             >
               <Animated.View style={[styles.cross, { transform: [{ rotate: crossRotation }] }]}>
                 <View style={styles.crossH} />
@@ -136,18 +149,19 @@ export function IncidentFAB({ onAddPoint }: Props) {
 
 /** One fanned-out choice: label pill + round button, rising off the FAB. */
 function FanAction({
-  fan, index, open, label, icon, color, onPress,
+  fan, lift, size, open, label, icon, color, onPress,
 }: {
   fan: Animated.Value;
-  /** Distance from the FAB, in slots — staggers the rise. */
-  index: number;
+  /** How far below its resting spot the button starts — it should launch from under the FAB. */
+  lift: number;
+  /** Diameter of the round button. */
+  size: number;
   open: boolean;
   label: string;
   icon: keyof typeof Feather.glyphMap;
   color: string;
   onPress: () => void;
 }) {
-  const lift = (index + 1) * (MINI_SIZE + 12);
   return (
     <Animated.View
       pointerEvents={open ? "auto" : "none"}
@@ -163,8 +177,22 @@ function FanAction({
         <View style={styles.actionLabel}>
           <Text style={styles.actionLabelText} numberOfLines={1}>{label}</Text>
         </View>
-        <View style={[styles.mini, { backgroundColor: color, shadowColor: color }]}>
-          <Feather name={icon} size={19} color="#fff" />
+        <View
+          style={[
+            styles.mini,
+            {
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              // Centre the round button on the FAB's axis rather than flushing
+              // it to the column's right edge.
+              marginRight: (FAB_SIZE - size) / 2,
+              backgroundColor: color,
+              shadowColor: color,
+            },
+          ]}
+        >
+          <Feather name={icon} size={Math.round(size * 0.42)} color="#fff" />
         </View>
       </Pressable>
     </Animated.View>
@@ -173,6 +201,8 @@ function FanAction({
 
 const FAB_SIZE = 62;
 const MINI_SIZE = 46;
+/** "Add incident" is the urgent one — it gets a noticeably larger target. */
+const INCIDENT_SIZE = 58;
 
 const styles = StyleSheet.create({
   root: { ...StyleSheet.absoluteFillObject, zIndex: 35 },
@@ -213,6 +243,11 @@ const styles = StyleSheet.create({
   fabPressed: {
     backgroundColor: "#e02c2c",
   },
+  fabOpen: {
+    backgroundColor: "#1f2b3d",
+    shadowColor: "#000",
+    shadowOpacity: 0.4,
+  },
   cross: { width: 26, height: 26, alignItems: "center", justifyContent: "center" },
   crossH: {
     position: "absolute",
@@ -241,9 +276,6 @@ const styles = StyleSheet.create({
   },
   actionLabelText: { color: "#E9F1FA", fontSize: 12.5, fontWeight: "800" },
   mini: {
-    width: MINI_SIZE,
-    height: MINI_SIZE,
-    borderRadius: MINI_SIZE / 2,
     alignItems: "center",
     justifyContent: "center",
     shadowOpacity: 0.45,

@@ -22,8 +22,9 @@ import { useEventChat } from '@/hooks/useEventChat'
 import { useParticipants } from '@/hooks/useParticipants'
 import { useZones } from '@/hooks/useZones'
 import ZonesPanel from '@/components/map/ZonesPanel'
+import TracksPanel from '@/components/map/TracksPanel'
 import { POI_CONFIGS } from '@/lib/constants'
-import { fetchGpxCoordinates } from '@/lib/gpx'
+import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
 import { updatePoi } from '@/api/events'
 import type { EventMedic, MedicState } from '@events/contracts'
@@ -291,7 +292,12 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const deactivate = useDeactivateEvent()
   const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents' | 'participants'>('info')
   const [showTracks, setShowTracks] = useState(true)
-  // Km distance chips along tracks + their spacing (km).
+  // Individually hidden tracks (Layers → Tracks). Kept as the *hidden* set so a
+  // track that appears later (GPX still loading, day filter change) is visible.
+  const [hiddenTrackIds, setHiddenTrackIds] = useState<string[]>([])
+  // Km distance chips along tracks + their spacing (km). Tucked into a closed
+  // submenu — the chips are set once and then forgotten.
+  const [kmMarksOpen, setKmMarksOpen] = useState(false)
   const [showKmMarks, setShowKmMarks] = useState(true)
   const [kmMarkInterval, setKmMarkInterval] = useState(5)
   const [showMedics, setShowMedics] = useState(true)
@@ -416,8 +422,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const selectedIncident = liveIncidents.find(i => i.id === selectedIncidentId) ?? null
   const selectedMedic = medics.find(m => m.medicId === selectedMedicId) ?? null
 
-  // Fetch GPX coordinates for each discipline that has a gpxUrl
-  const [gpxCoords, setGpxCoords] = useState<Record<string, [number, number][]>>({})
+  // Fetch each discipline's GPX — coordinates for the map, plus the elevation
+  // profile the Tracks panel previews.
+  const [gpxTracks, setGpxTracks] = useState<Record<string, GpxTrack>>({})
   useEffect(() => {
     if (!event) return
     const disciplines = (event.days ?? []).flatMap(d => d.disciplines ?? [])
@@ -426,15 +433,12 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
     let cancelled = false
     Promise.all(
-      toFetch.map(async d => {
-        const coords = await fetchGpxCoordinates(d.gpxUrl!)
-        return { key: d.gpxUrl!, coords }
-      })
+      toFetch.map(async d => ({ key: d.gpxUrl!, track: await fetchGpxTrack(d.gpxUrl!) })),
     ).then(results => {
       if (cancelled) return
-      const map: Record<string, [number, number][]> = {}
-      results.forEach(r => { map[r.key] = r.coords })
-      setGpxCoords(map)
+      const map: Record<string, GpxTrack> = {}
+      results.forEach(r => { map[r.key] = r.track })
+      setGpxTracks(map)
     })
     return () => { cancelled = true }
   }, [event?.id])
@@ -447,12 +451,27 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const filteredDays = selectedDayIdx >= 0 ? [eventDays[selectedDayIdx]].filter(Boolean) : eventDays
 
   const allTracks = filteredDays.flatMap((day) =>
-    (day.disciplines || []).map(disc => ({
-      id: `${day.date}-${disc.name}`,
-      name: disc.name,
-      color: disc.color,
-      coordinates: (disc.gpxUrl ? gpxCoords[disc.gpxUrl] : undefined) ?? [],
-    }))
+    (day.disciplines || []).map(disc => {
+      const gpx = disc.gpxUrl ? gpxTracks[disc.gpxUrl] : undefined
+      return {
+        id: `${day.date}-${disc.name}`,
+        name: disc.name,
+        color: disc.color,
+        coordinates: gpx?.coordinates ?? [],
+        // Parsed straight off the GPX with the same routine the editor uses, so
+        // the dashboard preview matches the profile shown there.
+        elevationProfile: gpx?.elevationProfile ?? [],
+      }
+    })
+  )
+
+  // Per-track visibility (Layers → Tracks). Tracks not listed here are hidden;
+  // anything newly discovered defaults to visible.
+  const trackIds = allTracks.map(t => t.id)
+  const visibleTrackIds = useMemo(
+    () => new Set(trackIds.filter(id => !hiddenTrackIds.includes(id))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trackIds.join('|'), hiddenTrackIds],
   )
 
   // Archived points are off the board unless archive review is on.
@@ -1117,6 +1136,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             enable3d={map3d}
             pois={showPois ? mapPois : []}
             tracks={showTracks ? allTracks : []}
+            visibleTrackIds={visibleTrackIds}
             liveMedics={isActive && showMedics ? medics : []}
             onMedicAssign={assignDestination}
             runnerLocations={isActive ? heatPoints : []}
@@ -1290,37 +1310,71 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 </button>
               ))}
 
-              {/* Km marks along tracks: toggle + spacing */}
-              <div
-                className="rounded-lg px-2.5 py-1.5"
-                style={{
-                  background: showKmMarks ? 'rgba(59,130,246,0.09)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${showKmMarks ? 'rgba(59,130,246,0.25)' : 'rgba(148,163,184,0.08)'}`,
-                }}
-              >
-                <button onClick={() => setShowKmMarks(v => !v)} className="flex items-center gap-2.5 w-full text-left">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: showKmMarks ? '#3b82f6' : '#334155' }} />
-                  <span className="flex-1 text-xs font-medium" style={{ color: showKmMarks ? '#e2e8f0' : '#475569' }}>
+              {/* Per-track visibility + elevation previews — collapsible, like Zones. */}
+              <TracksPanel
+                tracks={allTracks}
+                visibleIds={allTracks.filter(t => !hiddenTrackIds.includes(t.id)).map(t => t.id)}
+                onToggleVisible={(trackId) =>
+                  setHiddenTrackIds(prev =>
+                    prev.includes(trackId) ? prev.filter(x => x !== trackId) : [...prev, trackId],
+                  )
+                }
+                pois={mapPois.map(p => ({ coordinates: p.coordinates, type: p.type as string, name: p.name }))}
+              />
+
+              {/* Km marks along tracks — collapsible section, like Zones. */}
+              <div className="flex flex-col gap-1.5" style={{ borderTop: '1px solid rgba(148,163,184,0.1)', marginTop: 8, paddingTop: 8 }}>
+                <button
+                  onClick={() => setKmMarksOpen(o => !o)}
+                  className="flex items-center justify-between w-full"
+                  style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#334155' }}>
                     Km marks
                   </span>
-                  {showKmMarks && <span className="text-[10px] font-bold" style={{ color: '#3b82f6' }}>every {kmMarkInterval} km</span>}
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold" style={{ color: showKmMarks ? '#3b82f6' : '#475569' }}>
+                      {showKmMarks ? `every ${kmMarkInterval} km` : 'off'}
+                    </span>
+                    <ChevronDown
+                      className="w-3.5 h-3.5 transition-transform"
+                      style={{ color: '#64748b', transform: kmMarksOpen ? 'rotate(180deg)' : 'none' }}
+                    />
+                  </span>
                 </button>
-                {showKmMarks && (
-                  <div className="flex gap-1 mt-1.5">
-                    {[1, 3, 5, 10, 20].map(v => (
-                      <button
-                        key={v}
-                        onClick={() => setKmMarkInterval(v)}
-                        className="flex-1 text-[10px] font-bold py-1 rounded-md transition-all"
-                        style={{
-                          background: kmMarkInterval === v ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.04)',
-                          color: kmMarkInterval === v ? '#93c5fd' : '#64748b',
-                          border: `1px solid ${kmMarkInterval === v ? 'rgba(59,130,246,0.4)' : 'transparent'}`,
-                        }}
-                      >
-                        {v}
-                      </button>
-                    ))}
+
+                {kmMarksOpen && (
+                  <div
+                    className="rounded-lg px-2.5 py-1.5"
+                    style={{
+                      background: showKmMarks ? 'rgba(59,130,246,0.09)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${showKmMarks ? 'rgba(59,130,246,0.25)' : 'rgba(148,163,184,0.08)'}`,
+                    }}
+                  >
+                    <button onClick={() => setShowKmMarks(v => !v)} className="flex items-center gap-2.5 w-full text-left">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: showKmMarks ? '#3b82f6' : '#334155' }} />
+                      <span className="flex-1 text-xs font-medium" style={{ color: showKmMarks ? '#e2e8f0' : '#475569' }}>
+                        Show km marks
+                      </span>
+                    </button>
+                    {showKmMarks && (
+                      <div className="flex gap-1 mt-1.5">
+                        {[1, 3, 5, 10, 20].map(v => (
+                          <button
+                            key={v}
+                            onClick={() => setKmMarkInterval(v)}
+                            className="flex-1 text-[10px] font-bold py-1 rounded-md transition-all"
+                            style={{
+                              background: kmMarkInterval === v ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.04)',
+                              color: kmMarkInterval === v ? '#93c5fd' : '#64748b',
+                              border: `1px solid ${kmMarkInterval === v ? 'rgba(59,130,246,0.4)' : 'transparent'}`,
+                            }}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

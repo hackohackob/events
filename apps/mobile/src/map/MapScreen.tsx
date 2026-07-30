@@ -46,7 +46,7 @@ import { debugLog } from "../debug/debug-log";
 import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
-import { MedicDot } from "./MedicDot";
+import { IMPRECISE_ACCURACY_M, MedicDot } from "./MedicDot";
 import { MedicSheet } from "./MedicSheet";
 import { SearchOverlay, type SearchTarget } from "../search/SearchOverlay";
 import { usePlacesStore } from "../search/places-store";
@@ -3786,6 +3786,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                       isStationary={isStationary}
                       isSweeper={isSweeper}
                       isGoingToPoint={isGoingToPoint}
+                      isImprecise={(marker.accuracy ?? 0) > IMPRECISE_ACCURACY_M}
                       selected={false}
                       // I'm on an incident → fade everyone but me so my own path
                       // stays the visual focus.

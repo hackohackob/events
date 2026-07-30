@@ -54,6 +54,25 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
     };
   }, []);
 
+  // Where the touch catcher sits in window coordinates. Touch events report
+  // pageX/pageY (window origin), but MapLibre's unproject expects pixels
+  // relative to the MAP view — and the map lives inside a top-inset SafeAreaView,
+  // so the two frames differ by the status-bar height. Without this correction
+  // the sketch trails the finger by exactly that offset.
+  const catcherRef = useRef<View | null>(null);
+  const catcherOrigin = useRef<[number, number]>([0, 0]);
+  const measureCatcher = () => {
+    catcherRef.current?.measureInWindow((x, y) => {
+      if (Number.isFinite(x) && Number.isFinite(y)) catcherOrigin.current = [x, y];
+    });
+  };
+
+  /** Window pixel → map-view pixel. */
+  const toMapPixel = (pageX: number, pageY: number): [number, number] => [
+    pageX - catcherOrigin.current[0],
+    pageY - catcherOrigin.current[1],
+  ];
+
   // Pixel queue → unproject pump. Move events arrive far faster than the async
   // bridge round-trips, so points are queued and drained in ordered batches.
   const pixelQueue = useRef<Array<[number, number]>>([]);
@@ -88,11 +107,11 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (event) => {
         useZoneDrawStore.getState().resetSketch();
-        pixelQueue.current = [[event.nativeEvent.pageX, event.nativeEvent.pageY]];
+        pixelQueue.current = [toMapPixel(event.nativeEvent.pageX, event.nativeEvent.pageY)];
         void pump();
       },
       onPanResponderMove: (event) => {
-        pixelQueue.current.push([event.nativeEvent.pageX, event.nativeEvent.pageY]);
+        pixelQueue.current.push(toMapPixel(event.nativeEvent.pageX, event.nativeEvent.pageY));
         void pump();
       },
       onPanResponderRelease: () => {
@@ -134,7 +153,14 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Touch catcher — grabs the whole screen while sketching. */}
-      {phase === "draw" ? <View style={StyleSheet.absoluteFill} {...responder.panHandlers} /> : null}
+      {phase === "draw" ? (
+        <View
+          ref={catcherRef}
+          style={StyleSheet.absoluteFill}
+          onLayout={measureCatcher}
+          {...responder.panHandlers}
+        />
+      ) : null}
 
       {/* Hint banner + cancel */}
       <View style={styles.banner} pointerEvents="box-none">
@@ -218,7 +244,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 70,
     left: 12,
-    right: 12,
+    // Stop short of the right-hand control column (46px buttons at right: 12) —
+    // at this height it holds "centre on me", and a full-width banner put the
+    // cancel X straight on top of it.
+    right: 68,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,

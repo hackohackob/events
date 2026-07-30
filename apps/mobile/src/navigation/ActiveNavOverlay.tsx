@@ -69,8 +69,8 @@ export function ActiveNavOverlay() {
               {arriving
                 ? (destination?.label ? `Arrive · ${destination.label}` : "Arrive at destination")
                 : instruction?.streetName
-                  ? `${maneuverLabel(maneuver)} · ${instruction.streetName}`
-                  : maneuverLabel(maneuver)}
+                  ? `${maneuverLabel(maneuver, instruction.exitNumber)} · ${instruction.streetName}`
+                  : maneuverLabel(maneuver, instruction?.exitNumber)}
             </Text>
           </View>
           {/* Lookahead: what comes right after this maneuver. */}

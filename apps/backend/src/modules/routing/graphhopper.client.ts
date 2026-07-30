@@ -27,6 +27,8 @@ export interface GraphHopperPath {
     time: number;
     sign: number;
     street_name?: string;
+    /** Roundabout instructions (sign 6) carry the 1-based exit to take. */
+    exit_number?: number;
     interval: [number, number];
   }>;
 }

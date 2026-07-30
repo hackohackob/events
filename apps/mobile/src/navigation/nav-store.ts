@@ -133,7 +133,10 @@ function spokenInstructions(instructions: RouteInstruction[]): SpokenInstruction
   if (cached) return cached;
   const out = instructions.map((inst): SpokenInstruction => ({
     maneuver: inst.maneuver,
-    text: inst.maneuver === "arrive" ? "You have arrived at your destination" : maneuverLabel(inst.maneuver),
+    text:
+      inst.maneuver === "arrive"
+        ? "You have arrived at your destination"
+        : maneuverLabel(inst.maneuver, inst.exitNumber),
   }));
   spokenCache.set(instructions, out);
   return out;

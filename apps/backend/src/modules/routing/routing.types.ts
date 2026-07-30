@@ -40,6 +40,11 @@ export interface RouteInstruction {
   timeMs: number;
   /** Street / way name, when GraphHopper provides one. */
   streetName?: string;
+  /**
+   * Roundabouts only (sign 6): which exit to take, 1-based. Without it the
+   * client can only say "enter the roundabout", which is useless on the ground.
+   */
+  exitNumber?: number;
   /** `[fromIndex, toIndex]` into the route's point array. */
   interval: [number, number];
   /** Location of the maneuver, `[lng, lat]`. */

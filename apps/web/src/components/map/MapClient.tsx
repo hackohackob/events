@@ -575,6 +575,9 @@ function GoToModal({ medic, pois, incidents, onAssign, onClose }: GoToModalProps
 
 // ─── LiveMedicDot ─────────────────────────────────────────────────────────────
 
+/** Beyond this reported accuracy a medic dot is flagged as an approximate position. */
+const IMPRECISE_ACCURACY_M = 200
+
 interface LiveMedicDotProps {
   medic: MedicState
   onAssign?: (medicId: string, destination: { lat: number; lng: number; label: string } | null) => void
@@ -608,6 +611,8 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
   const isGoingTo = medic.status === 'going_to'
   const isGoingToPoint = !isResponding && isGoingTo
   const flashing = isResponding && online
+  // Wide last fix (cell/WiFi-grade): the dot is only roughly where it says.
+  const imprecise = online && (medic.accuracy ?? 0) > IMPRECISE_ACCURACY_M
 
   // Responding → the whole dot pulses red/blue (emergency lights).
   useEffect(() => {
@@ -655,14 +660,26 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
               height: 32,
               fontSize: 11,
               background: dotColor,
-              border: `2.5px solid ${online ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)'}`,
+              border: imprecise
+                ? '2.5px dashed #fbbf24'
+                : `2.5px solid ${online ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)'}`,
               boxShadow: online ? `0 2px 12px ${dotColor}88` : '0 2px 6px rgba(0,0,0,0.4)',
               opacity: online ? 1 : 0.65,
             }}
-            title={medic.name}
+            title={imprecise ? `${medic.name} — approximate position (±${Math.round(medic.accuracy!)} m)` : medic.name}
           >
             {getInitials(medic.name)}
           </div>
+          {/* Imprecise fix marker — top-left, clear of the status badges. */}
+          {imprecise && (
+            <div
+              className="absolute flex items-center justify-center rounded-full"
+              style={{ top: -5, left: -5, width: 15, height: 15, background: '#fbbf24', border: '1px solid #04121f', zIndex: 4, fontSize: 10, fontWeight: 900, color: '#04121f', lineHeight: 1 }}
+              title={`Approximate position (±${Math.round(medic.accuracy!)} m)`}
+            >
+              ~
+            </div>
+          )}
           {/* Stationary (anchored) / sweeper / heading-to-point badges */}
           {isStationary && online && (
             <div className="absolute flex items-center justify-center rounded-full" style={{ bottom: -6, right: -6, width: 21, height: 21, background: '#34d399', border: '1.5px solid #04121f', zIndex: 4, fontSize: 12 }}>⚓</div>

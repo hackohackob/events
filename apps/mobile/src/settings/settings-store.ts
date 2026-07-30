@@ -8,10 +8,18 @@ export const LOCATION_INTERVAL_OPTIONS: Array<{ label: string; ms: number }> = [
   { label: "30 sec", ms: 30_000 },
   { label: "1 min", ms: 60_000 },
   { label: "3 min", ms: 180_000 },
+  { label: "5 min", ms: 300_000 },
   { label: "7 min", ms: 420_000 },
   { label: "20 min", ms: 1_200_000 },
   { label: "40 min", ms: 2_400_000 },
 ];
+
+/**
+ * Cadence forced while the medic's own status is "stationary" — someone holding
+ * a post isn't moving, so a fix per minute is pure battery burn. Applied as a
+ * floor, never a speed-up: a medic who deliberately chose 20 min keeps 20 min.
+ */
+export const STATIONARY_INTERVAL_MS = 420_000;
 
 /** Selectable spacing for the km chips drawn along tracks. */
 export const KM_MARKER_INTERVAL_OPTIONS = [1, 3, 5, 10, 20] as const;
@@ -32,8 +40,14 @@ interface SettingsState {
    * instead of dropping them. Everyone else gets the clean live picture.
    */
   showArchived: boolean;
+  /**
+   * Mirrors my own medic status being "stationary". Not persisted — it is
+   * re-derived from the live roster on every launch (see MedicStatusControl).
+   */
+  stationaryMode: boolean;
   hydrated: boolean;
 
+  setStationaryMode: (on: boolean) => void;
   setLocationIntervalMs: (ms: number) => void;
   setTrackOffsetEnabled: (enabled: boolean) => void;
   setTrackGradientEnabled: (enabled: boolean) => void;
@@ -85,8 +99,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   kmMarkersEnabled: DEFAULTS.kmMarkersEnabled,
   kmMarkerIntervalKm: DEFAULTS.kmMarkerIntervalKm,
   showArchived: DEFAULTS.showArchived,
+  stationaryMode: false,
   hydrated: false,
 
+  setStationaryMode: (stationaryMode) => set({ stationaryMode }),
   setLocationIntervalMs: (locationIntervalMs) => {
     set({ locationIntervalMs });
     persist({ ...get(), locationIntervalMs });
@@ -138,3 +154,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * The cadence tracking should actually run at: the user's choice, floored to
+ * {@link STATIONARY_INTERVAL_MS} while they are holding a post.
+ */
+export function effectiveLocationIntervalMs(): number {
+  const { locationIntervalMs, stationaryMode } = useSettingsStore.getState();
+  return stationaryMode ? Math.max(locationIntervalMs, STATIONARY_INTERVAL_MS) : locationIntervalMs;
+}

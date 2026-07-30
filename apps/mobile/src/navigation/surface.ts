@@ -59,7 +59,31 @@ export function maneuverGlyph(maneuver: ManeuverKind): string {
   }
 }
 
-export function maneuverLabel(maneuver: ManeuverKind): string {
+/** "1st", "2nd", "3rd", "4th"… — for roundabout exits. */
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+/**
+ * @param exitNumber Roundabouts only — GraphHopper's 1-based exit to take. With
+ *   it the label becomes "At the roundabout, take the 2nd exit" instead of the
+ *   useless bare "Enter roundabout".
+ */
+export function maneuverLabel(maneuver: ManeuverKind, exitNumber?: number): string {
+  if (maneuver === "roundabout" && exitNumber != null && exitNumber > 0) {
+    return `At the roundabout, take the ${ordinal(exitNumber)} exit`;
+  }
   switch (maneuver) {
     case "turn-left":
       return "Turn left";
@@ -80,7 +104,8 @@ export function maneuverLabel(maneuver: ManeuverKind): string {
     case "uturn":
       return "Make a U-turn";
     case "roundabout":
-      return "Enter roundabout";
+      // No exit number from the engine — the best we can honestly say.
+      return "Enter the roundabout";
     case "arrive":
       return "Arrive";
     case "depart":

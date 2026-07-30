@@ -14,6 +14,8 @@ interface Props {
   isSweeper: boolean;
   /** Heading to a plain point → a "moving" badge. */
   isGoingToPoint: boolean;
+  /** Last fix was wide (see IMPRECISE_ACCURACY_M) → dashed ring + a small "~". */
+  isImprecise?: boolean;
   /** Faded out — the viewer is focused on their own incident. */
   dimmed?: boolean;
   /** Currently selected on the map → bright halo ring + slight scale-up. */
@@ -22,12 +24,15 @@ interface Props {
 
 const FLASH_MS = 460;
 
+/** Beyond this reported accuracy the dot is flagged as an approximate position. */
+export const IMPRECISE_ACCURACY_M = 200;
+
 /**
  * Medic map marker. When responding to an incident the entire dot pulses between
  * red and blue (emergency lights). The flash runs on this component's own timer
  * so it stays smooth without re-rendering the whole map.
  */
-export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationary, isSweeper, isGoingToPoint, dimmed = false, selected = false }: Props) {
+export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationary, isSweeper, isGoingToPoint, isImprecise = false, dimmed = false, selected = false }: Props) {
   const [flashBlue, setFlashBlue] = useState(false);
 
   useEffect(() => {
@@ -47,6 +52,9 @@ export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationar
           styles.dot,
           { backgroundColor: background },
           isGrey && styles.dotStale,
+          // Wide fix: swap the solid white ring for a dashed amber one. Small
+          // enough not to compete with the status badges, unmissable up close.
+          isImprecise && !isGrey && styles.dotImprecise,
           responding && { shadowColor: glow, shadowOpacity: 0.95, shadowRadius: 9, elevation: 10, borderColor: "#FFFFFF" },
         ]}
       >
@@ -67,6 +75,11 @@ export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationar
       {isGoingToPoint && !isGrey ? (
         <View style={[styles.badge, styles.movingBadge]}>
           <Feather name="navigation" size={13} color="#04121f" />
+        </View>
+      ) : null}
+      {isImprecise && !isGrey ? (
+        <View style={styles.impreciseBadge}>
+          <Text style={styles.impreciseGlyph} allowFontScaling={false}>~</Text>
         </View>
       ) : null}
     </View>
@@ -99,6 +112,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   dotStale: { backgroundColor: "#475569", borderColor: "rgba(255,255,255,0.4)", opacity: 0.65 },
+  dotImprecise: { borderColor: "#fbbf24", borderStyle: "dashed", borderWidth: 2 },
+  // Top-LEFT so it never collides with the status badges (bottom-right).
+  impreciseBadge: {
+    position: "absolute",
+    top: -5,
+    left: -5,
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: "#fbbf24",
+    borderWidth: 1,
+    borderColor: "#04121f",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 3,
+  },
+  impreciseGlyph: { color: "#04121f", fontSize: 11, fontWeight: "900", lineHeight: 12, includeFontPadding: false },
   text: { color: "#ffffff", fontSize: 11, fontWeight: "900", lineHeight: 13, textAlign: "center", includeFontPadding: false },
   textStale: { color: "rgba(255,255,255,0.7)" },
   badge: {

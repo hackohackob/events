@@ -70,10 +70,47 @@ export default function ChatDrawer({ messages, loading, onSend, onClose, onFocus
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  /** False once the reader scrolls up — don't yank them back down mid-read. */
+  const pinnedRef = useRef(true)
+  /** The first scroll after open must not animate; there is nothing to animate from. */
+  const firstScrollRef = useRef(true)
 
+  const scrollToBottom = () => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: firstScrollRef.current ? 'auto' : 'smooth' })
+    firstScrollRef.current = false
+  }
+
+  // Scroll after the browser has laid the new rows out — doing it in the same
+  // frame measures the *previous* scrollHeight and lands short of the bottom,
+  // which is why the drawer used to open mid-history.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages])
+    if (!pinnedRef.current) return
+    const raf = requestAnimationFrame(() => requestAnimationFrame(scrollToBottom))
+    return () => cancelAnimationFrame(raf)
+  }, [messages, loading])
+
+  // Avatars, photos and voice players resolve their height after the row is
+  // already in the DOM; each of those growths has to re-pin the view.
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) scrollToBottom()
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+    // The list only exists once loading has finished with at least one message,
+    // so re-attach when that flips.
+  }, [loading, messages.length === 0])
+
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }
 
   const rows = useMemo(() => {
     return messages.map((msg, i) => {
@@ -122,7 +159,7 @@ export default function ChatDrawer({ messages, loading, onSend, onClose, onFocus
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-0.5">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center h-full text-sm" style={{ color: '#475569' }}>Loading…</div>
           ) : messages.length === 0 ? (
@@ -132,7 +169,8 @@ export default function ChatDrawer({ messages, loading, onSend, onClose, onFocus
               <div className="text-xs" style={{ color: '#475569' }}>Incidents, responses and new points show up here automatically.</div>
             </div>
           ) : (
-            rows.map(({ msg, mine, showHeader, dateSep }) => (
+            <div ref={contentRef} className="px-4 py-3 space-y-0.5">
+            {rows.map(({ msg, mine, showHeader, dateSep }) => (
               <div key={msg.id}>
                 {dateSep && (
                   <div className="flex items-center gap-3 my-3 px-6">
@@ -147,7 +185,8 @@ export default function ChatDrawer({ messages, loading, onSend, onClose, onFocus
                   <Bubble msg={msg} mine={mine} showHeader={showHeader} onFocusLocation={onFocusLocation} />
                 )}
               </div>
-            ))
+            ))}
+            </div>
           )}
         </div>
 

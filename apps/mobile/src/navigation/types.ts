@@ -42,6 +42,8 @@ export interface RouteInstruction {
   distanceMeters: number;
   timeMs: number;
   streetName?: string;
+  /** Roundabouts only: which exit to take, 1-based. */
+  exitNumber?: number;
   interval: [number, number];
   location?: LngLat;
 }

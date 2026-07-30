@@ -210,6 +210,8 @@ export class RoutingService {
         distanceMeters: raw.distance,
         timeMs: raw.time,
         streetName: raw.street_name || undefined,
+        exitNumber:
+          typeof raw.exit_number === "number" && raw.exit_number > 0 ? raw.exit_number : undefined,
         interval: raw.interval,
         location: at,
       };
