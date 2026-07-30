@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import {
   deleteEventPack,
   downloadEventPack,
-  getEventPackStatus,
+  getSavedPackIfPresent,
   type OfflineProgress,
 } from "./offline-tiles";
 import { OfflineDownloadModal, type OfflineQuality } from "./OfflineDownloadModal";
@@ -28,47 +28,50 @@ export function OfflineControlButton({ tilesUrl, tileSize, getBounds }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [pct, setPct] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
+  /** Quality currently on disk — drives both the green button and the sheet. */
+  const [savedQuality, setSavedQuality] = useState<string | null>(null);
+  const savedMinZoom = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
-    void getEventPackStatus().then((status) => {
-      if (active && status && (status.state === "complete" || status.percentage >= 100)) {
-        setPhase("ready");
-      }
+    void getSavedPackIfPresent().then((saved) => {
+      if (!active || !saved) return;
+      setSavedQuality(saved.qualityKey);
+      // 0 = the "unknown quality" fallback record. Taking it literally would
+      // widen the next upgrade down to z0 — a planet-sized download.
+      savedMinZoom.current = saved.minZoom > 0 ? saved.minZoom : null;
+      setPhase("ready");
     });
     return () => {
       active = false;
     };
   }, []);
 
-  const onProgress = (p: OfflineProgress) => {
-    setPct(Math.round(p.percentage));
-    if (p.state === "complete" || p.percentage >= 100) {
-      setPhase("ready");
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  };
-
-  const press = async () => {
+  const press = () => {
     if (phase === "downloading") {
       // Tap while downloading cancels it (handy to escape a slow "Detailed" pack).
-      await deleteEventPack();
+      void deleteEventPack();
+      setSavedQuality(null);
       setPhase("idle");
       setPct(0);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       return;
     }
-    if (phase === "ready") {
-      // Tapping a saved map removes it (frees space).
-      await deleteEventPack();
-      setPhase("idle");
-      setPct(0);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      return;
-    }
-    // idle / error → ask first (size + quality).
+    // idle / ready / error → open the sheet. When a pack is saved it shows what
+    // is on disk (green) and offers the higher resolutions plus Remove; tapping
+    // used to delete the pack outright, which was far too easy to do by accident.
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setModalOpen(true);
+  };
+
+  const remove = () => {
+    setModalOpen(false);
+    void deleteEventPack();
+    savedMinZoom.current = null;
+    setSavedQuality(null);
+    setPhase("idle");
+    setPct(0);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const startDownload = async (quality: OfflineQuality) => {
@@ -79,6 +82,10 @@ export function OfflineControlButton({ tilesUrl, tileSize, getBounds }: Props) {
       setTimeout(() => setPhase("idle"), 2500);
       return;
     }
+    // Upgrading replaces the pack, so widen the range to cover what the old one
+    // had: "Detailed" starts at z12, and without this an upgrade from
+    // "Balanced" would silently drop the z9–11 overview tiles.
+    const minZoom = Math.min(quality.minZoom, savedMinZoom.current ?? quality.minZoom);
     setPhase("downloading");
     setPct(0);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -87,9 +94,18 @@ export function OfflineControlButton({ tilesUrl, tileSize, getBounds }: Props) {
         tilesUrl,
         tileSize,
         bounds,
-        minZoom: quality.minZoom,
+        minZoom,
         maxZoom: quality.maxZoom,
-        onProgress,
+        qualityKey: quality.key,
+        onProgress: (p: OfflineProgress) => {
+          setPct(Math.round(p.percentage));
+          if (p.state === "complete" || p.percentage >= 100) {
+            savedMinZoom.current = minZoom;
+            setSavedQuality(quality.key);
+            setPhase("ready");
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
+        },
         onError: () => setPhase("error"),
       });
     } catch (err) {
@@ -132,8 +148,10 @@ export function OfflineControlButton({ tilesUrl, tileSize, getBounds }: Props) {
         visible={modalOpen}
         bounds={getBounds()}
         tileSize={tileSize}
+        savedQualityKey={savedQuality}
         onClose={() => setModalOpen(false)}
         onConfirm={startDownload}
+        onRemove={remove}
       />
     </>
   );

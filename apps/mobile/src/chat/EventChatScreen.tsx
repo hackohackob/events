@@ -331,8 +331,17 @@ function ChatBubble({
         </View>
       ) : null}
       {/* Voice notes get a much wider bubble: the transcript is the content, and
-          at 78% a normal sentence wrapped to three lines and collapsed. */}
-      <View style={{ maxWidth: isVoice ? "94%" : "78%", flexShrink: 1 }}>
+          at 78% a normal sentence wrapped to three lines and collapsed. The
+          minWidth matters just as much — a note WITHOUT a transcript is only a
+          play button and a duration, which collapsed to a stub barely a third
+          of the screen wide and was hard to hit. */}
+      <View
+        style={{
+          maxWidth: isVoice ? "94%" : "78%",
+          minWidth: isVoice ? "70%" : undefined,
+          flexShrink: 1,
+        }}
+      >
         {showHeader && !mine ? (
           <View style={styles.authorRow}>
             <Text style={[styles.author, origin ? { color: origin.color } : null]}>{name}</Text>
@@ -538,7 +547,11 @@ function VoiceContent({ msg, mine }: { msg: EventMessageDto; mine: boolean }) {
   );
 }
 
-const BAR_HEIGHTS = [8, 14, 10, 17, 12, 16, 9, 13, 18, 11, 15, 8];
+// Enough bars to read as a waveform across the full width of a 70% bubble.
+const BAR_HEIGHTS = [
+  8, 14, 10, 17, 12, 16, 9, 13, 18, 11, 15, 8,
+  13, 9, 16, 11, 18, 10, 14, 8, 15, 12, 17, 9,
+];
 function Waveform({ active, tint }: { active: boolean; tint: string }) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -855,7 +868,9 @@ const styles = StyleSheet.create({
 
   voiceRow: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 2 },
   voicePlay: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  waveform: { flexDirection: "row", alignItems: "center", gap: 2.5, height: 22 },
+  // Takes up whatever the play button and duration leave, so the bars spread
+  // across the (now wider) bubble instead of huddling on the left.
+  waveform: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 22 },
   waveBar: { width: 2.5, borderRadius: 2 },
   voiceDur: { fontSize: 11, fontWeight: "800", fontVariant: ["tabular-nums"] },
   transcript: { color: "#aeb9c9", fontSize: 12, lineHeight: 16, fontStyle: "italic" },

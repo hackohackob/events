@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type GestureResponderEvent,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -54,17 +55,28 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
     };
   }, []);
 
-  // Where the touch catcher sits in window coordinates. Touch events report
-  // pageX/pageY (window origin), but MapLibre's unproject expects pixels
-  // relative to the MAP view — and the map lives inside a top-inset SafeAreaView,
-  // so the two frames differ by the status-bar height. Without this correction
-  // the sketch trails the finger by exactly that offset.
-  const catcherRef = useRef<View | null>(null);
+  // Touch events report pageX/pageY in WINDOW coordinates, but MapLibre's
+  // unproject wants pixels relative to the MAP view — and the map sits inside a
+  // top-inset SafeAreaView, so the two frames differ by the status-bar height.
+  // Uncorrected, the sketch trails the finger by exactly that offset.
+  //
+  // The offset is taken from the touch itself: `locationX/locationY` are already
+  // relative to the view that received the gesture (the catcher, which exactly
+  // overlays the map), so page − location IS the map's window origin. That is
+  // measurement-free and self-correcting on every stroke — measureInWindow can
+  // report stale or zeroed values depending on when layout settles.
   const catcherOrigin = useRef<[number, number]>([0, 0]);
-  const measureCatcher = () => {
-    catcherRef.current?.measureInWindow((x, y) => {
-      if (Number.isFinite(x) && Number.isFinite(y)) catcherOrigin.current = [x, y];
-    });
+
+  const calibrateOrigin = (e: GestureResponderEvent["nativeEvent"]) => {
+    const { pageX, pageY, locationX, locationY } = e;
+    if ([pageX, pageY, locationX, locationY].every((v) => typeof v === "number" && Number.isFinite(v))) {
+      catcherOrigin.current = [pageX - locationX, pageY - locationY];
+      debugLog("app", "info", "zone draw origin calibrated", {
+        origin: catcherOrigin.current,
+        page: [pageX, pageY],
+        location: [locationX, locationY],
+      });
+    }
   };
 
   /** Window pixel → map-view pixel. */
@@ -107,6 +119,7 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (event) => {
         useZoneDrawStore.getState().resetSketch();
+        calibrateOrigin(event.nativeEvent);
         pixelQueue.current = [toMapPixel(event.nativeEvent.pageX, event.nativeEvent.pageY)];
         void pump();
       },
@@ -153,14 +166,7 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Touch catcher — grabs the whole screen while sketching. */}
-      {phase === "draw" ? (
-        <View
-          ref={catcherRef}
-          style={StyleSheet.absoluteFill}
-          onLayout={measureCatcher}
-          {...responder.panHandlers}
-        />
-      ) : null}
+      {phase === "draw" ? <View style={StyleSheet.absoluteFill} {...responder.panHandlers} /> : null}
 
       {/* Hint banner + cancel */}
       <View style={styles.banner} pointerEvents="box-none">

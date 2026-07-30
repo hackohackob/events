@@ -1534,7 +1534,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Coordinator-only "review archives" mode: archived incidents and points stay
   // on the map, dimmed. Held in a ref as well because the socket handlers and
   // the one-shot loaders below are registered once and must read it live.
-  const isCoordinator = useSessionStore((state) => state.role) === "coordinator";
+  // Same live-roster signal the Settings screen gates on — the session role is
+  // "medic" even for a coordinator, so it can't answer this question.
+  const isCoordinator = useRosterStore((s) => s.amCoordinator);
   const showArchivedSetting = useSettingsStore((s) => s.showArchived);
   const showArchived = isCoordinator && showArchivedSetting;
   const showArchivedRef = useRef(showArchived);

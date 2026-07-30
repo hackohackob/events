@@ -1,9 +1,53 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OfflineManager, type OfflinePack } from "@maplibre/maplibre-react-native";
 import { resolveLocalhostUrl } from "../ui/runtime-host";
 import { debugLog } from "../debug/debug-log";
 
 /** Identifies our single event-area pack across reinstalls of the same build. */
 const PACK_KEY = "event-area-v1";
+
+/**
+ * What we last finished downloading. MapLibre's own `pack.status()` reports a
+ * dormant complete pack as `inactive` with percentage 0 until something resumes
+ * it, so the button couldn't tell "saved" from "never downloaded" on a fresh
+ * launch and reverted to the plain (un-green) icon. This record is the source of
+ * truth for the saved state, and it also carries WHICH quality is on disk so the
+ * download sheet can offer only higher ones.
+ */
+const SAVED_KEY = "offline-map/saved/v1";
+
+export interface SavedPack {
+  qualityKey: string;
+  minZoom: number;
+  maxZoom: number;
+  savedAt: number;
+}
+
+export async function readSavedPack(): Promise<SavedPack | null> {
+  try {
+    const raw = await AsyncStorage.getItem(SAVED_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedPack>;
+    if (typeof parsed.qualityKey !== "string") return null;
+    return {
+      qualityKey: parsed.qualityKey,
+      minZoom: typeof parsed.minZoom === "number" ? parsed.minZoom : 0,
+      maxZoom: typeof parsed.maxZoom === "number" ? parsed.maxZoom : 0,
+      savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeSavedPack(saved: SavedPack | null): Promise<void> {
+  try {
+    if (saved) await AsyncStorage.setItem(SAVED_KEY, JSON.stringify(saved));
+    else await AsyncStorage.removeItem(SAVED_KEY);
+  } catch {
+    // non-critical — the button just falls back to its live pack probe
+  }
+}
 
 const API_BASE_URL = resolveLocalhostUrl(
   process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
@@ -98,6 +142,7 @@ export async function getEventPackStatus(): Promise<OfflineProgress | null> {
 }
 
 export async function deleteEventPack(): Promise<void> {
+  await writeSavedPack(null);
   const pack = await getEventPack();
   if (!pack) return;
   try {
@@ -105,6 +150,29 @@ export async function deleteEventPack(): Promise<void> {
   } catch (err) {
     debugLog("app", "warn", "deletePack failed", String(err));
   }
+}
+
+/**
+ * Is a finished pack sitting on disk, and at what quality? Trusts the saved
+ * record but verifies the pack still exists (the OS or a reinstall can drop it).
+ */
+export async function getSavedPackIfPresent(): Promise<SavedPack | null> {
+  const pack = await getEventPack();
+  const saved = await readSavedPack();
+
+  if (!pack) {
+    // The pack is gone (reinstall, or the OS reclaimed it) — drop the record.
+    if (saved) await writeSavedPack(null);
+    return null;
+  }
+  if (saved) return saved;
+
+  // A pack exists with no record: it finished while the app was backgrounded and
+  // the progress callback never ran. Report it as saved at an unknown quality —
+  // rank -1, so every quality stays offered as an upgrade.
+  const status = await getEventPackStatus();
+  if (!status || (status.state !== "complete" && status.percentage < 100)) return null;
+  return { qualityKey: "custom", minZoom: 0, maxZoom: 0, savedAt: Date.now() };
 }
 
 /**
@@ -117,27 +185,40 @@ export async function downloadEventPack(opts: {
   bounds: [number, number, number, number]; // [west, south, east, north]
   minZoom?: number;
   maxZoom?: number;
+  /** Quality key to record as saved once the pack completes. */
+  qualityKey?: string;
   onProgress?: (progress: OfflineProgress) => void;
   onError?: (message: string) => void;
 }): Promise<void> {
   await deleteEventPack();
 
   const styleUrl = rasterStyleUrl(opts.tilesUrl, opts.tileSize);
+  const minZoom = opts.minZoom ?? 10;
+  const maxZoom = opts.maxZoom ?? 16;
 
   await OfflineManager.createPack(
     {
       mapStyle: styleUrl,
       bounds: opts.bounds,
-      minZoom: opts.minZoom ?? 10,
-      maxZoom: opts.maxZoom ?? 16,
+      minZoom,
+      maxZoom,
       metadata: { packKey: PACK_KEY, name: "Event area" },
     },
-    (_pack, status) =>
+    (_pack, status) => {
+      if (status.state === "complete" || status.percentage >= 100) {
+        void writeSavedPack({
+          qualityKey: opts.qualityKey ?? "custom",
+          minZoom,
+          maxZoom,
+          savedAt: Date.now(),
+        });
+      }
       opts.onProgress?.({
         percentage: status.percentage,
         state: status.state,
         completedTileCount: status.completedTileCount,
-      }),
+      });
+    },
     (_pack, error) => {
       debugLog("app", "error", "offline pack error", error.message);
       opts.onError?.(error.message);

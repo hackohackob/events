@@ -11,14 +11,19 @@ import {
 import { startLocationLoop } from "../location/location-tracker";
 import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
 import { PttBridgeSection } from "../ptt/PttBridgeSection";
-import { useSessionStore } from "../security/session-store";
+import { useRosterStore } from "../security/roster-store";
 
 export function SettingsScreen({ onClose }: { onClose: () => void }) {
   // Only coordinators change what the event puts on the air.
-  const isCoordinator = useSessionStore((s) => s.role) === "coordinator";
+  // Coordinator status is a property of the USER, resolved live from the roster
+  // (`type`, which the backend derives from users.role). The session role comes
+  // from the join call and is just "medic" for a coordinator who joined as one
+  // — keying off it hid the coordinator-only sections from every coordinator.
+  const isCoordinator = useRosterStore((s) => s.amCoordinator);
   const locationIntervalMs = useSettingsStore((s) => s.locationIntervalMs);
   const setLocationIntervalMs = useSettingsStore((s) => s.setLocationIntervalMs);
   const [intervalOpen, setIntervalOpen] = useState(false);
+  const [kmIntervalOpen, setKmIntervalOpen] = useState(false);
   const trackOffsetEnabled = useSettingsStore((s) => s.trackOffsetEnabled);
   const setTrackOffsetEnabled = useSettingsStore((s) => s.setTrackOffsetEnabled);
   const trackGradientEnabled = useSettingsStore((s) => s.trackGradientEnabled);
@@ -118,24 +123,39 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
                 How far apart the km chips are drawn along tracks. Toggle the chips themselves from the map layers menu.
               </Text>
             </View>
-            <View style={[styles.optionsWrap, { marginTop: 10 }]}>
-              {KM_MARKER_INTERVAL_OPTIONS.map((km) => {
-                const active = km === kmMarkerIntervalKm;
-                return (
-                  <Pressable
-                    key={km}
-                    style={[styles.optionPill, active && styles.optionPillActive]}
-                    onPress={() => {
-                      if (active) return;
-                      setKmMarkerIntervalKm(km);
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    }}
-                  >
-                    <Text style={[styles.optionText, active && styles.optionTextActive]}>{km} km</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {/* Compact dropdown, matching the update-frequency picker above. */}
+            <Pressable
+              style={styles.dropdownButton}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setKmIntervalOpen((o) => !o);
+              }}
+            >
+              <Text style={styles.dropdownValue}>{kmMarkerIntervalKm} km</Text>
+              <Feather name={kmIntervalOpen ? "chevron-up" : "chevron-down"} size={18} color="#7e90a8" />
+            </Pressable>
+            {kmIntervalOpen ? (
+              <View style={styles.dropdownMenu}>
+                {KM_MARKER_INTERVAL_OPTIONS.map((km) => {
+                  const active = km === kmMarkerIntervalKm;
+                  return (
+                    <Pressable
+                      key={km}
+                      onPress={() => {
+                        setKmIntervalOpen(false);
+                        if (active) return;
+                        setKmMarkerIntervalKm(km);
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }}
+                      style={[styles.dropdownItem, active && styles.dropdownItemActive]}
+                    >
+                      <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>{km} km</Text>
+                      {active ? <Feather name="check" size={15} color="#34d399" /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         </View>
 
