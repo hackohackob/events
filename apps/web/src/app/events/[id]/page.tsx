@@ -22,7 +22,7 @@ import { useEventChat } from '@/hooks/useEventChat'
 import { useParticipants } from '@/hooks/useParticipants'
 import { useZones } from '@/hooks/useZones'
 import ZonesPanel from '@/components/map/ZonesPanel'
-import TracksPanel from '@/components/map/TracksPanel'
+import TracksPanel, { TrackElevationOverlay } from '@/components/map/TracksPanel'
 import { POI_CONFIGS } from '@/lib/constants'
 import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
@@ -295,6 +295,10 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   // Individually hidden tracks (Layers → Tracks). Kept as the *hidden* set so a
   // track that appears later (GPX still loading, day filter change) is visible.
   const [hiddenTrackIds, setHiddenTrackIds] = useState<string[]>([])
+  // Track whose elevation profile is open as a strip over the map, plus the
+  // point currently hovered on that profile (marked on the track).
+  const [profileTrackId, setProfileTrackId] = useState<string | null>(null)
+  const [elevHoverCoord, setElevHoverCoord] = useState<[number, number] | null>(null)
   // Km distance chips along tracks + their spacing (km). Tucked into a closed
   // submenu — the chips are set once and then forgotten.
   const [kmMarksOpen, setKmMarksOpen] = useState(false)
@@ -461,9 +465,13 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
         // Parsed straight off the GPX with the same routine the editor uses, so
         // the dashboard preview matches the profile shown there.
         elevationProfile: gpx?.elevationProfile ?? [],
+        distanceKm: disc.distanceKm,
+        ascentMeters: disc.ascentMeters,
       }
     })
   )
+
+  const profileTrack = allTracks.find(t => t.id === profileTrackId) ?? null
 
   // Per-track visibility (Layers → Tracks). Tracks not listed here are hidden;
   // anything newly discovered defaults to visible.
@@ -476,9 +484,6 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
   // Archived points are off the board unless archive review is on.
   const filteredPois = filteredDays.flatMap(d => d.pois || []).filter(p => showArchived || !p.archived)
-  const archivedCount =
-    filteredDays.flatMap(d => d.pois || []).filter(p => p.archived).length +
-    liveIncidents.filter(i => i.status === 'archived').length
 
   const mapPois = [
     ...filteredPois.map((p, i) => ({
@@ -1143,8 +1148,10 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             showHeatmap={showParticipants}
             fitBounds={mapFitBounds}
             focusTarget={participantFocus ?? undefined}
-            hoverCoord={participantFocus ? [participantFocus.lng, participantFocus.lat] : undefined}
-            hoverCoordColor="#22c55e"
+            // Scrubbing the elevation profile marks that point on the track;
+            // otherwise the dot belongs to the located participant.
+            hoverCoord={elevHoverCoord ?? (participantFocus ? [participantFocus.lng, participantFocus.lat] : undefined)}
+            hoverCoordColor={elevHoverCoord ? (profileTrack?.color ?? '#f97316') : '#22c55e'}
             participantMarkers={participantMarkers}
             showParticipantDots={isActive && showParticipantDots}
             highlightedParticipantId={participantHighlight?.userId}
@@ -1183,6 +1190,17 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             showKmMarks={showTracks && showKmMarks}
             kmMarkIntervalKm={kmMarkInterval}
           />
+
+          {/* Elevation profile of the selected track — a strip across the
+              bottom of the map, like the chart under the map in the editor. */}
+          {profileTrack && (
+            <TrackElevationOverlay
+              track={profileTrack}
+              pois={mapPois.map(p => ({ coordinates: p.coordinates, type: p.type as string, name: p.name }))}
+              onHoverCoord={setElevHoverCoord}
+              onClose={() => { setElevHoverCoord(null); setProfileTrackId(null) }}
+            />
+          )}
 
           {/* Layer toggles — top right */}
           <div
@@ -1274,12 +1292,10 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 { key: 'tracks', label: 'Tracks', count: allTracks.filter(t => t.coordinates.length > 0).length, color: '#3b82f6', active: showTracks, toggle: () => setShowTracks(v => !v) },
                 { key: 'medics', label: 'Medics', count: medics.length, color: '#22c55e', active: showMedics, toggle: () => setShowMedics(v => !v) },
                 { key: 'pois', label: 'POIs', count: totalPois, color: '#ef4444', active: showPois, toggle: () => setShowPois(v => !v) },
-                { key: 'participant-dots', label: 'Participants', count: participantMarkers.length, color: '#22c55e', active: showParticipantDots, toggle: () => setShowParticipantDots(v => !v) },
-                { key: 'participants', label: 'Heatmap', count: runnerCount, color: '#f97316', active: showParticipants, toggle: () => setShowParticipants(v => !v) },
                 { key: 'incidents', label: 'Incidents', count: liveIncidents.length, color: '#f87171', active: showIncidents, toggle: () => setShowIncidents(v => !v) },
-                // Coordinator review mode: put archived incidents and points back
-                // on the map (and in the lists) instead of hiding them.
-                { key: 'archived', label: 'Archived', count: archivedCount, color: '#94a3b8', active: showArchived, toggle: () => setShowArchived(v => !v) },
+                // Participants, Heatmap and Archived are deliberately NOT here.
+                // Participant dots come on via "Locate" in the Participants tab;
+                // the heatmap and archive review are off by default.
               ].map(({ key, label, count, color, active, toggle }) => (
                 <button
                   key={key}
@@ -1319,7 +1335,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     prev.includes(trackId) ? prev.filter(x => x !== trackId) : [...prev, trackId],
                   )
                 }
-                pois={mapPois.map(p => ({ coordinates: p.coordinates, type: p.type as string, name: p.name }))}
+                profileTrackId={profileTrackId}
+                onToggleProfile={(trackId) => {
+                  setElevHoverCoord(null)
+                  setProfileTrackId(cur => (cur === trackId ? null : trackId))
+                }}
               />
 
               {/* Km marks along tracks — collapsible section, like Zones. */}

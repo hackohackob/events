@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Area, AreaChart, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ChevronDown, Eye, EyeOff, Mountain } from 'lucide-react'
+import { ChevronDown, Eye, EyeOff, Mountain, X } from 'lucide-react'
 import { POI_CONFIGS } from '@/lib/constants'
 
 export interface PanelTrack {
@@ -12,6 +12,9 @@ export interface PanelTrack {
   coordinates: [number, number][]
   /** distance km → elevation m; empty when the GPX carried no elevation. */
   elevationProfile: { distance: number; elevation: number }[]
+  /** The event's own figures — preferred over re-deriving them from the profile. */
+  distanceKm?: number
+  ascentMeters?: number
 }
 
 export interface PanelPoi {
@@ -26,8 +29,9 @@ interface Props {
   /** Ids currently drawn on the map. */
   visibleIds: string[]
   onToggleVisible: (trackId: string) => void
-  /** Points of interest, projected onto whichever track's profile is open. */
-  pois: PanelPoi[]
+  /** Track whose elevation profile is open over the map, if any. */
+  profileTrackId: string | null
+  onToggleProfile: (trackId: string) => void
 }
 
 /** Metres between two `[lng, lat]` points (equirectangular — fine at these scales). */
@@ -109,19 +113,18 @@ function totalAscent(profile: { elevation: number }[]): number {
 
 /**
  * Tracks section, embedded as a collapsible block inside the Layers panel —
- * same shape as ZonesPanel. Each track can be shown/hidden individually and
- * can pop open the same elevation profile the event editor shows, with the
- * event's points of interest marked along it.
+ * same shape as ZonesPanel. Each track can be shown/hidden individually, and
+ * the mountain button opens its elevation profile as a strip over the map (see
+ * {@link TrackElevationOverlay}) rather than inside this cramped popup.
  */
-export default function TracksPanel({ tracks, visibleIds, onToggleVisible, pois }: Props) {
+export default function TracksPanel({
+  tracks,
+  visibleIds,
+  onToggleVisible,
+  profileTrackId,
+  onToggleProfile,
+}: Props) {
   const [open, setOpen] = useState(false)
-  const [profileId, setProfileId] = useState<string | null>(null)
-
-  const profileTrack = tracks.find(t => t.id === profileId) ?? null
-  const profilePois = useMemo(
-    () => (profileTrack ? projectPois(profileTrack, pois) : []),
-    [profileTrack, pois],
-  )
 
   return (
     <div className="flex flex-col gap-1.5" style={{ borderTop: '1px solid rgba(148,163,184,0.1)', marginTop: 8, paddingTop: 8 }}>
@@ -153,7 +156,7 @@ export default function TracksPanel({ tracks, visibleIds, onToggleVisible, pois 
           {tracks.map(track => {
             const visible = visibleIds.includes(track.id)
             const hasProfile = track.elevationProfile.length > 1
-            const profileOpen = profileId === track.id
+            const profileOpen = profileTrackId === track.id
             return (
               <div
                 key={track.id}
@@ -168,7 +171,7 @@ export default function TracksPanel({ tracks, visibleIds, onToggleVisible, pois 
                   {track.name}
                 </span>
                 <button
-                  onClick={() => hasProfile && setProfileId(profileOpen ? null : track.id)}
+                  onClick={() => hasProfile && onToggleProfile(track.id)}
                   disabled={!hasProfile}
                   title={hasProfile ? 'Elevation profile' : 'This track has no elevation data'}
                   style={{ color: profileOpen ? '#f97316' : hasProfile ? '#64748b' : '#334155', cursor: hasProfile ? 'pointer' : 'default' }}
@@ -185,77 +188,136 @@ export default function TracksPanel({ tracks, visibleIds, onToggleVisible, pois 
               </div>
             )
           })}
-
-          {profileTrack && profileTrack.elevationProfile.length > 1 && (
-            <div
-              className="rounded-lg p-2"
-              style={{ background: 'rgba(2,8,20,0.6)', border: '1px solid rgba(148,163,184,0.12)' }}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-bold truncate" style={{ color: '#cbd5e1' }}>
-                  {profileTrack.name}
-                </span>
-                <span className="text-[10px]" style={{ color: '#64748b' }}>
-                  {totalAscent(profileTrack.elevationProfile).toLocaleString()} m+ ·{' '}
-                  {profileTrack.elevationProfile[profileTrack.elevationProfile.length - 1].distance.toFixed(1)} km
-                </span>
-              </div>
-              <div style={{ height: 110 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={profileTrack.elevationProfile} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
-                    <defs>
-                      <linearGradient id={`trkElev-${profileTrack.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={profileTrack.color} stopOpacity={0.35} />
-                        <stop offset="95%" stopColor={profileTrack.color} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="distance" type="number" domain={['dataMin', 'dataMax']} hide />
-                    <YAxis hide domain={['auto', 'auto']} />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'rgba(10,20,36,0.95)',
-                        border: '1px solid rgba(148,163,184,0.15)',
-                        borderRadius: '10px',
-                        fontSize: '11px',
-                        color: '#f1f5f9',
-                      }}
-                      formatter={(v: number) => [`${v} m`, 'Elevation']}
-                      labelFormatter={(l: number) => `${Number(l).toFixed(1)} km`}
-                    />
-                    <Area
-                      type="linear"
-                      dataKey="elevation"
-                      stroke={profileTrack.color}
-                      strokeWidth={1.5}
-                      fill={`url(#trkElev-${profileTrack.id})`}
-                      dot={false}
-                      isAnimationActive={false}
-                      activeDot={{ r: 3.5, fill: profileTrack.color, stroke: 'white', strokeWidth: 1.5 }}
-                    />
-                    {/* Points of interest, snapped onto the profile. */}
-                    {profilePois.map((p, i) => (
-                      <ReferenceDot
-                        key={`${p.label}-${i}`}
-                        x={p.km}
-                        y={p.elevation}
-                        r={3.5}
-                        fill={p.color}
-                        stroke="#04121f"
-                        strokeWidth={1}
-                        isFront
-                        label={{ value: p.label, position: 'top', fontSize: 8, fill: p.color }}
-                      />
-                    ))}
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              {profilePois.length === 0 && (
-                <div className="text-[10px] mt-1" style={{ color: '#475569' }}>No points of interest along this track.</div>
-              )}
-            </div>
-          )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * The elevation profile itself, as a strip across the bottom of the map —
+ * mirroring the chart under the map in the event editor, with the event's
+ * points of interest marked along it. Hovering reports the coordinate back so
+ * the caller can drop a dot on the map at that point on the track.
+ */
+export function TrackElevationOverlay({
+  track,
+  pois,
+  onHoverCoord,
+  onClose,
+}: {
+  track: PanelTrack
+  pois: PanelPoi[]
+  onHoverCoord: (coord: [number, number] | null) => void
+  onClose: () => void
+}) {
+  // Scrubbing the chart re-renders this component on every mouse move, and the
+  // caller rebuilds `track`/`pois` each time — so key the (O(pois × vertices))
+  // projection on the data itself, not on object identity.
+  const poisKey = pois.map(p => `${p.coordinates[0]},${p.coordinates[1]}`).join('|')
+  const profilePois = useMemo(
+    () => projectPois(track, pois),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [track.id, track.coordinates, poisKey],
+  )
+  if (track.elevationProfile.length < 2) return null
+
+  // The profile is smoothed and strided, so re-deriving gain/distance from it
+  // undershoots the event's published figures — use those when we have them.
+  const gainM = track.ascentMeters ?? totalAscent(track.elevationProfile)
+  const lastKm = track.distanceKm ?? track.elevationProfile[track.elevationProfile.length - 1].distance
+
+  /** Profile sample index → the track coordinate it came from. */
+  const coordAt = (index: number): [number, number] | null => {
+    if (track.coordinates.length === 0) return null
+    const ratio = index / Math.max(track.elevationProfile.length - 1, 1)
+    return track.coordinates[Math.round(ratio * (track.coordinates.length - 1))] ?? null
+  }
+
+  return (
+    <div
+      className="absolute bottom-4 left-4 right-4 lg:right-[248px] rounded-2xl p-3"
+      style={{
+        zIndex: 10,
+        background: 'rgba(10,18,34,0.95)',
+        backdropFilter: 'blur(12px)',
+        border: '1px solid rgba(148,163,184,0.18)',
+      }}
+      onMouseLeave={() => onHoverCoord(null)}
+    >
+      <div className="flex items-center gap-2 mb-1.5">
+        <Mountain className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#f97316' }} />
+        <span className="text-xs font-medium truncate" style={{ color: '#94a3b8' }}>
+          Elevation Profile — {track.name}
+        </span>
+        <span className="text-xs flex-1 text-right whitespace-nowrap" style={{ color: '#64748b' }}>
+          {gainM.toLocaleString()} m gain · {lastKm.toFixed(1)} km
+        </span>
+        <button
+          onClick={onClose}
+          title="Close elevation profile"
+          className="p-1 rounded-lg flex-shrink-0"
+          style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)' }}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div style={{ height: 120 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart
+            data={track.elevationProfile}
+            margin={{ top: 12, right: 8, bottom: 0, left: 0 }}
+            onMouseMove={(state: { activeTooltipIndex?: number }) => {
+              if (state?.activeTooltipIndex !== undefined) onHoverCoord(coordAt(state.activeTooltipIndex))
+            }}
+            onMouseLeave={() => onHoverCoord(null)}
+          >
+            <defs>
+              <linearGradient id={`trkElev-${track.id}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={track.color} stopOpacity={0.35} />
+                <stop offset="95%" stopColor={track.color} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="distance" type="number" domain={['dataMin', 'dataMax']} hide />
+            <YAxis hide domain={['auto', 'auto']} />
+            <Tooltip
+              contentStyle={{
+                background: 'rgba(10,20,36,0.95)',
+                border: '1px solid rgba(148,163,184,0.15)',
+                borderRadius: '10px',
+                fontSize: '11px',
+                color: '#f1f5f9',
+              }}
+              formatter={(v: number) => [`${v} m`, 'Elevation']}
+              labelFormatter={(l: number) => `${Number(l).toFixed(1)} km`}
+            />
+            <Area
+              type="linear"
+              dataKey="elevation"
+              stroke={track.color}
+              strokeWidth={1.5}
+              fill={`url(#trkElev-${track.id})`}
+              dot={false}
+              isAnimationActive={false}
+              activeDot={{ r: 4, fill: track.color, stroke: 'white', strokeWidth: 2 }}
+            />
+            {/* Points of interest, snapped onto the profile. */}
+            {profilePois.map((p, i) => (
+              <ReferenceDot
+                key={`${p.label}-${i}`}
+                x={p.km}
+                y={p.elevation}
+                r={4}
+                fill={p.color}
+                stroke="#04121f"
+                strokeWidth={1.5}
+                isFront
+                label={{ value: p.label, position: 'top', fontSize: 9, fill: p.color }}
+              />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   )
 }
