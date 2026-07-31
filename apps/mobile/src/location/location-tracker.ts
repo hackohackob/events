@@ -117,103 +117,15 @@ let lastSendAt = 0;
 const SEND_SLACK_MS = 2_000;
 /** Last battery reading, reused on throttled fixes so we don't re-poll at 2 Hz. */
 let lastBatteryLevel: number | undefined;
+/** Fix timestamp of the last report, so converging paths can't send it twice. */
+let lastReportedFixTimestamp = 0;
 
-// ─── Accuracy gating ─────────────────────────────────────────────────────────
-// Drop fixes that are too imprecise to be useful so the map/server never get a
-// position that's off by hundreds of metres. BUT: never starve the server —
-// indoors/on a charger every fix can be WiFi/cell-grade for long stretches, and
-// silently dropping all of them makes the medic vanish from the dashboard, which
-// is far worse than an imprecise dot (the accuracy radius is drawn anyway).
-//
-// So the tolerance is a function of how long ago we last delivered a position:
-// the fresher the last known good fix, the pickier we are about replacing it.
-// Once the last fix ages past the final rung, anything goes.
-const ACCURACY_LADDER: Array<{ withinMs: number; maxAccuracyM: number }> = [
-  { withinMs: 5 * 60_000, maxAccuracyM: 80 },
-  { withinMs: 10 * 60_000, maxAccuracyM: 250 },
-  { withinMs: 20 * 60_000, maxAccuracyM: 600 },
-];
-/** Never send a "fix" this vague, no matter how long we've been dark. */
-const ABSURD_ACCURACY_M = 5_000;
-/** Window in which a fix is judged against the *previous* fix's accuracy. */
-const RELATIVE_RECENCY_MS = 10 * 60_000;
-/** Ratio + floor for the relative rule — a sudden 2.5× widening is a bad sample. */
-const RELATIVE_WIDENING_FACTOR = 2.5;
-const RELATIVE_WIDENING_FLOOR_M = 60;
-/** Implied travel speed above which a fix is a jump, not movement (~216 km/h). */
-const TELEPORT_SPEED_MPS = 60;
-/** …but only distrust the jump when the fix is itself imprecise. */
-const TELEPORT_MIN_ACCURACY_M = 100;
-
-let lastAcceptedAccuracy: number | null = null;
-let lastAcceptedAt: number | null = null;
-let lastAcceptedLat: number | null = null;
-let lastAcceptedLng: number | null = null;
-
-/** Metres between two WGS84 points (equirectangular — plenty at these scales). */
-function metersBetween(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6_371_000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const mLat = ((lat1 + lat2) / 2) * (Math.PI / 180);
-  const x = dLng * Math.cos(mLat);
-  return Math.sqrt(x * x + dLat * dLat) * R;
-}
-
-/**
- * Decide whether a fix is good enough to deliver. Returns a reason string when
- * the fix should be dropped, otherwise null.
- *
- * Rules, in order:
- *  1. Absurd accuracy (>5 km) is never sent.
- *  2. No accuracy reported → can't judge, accept.
- *  3. No previous fix (cold start) → accept.
- *  4. Recency ladder: <5 min ⇒ ≤80 m, <10 min ⇒ ≤250 m, <20 min ⇒ ≤600 m,
- *     older ⇒ anything (the medic must not disappear).
- *  5. Relative widening: within 10 min of a good fix, reject one that is >2.5×
- *     broader and above 60 m — catches the single WiFi sample dropped into a
- *     run of GPS fixes.
- *  6. Teleport guard: a jump implying >60 m/s is rejected when the fix's own
- *     accuracy is >100 m (multipath / cell-tower centroid).
- */
-function accuracyRejectReason(
-  accuracy: number | undefined,
-  lat: number,
-  lng: number,
-  fixAt: number,
-): string | null {
-  if (accuracy != null && accuracy > ABSURD_ACCURACY_M) {
-    return `accuracy ${Math.round(accuracy)}m is not a position`;
-  }
-  if (accuracy == null) return null;
-  if (lastAcceptedAt == null) return null;
-
-  const sinceLast = Date.now() - lastAcceptedAt;
-  const rung = ACCURACY_LADDER.find((r) => sinceLast < r.withinMs);
-  if (rung && accuracy > rung.maxAccuracyM) {
-    return `accuracy ${Math.round(accuracy)}m > ${rung.maxAccuracyM}m allowed ${Math.round(sinceLast / 1000)}s after the last fix`;
-  }
-  // Past the last rung the ladder yields: send it rather than go dark.
-  if (!rung) return null;
-
-  if (
-    lastAcceptedAccuracy != null &&
-    sinceLast < RELATIVE_RECENCY_MS &&
-    accuracy > lastAcceptedAccuracy * RELATIVE_WIDENING_FACTOR &&
-    accuracy > RELATIVE_WIDENING_FLOOR_M
-  ) {
-    return `accuracy ${Math.round(accuracy)}m ≫ last ${Math.round(lastAcceptedAccuracy)}m`;
-  }
-
-  if (accuracy > TELEPORT_MIN_ACCURACY_M && lastAcceptedLat != null && lastAcceptedLng != null) {
-    const moved = metersBetween(lastAcceptedLat, lastAcceptedLng, lat, lng);
-    const elapsedSec = Math.max(1, (fixAt - lastAcceptedAt) / 1000);
-    if (moved / elapsedSec > TELEPORT_SPEED_MPS) {
-      return `implausible jump ${Math.round(moved)}m in ${Math.round(elapsedSec)}s at ${Math.round(accuracy)}m accuracy`;
-    }
-  }
-  return null;
-}
+// Fixes are delivered exactly as the OS reports them. An earlier version graded
+// them on an accuracy ladder and dropped anything too vague, plus relative
+// widening and teleport guards — but a dropped fix means the medic freezes on
+// the dashboard, which is worse than an imprecise dot (the accuracy radius is
+// drawn anyway, and MedicDot already flags anything over IMPRECISE_ACCURACY_M).
+// Removed deliberately; do not reintroduce silent dropping here.
 
 function isMedicSession(): boolean {
   const role = useSessionStore.getState().role;
@@ -252,23 +164,11 @@ async function sendLocation(
   const session = useSessionStore.getState();
   const isMedic = session.role === "medic" || session.role === "paramedic";
 
-  // Gate on accuracy before doing anything — a too-broad fix is worse than none.
-  const accuracy = location.coords.accuracy ?? undefined;
-  const rejectReason = accuracyRejectReason(
-    accuracy,
-    location.coords.latitude,
-    location.coords.longitude,
-    location.timestamp,
-  );
-  if (rejectReason) {
-    debugLog("location", "warn", "location dropped — too imprecise", rejectReason);
-    useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "skipped", error: rejectReason });
-    return;
-  }
-  lastAcceptedAccuracy = accuracy ?? lastAcceptedAccuracy;
-  lastAcceptedAt = Date.now();
-  lastAcceptedLat = location.coords.latitude;
-  lastAcceptedLng = location.coords.longitude;
+  // Never report the same fix twice. Opening the app fires two one-shots almost
+  // together (the AppState listener and startLocationLoop's own), both "forced"
+  // past the throttle, and both resolve to the same cached position — that is
+  // the burst of three sends in one second seen in the log.
+  if (location.timestamp === lastReportedFixTimestamp) return;
 
   // Pace the reports. Nav has its own cadence (sendNavLocationFix throttles to
   // NAV_FOREGROUND_SEND_INTERVAL_MS) and one-shots are explicit user/app intent,
@@ -293,6 +193,7 @@ async function sendLocation(
   // Count the attempt, not the success: if the network is down every fix would
   // otherwise sail through the gate and queue at the OS delivery rate.
   lastSendAt = Date.now();
+  lastReportedFixTimestamp = location.timestamp;
 
   const battery = await readBatteryLevel();
   const charging = await readBatteryCharging();

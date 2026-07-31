@@ -1,5 +1,5 @@
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
-index 2b6c2fa..94784e0 100644
+index 2b6c2fa..6eb2904 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
 +++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
 @@ -52,6 +52,13 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
@@ -39,3 +39,50 @@ index 2b6c2fa..94784e0 100644
      return context != null ? context.getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE) : null;
    }
  
+@@ -583,7 +599,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+   }
+ 
+   private void removeAppFromConfig(String appScopeKey) {
+-    getSharedPreferences().edit().remove(appScopeKey).apply();
++    // Nullable — see getSharedPreferences(). (Local patch — see patches/expo-task-manager.)
++    SharedPreferences preferences = getSharedPreferences();
++    if (preferences == null) {
++      return;
++    }
++    preferences.edit().remove(appScopeKey).apply();
+   }
+ 
+   /**
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksPersistence.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksPersistence.java
+index a872533..cab4733 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksPersistence.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksPersistence.java
+@@ -16,6 +16,14 @@ import expo.modules.interfaces.taskManager.TaskInterface;
+ public class TasksPersistence {
+ 
+   public void clearTaskPersistence(SharedPreferences preferences, String but) {
++    // getSharedPreferences() is nullable (TaskService's Context is a
++    // WeakReference), and this NPE'd on getAll() — rejecting every
++    // start/stopLocationUpdatesAsync for the life of the process. Match the
++    // null-guard persistTasksForAppScopeKey already has.
++    // (Local patch — see patches/expo-task-manager.)
++    if (preferences == null) {
++      return;
++    }
+     Map<String, ?> map = preferences.getAll();
+     for(String key: map.keySet()) {
+       if(!but.equals(key)) {
+@@ -56,6 +64,13 @@ public class TasksPersistence {
+   public Map<String, TasksAndEventsRepository.AppConfig> readPersistedTasks(SharedPreferences preferences) {
+     Map<String, TasksAndEventsRepository.AppConfig> result = new HashMap<>();
+ 
++    // Nullable for the same reason as in clearTaskPersistence — an empty result
++    // means "no persisted tasks", which is recoverable; an NPE is not.
++    // (Local patch — see patches/expo-task-manager.)
++    if (preferences == null) {
++      return result;
++    }
++
+     Map<String, ?> appScopeKeyToAppConfigsMap = preferences.getAll();
+ 
+     for (Map.Entry<String, ?> appScopeKeyToConfig : appScopeKeyToAppConfigsMap.entrySet()) {
