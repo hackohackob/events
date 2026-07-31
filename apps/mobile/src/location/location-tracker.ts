@@ -262,6 +262,17 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
     at: Date.now(),
   });
 
+  // The fix above still feeds the local map — but with no event on the session
+  // there is nowhere to REPORT it. Without this guard the id interpolated to ""
+  // and every fix hit `/events//location`, which the server 404s; each failure
+  // then landed in the retry queue and was replayed on every flush, so the log
+  // filled with 404s that could never resolve.
+  if (!session.eventId) {
+    debugLog("location", "warn", "location not reported — no active event on the session");
+    useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "skipped", error: "no active event" });
+    return;
+  }
+
   if (isMedic) {
     const payload = {
       // Display name for the HTTP path — external guests aren't on the roster,
@@ -779,8 +790,17 @@ export async function flushLocationQueue(): Promise<void> {
         // Medic items carry their own eventId — the session one may have changed
         // since the fix was queued.
         const eventId = (item.payload as any).eventId ?? session.eventId ?? "";
+        const medicId = (item.payload as any).medicId ?? "";
+        // Drop what can never be delivered. Fixes queued before this guard
+        // existed (or after the event was cleared) carry no event id, and
+        // retrying them just replays a guaranteed 404 on every flush.
+        if (!eventId || (item.type === "medic_location" && !medicId)) {
+          locationQueue.remove(item.id);
+          debugLog("location", "warn", "queued fix dropped — no event id to send it to");
+          continue;
+        }
         const url = item.type === "medic_location"
-          ? `/events/${eventId}/medics/${(item.payload as any).medicId}/location`
+          ? `/events/${eventId}/medics/${medicId}/location`
           : `/events/${eventId}/location`;
         await apiFetch(url, { method: "POST", body: JSON.stringify(item.payload) });
         locationQueue.remove(item.id);
