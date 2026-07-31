@@ -1,0 +1,26 @@
+diff --git a/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt b/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt
+index 707840a..38dc99b 100644
+--- a/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt
++++ b/node_modules/expo-location/android/src/main/java/expo/modules/location/records/LocationArguments.kt
+@@ -24,11 +24,18 @@ internal open class LocationOptions(
+   @Field var mayShowUserSettingsDialog: Boolean = true,
+   @Field var timeInterval: Long? = null
+ ) : Record, Serializable {
++  // These options round-trip through JSON when a background task's options are
++  // persisted and restored (expo-task-manager Utils.jsonToMap). org.json hands
++  // numbers back as Integer/Double, so the original `as? Long` / `as? Int`
++  // casts returned null and the caller's timeInterval/distanceInterval were
++  // silently dropped — the location request then fell back to the accuracy
++  // default (500 ms for BestForNavigation) and ignored the configured cadence.
++  // Widening to Number covers every boxing the JSON layer can produce.
+   constructor(map: Map<String, Any?>) : this(
+-    accuracy = map["accuracy"] as? Int ?: ACCURACY_BALANCED,
+-    distanceInterval = map["distanceInterval"] as? Int?,
++    accuracy = (map["accuracy"] as? Number)?.toInt() ?: ACCURACY_BALANCED,
++    distanceInterval = (map["distanceInterval"] as? Number)?.toInt(),
+     mayShowUserSettingsDialog = map["mayShowUserSettingsDialog"] as? Boolean? ?: true,
+-    timeInterval = map["timeInterval"] as? Long
++    timeInterval = (map["timeInterval"] as? Number)?.toLong()
+   )
+ }
+ 
