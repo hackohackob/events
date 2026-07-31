@@ -42,6 +42,14 @@ const PHOTON_URL = process.env.PHOTON_URL ?? "https://photon.komoot.io";
 const OVERPASS_URL = process.env.OVERPASS_URL ?? "https://overpass-api.de/api/interpreter";
 
 /**
+ * Node's `fetch` sends no User-Agent at all, and overpass-api.de answers a
+ * header-less request with `406 Not Acceptable` (an HTML error page, not JSON) —
+ * which surfaced to the app as a 502 on every offline place pack. The OSM usage
+ * policy wants an identifying agent on these calls anyway.
+ */
+const OSM_USER_AGENT = "extreme-medics-events/1.0 (+https://events.academyfirstaid.com)";
+
+/**
  * Search is scoped to Bulgaria: the geocoder gets this as a hard bbox and the
  * results are re-checked on our side (country code + bbox), because a bbox is
  * only a bias on some Photon builds. `[minLon, minLat, maxLon, maxLat]`.
@@ -171,7 +179,7 @@ export class PlacesService implements OnModuleInit {
     let response: Response;
     try {
       response = await fetch(`${PHOTON_URL}/api/?${params.toString()}`, {
-        headers: { "user-agent": "extreme-medics-events/1.0" },
+        headers: { "user-agent": OSM_USER_AGENT },
       });
     } catch (err) {
       this.logger.warn(`photon unreachable: ${String(err)}`);
@@ -260,13 +268,20 @@ export class PlacesService implements OnModuleInit {
     try {
       response = await fetch(OVERPASS_URL, {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "user-agent": OSM_USER_AGENT,
+        },
         body: `data=${encodeURIComponent(query)}`,
       });
     } catch (err) {
       throw new BadGatewayException(`Overpass unreachable: ${String(err)}`);
     }
     if (!response.ok) {
+      // Overpass reports query and quota problems in the body, not the status —
+      // carry a slice of it so the next failure is diagnosable from the log.
+      const detail = await response.text().catch(() => "");
+      this.logger.warn(`overpass ${response.status}: ${detail.slice(0, 300).replace(/\s+/g, " ")}`);
       throw new BadGatewayException(`Overpass error ${response.status}`);
     }
     const parsed = (await response.json()) as { elements?: OverpassElement[] };
