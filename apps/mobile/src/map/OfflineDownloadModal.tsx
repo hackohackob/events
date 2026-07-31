@@ -108,25 +108,32 @@ export function OfflineDownloadModal({
             </Text>
           </View>
 
-          {/* Quality options. The saved one (and anything below it) is already
-              covered, so it shows green and can't be re-selected — only higher
-              resolutions are offered. */}
+          {/* Quality options. Only the resolution actually on disk is green;
+              anything below it is implied by that pack, so it greys out. Both
+              are unselectable — only higher resolutions are offered. */}
           <Text style={styles.sectionLabel}>QUALITY</Text>
           {QUALITIES.map((q, i) => {
             const est = estimates[q.key];
             const isSaved = q.key === savedQualityKey;
-            const covered = i <= savedRank;
+            // Below the saved pack: already implied by it, so nothing to download.
+            const superseded = i < savedRank;
+            const covered = isSaved || superseded;
             const active = !covered && q.key === selected;
             return (
               <Pressable
                 key={q.key}
-                style={[styles.option, active && styles.optionActive, covered && styles.optionSaved]}
+                style={[
+                  styles.option,
+                  active && styles.optionActive,
+                  isSaved && styles.optionSaved,
+                  superseded && styles.optionSuperseded,
+                ]}
                 onPress={() => !covered && setSelected(q.key)}
                 disabled={covered}
               >
                 {covered ? (
-                  <View style={styles.savedCheck}>
-                    <Feather name="check" size={12} color="#04121f" />
+                  <View style={[styles.savedCheck, superseded && styles.supersededCheck]}>
+                    <Feather name="check" size={12} color={superseded ? "#64748b" : "#04121f"} />
                   </View>
                 ) : (
                   <View style={[styles.radio, active && styles.radioActive]}>
@@ -138,18 +145,25 @@ export function OfflineDownloadModal({
                     style={[
                       styles.optionLabel,
                       active && { color: "#e2e8f0" },
-                      covered && { color: "#34d399" },
+                      isSaved && { color: "#34d399" },
+                      superseded && { color: "#64748b" },
                     ]}
                   >
                     {q.label}
                   </Text>
-                  <Text style={[styles.optionSub, covered && { color: "#3f8f74" }]}>
-                    {isSaved ? "Saved on this device" : covered ? "Already covered" : q.sublabel}
+                  <Text
+                    style={[
+                      styles.optionSub,
+                      isSaved && { color: "#3f8f74" },
+                      superseded && { color: "#475569" },
+                    ]}
+                  >
+                    {isSaved ? "Saved on this device" : superseded ? "Already covered" : q.sublabel}
                   </Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
                   {covered ? (
-                    <Feather name="hard-drive" size={15} color="#34d399" />
+                    <Feather name="hard-drive" size={15} color={superseded ? "#475569" : "#34d399"} />
                   ) : (
                     <>
                       <Text style={[styles.optionSize, active && { color: "#60a5fa" }]}>
@@ -260,6 +274,7 @@ const styles = StyleSheet.create({
   },
   optionActive: { borderColor: "rgba(59,130,246,0.5)", backgroundColor: "rgba(59,130,246,0.08)" },
   optionSaved: { borderColor: "rgba(52,211,153,0.45)", backgroundColor: "rgba(52,211,153,0.08)" },
+  optionSuperseded: { borderColor: "rgba(148,163,184,0.1)", backgroundColor: "rgba(255,255,255,0.015)" },
   savedCheck: {
     width: 20,
     height: 20,
@@ -268,6 +283,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  supersededCheck: { backgroundColor: "rgba(148,163,184,0.16)" },
   radio: {
     width: 20,
     height: 20,
