@@ -13,6 +13,8 @@ import {
   Text,
   TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -99,6 +101,9 @@ interface Row {
 
 const MIN_VOICE_MS = 800;
 
+/** Within this many px of the bottom still counts as "following the feed". */
+const FOLLOW_SLACK_PX = 90;
+
 export function EventChatScreen({
   onClose,
   bottomInset = 0,
@@ -116,6 +121,29 @@ export function EventChatScreen({
   const [sending, setSending] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
   const listRef = useRef<FlatList<Row>>(null);
+  // The feed only auto-follows while you are actually at the bottom. Content
+  // size changes for reasons that are not new traffic — expanding a voice
+  // transcript, a photo finishing its load — and scrolling to the end on every
+  // one of those yanked you out of the history you were reading.
+  const pinnedToBottom = useRef(true);
+  const didInitialScroll = useRef(false);
+
+  const onListScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const fromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
+    pinnedToBottom.current = fromBottom <= FOLLOW_SLACK_PX;
+  };
+
+  const onContentSizeChange = () => {
+    // First paint of the history lands at the newest message, no animation.
+    if (!didInitialScroll.current) {
+      didInitialScroll.current = true;
+      pinnedToBottom.current = true;
+      listRef.current?.scrollToEnd({ animated: false });
+      return;
+    }
+    if (pinnedToBottom.current) listRef.current?.scrollToEnd({ animated: true });
+  };
 
   // The screen lives in an absolutely-positioned overlay, so KeyboardAvoidingView
   // can't shrink it. Track the keyboard height and lift the composer above it.
@@ -176,6 +204,9 @@ export function EventChatScreen({
     if (!text || sending) return;
     setSending(true);
     setDraft("");
+    // Sending is an explicit "take me to the bottom", even if you were reading
+    // back through the history when you typed it.
+    pinnedToBottom.current = true;
     try {
       const msg = await sendEventMessage(text);
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -214,7 +245,9 @@ export function EventChatScreen({
           keyExtractor={(r) => r.msg.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => <MessageRow row={item} onFocusLocation={onFocusLocation} />}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={onContentSizeChange}
+          onScroll={onListScroll}
+          scrollEventThrottle={64}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
               <Feather name="message-square" size={30} color="#26384f" />
@@ -231,7 +264,10 @@ export function EventChatScreen({
         setDraft={setDraft}
         onSend={send}
         sending={sending}
-        onAttachment={(m) => setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]))}
+        onAttachment={(m) => {
+          pinnedToBottom.current = true;
+          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+        }}
       />
     </View>
   );
