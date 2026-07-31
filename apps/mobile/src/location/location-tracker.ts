@@ -101,6 +101,23 @@ export function resetTransientTrackingBackoff(): void {
 /** True while turn-by-turn navigation is active — shortens the update interval. */
 let navModeActive = false;
 
+// ─── Send pacing ─────────────────────────────────────────────────────────────
+// The configured interval CANNOT be trusted to reach the OS. expo-location
+// persists the background task's options as JSON, and on every restart of the
+// task it parses them back with `map["timeInterval"] as? Long` — but JSON hands
+// back an Integer, and `Integer as? Long` is null in Kotlin, so `timeInterval`
+// is silently dropped and the request falls back to the accuracy default
+// (500 ms for BestForNavigation). Confirmed on a device: the fused provider was
+// running at 500 ms–1 s while Settings said 60 s, and every delivery reported a
+// position. `patches/expo-location+19.0.8.patch` fixes the parse, but only for
+// builds that ship it — this throttle keeps the cadence honest regardless of
+// what the OS decides to deliver, including on already-installed binaries.
+let lastSendAt = 0;
+/** GPS delivery jitter — a fix landing a hair early must not cost a full cycle. */
+const SEND_SLACK_MS = 2_000;
+/** Last battery reading, reused on throttled fixes so we don't re-poll at 2 Hz. */
+let lastBatteryLevel: number | undefined;
+
 // ─── Accuracy gating ─────────────────────────────────────────────────────────
 // Drop fixes that are too imprecise to be useful so the map/server never get a
 // position that's off by hundreds of metres. BUT: never starve the server —
@@ -228,7 +245,10 @@ async function readBatteryCharging(): Promise<boolean | undefined> {
  * the one-shot send fired when the app launches. Records outcome to the debug
  * log and the location-status store so the Location tab can surface it.
  */
-async function sendLocation(location: ExpoLocation.LocationObject): Promise<void> {
+async function sendLocation(
+  location: ExpoLocation.LocationObject,
+  opts: { force?: boolean } = {},
+): Promise<void> {
   const session = useSessionStore.getState();
   const isMedic = session.role === "medic" || session.role === "paramedic";
 
@@ -250,8 +270,33 @@ async function sendLocation(location: ExpoLocation.LocationObject): Promise<void
   lastAcceptedLat = location.coords.latitude;
   lastAcceptedLng = location.coords.longitude;
 
+  // Pace the reports. Nav has its own cadence (sendNavLocationFix throttles to
+  // NAV_FOREGROUND_SEND_INTERVAL_MS) and one-shots are explicit user/app intent,
+  // so both bypass this. Everything below the gate is skipped on a throttled
+  // fix — including the battery reads, which were running at the OS delivery
+  // rate rather than ours.
+  const sinceLastSend = Date.now() - lastSendAt;
+  const minGapMs = effectiveLocationIntervalMs();
+  if (!opts.force && !navModeActive && sinceLastSend < minGapMs - SEND_SLACK_MS) {
+    // Keep the local position live even when we're not reporting it — the
+    // locate button, nav progress and the debug screen all read this.
+    useLocationStatus.getState().setFix({
+      lat: location.coords.latitude,
+      lng: location.coords.longitude,
+      accuracy: location.coords.accuracy ?? undefined,
+      battery: lastBatteryLevel,
+      at: Date.now(),
+    });
+    return;
+  }
+
+  // Count the attempt, not the success: if the network is down every fix would
+  // otherwise sail through the gate and queue at the OS delivery rate.
+  lastSendAt = Date.now();
+
   const battery = await readBatteryLevel();
   const charging = await readBatteryCharging();
+  lastBatteryLevel = battery;
   noteBatterySample(battery);
 
   useLocationStatus.getState().setFix({
@@ -487,7 +532,9 @@ export async function sendCurrentLocationNow(): Promise<void> {
       ? lastKnown
       : await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced });
     if (location) {
-      await sendLocation(location);
+      // Explicit intent (app opened, tracking (re)started, debug button) —
+      // always report, never wait out the interval.
+      await sendLocation(location, { force: true });
     }
   } catch (err) {
     debugLog("location", "error", "one-shot send failed", String(err));
@@ -712,7 +759,9 @@ export function sendNavLocationFix(location: ExpoLocation.LocationObject): void 
     lastDeliveredFixTimestamp = location.timestamp;
     lastDeliveredAt = Date.now();
   }
-  void sendLocation(location);
+  // Already throttled to NAV_FOREGROUND_SEND_INTERVAL_MS just above, and nav
+  // deliberately reports faster than the configured interval.
+  void sendLocation(location, { force: true });
 }
 
 let lastWatchdogRestartAt = 0;
