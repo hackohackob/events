@@ -2988,6 +2988,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     return () => sub.remove();
   }, [radialAnchor, menuOpen, layersOpen, activeTab, selectedMarkerId, navPhase]);
 
+  // Opening an incident hides the top header, so anything hanging off it has to
+  // go with it — otherwise the Menu / layers popup floats over the drawer with
+  // no button left to dismiss it.
+  useEffect(() => {
+    if (!selectedIncident) return;
+    setMenuOpen(false);
+    setLayersOpen(false);
+  }, [selectedIncident]);
+
   // Team-chat unread badge: count incoming messages (not my own) while the chat
   // tab isn't open. Opening the tab clears it.
   useEffect(() => {
@@ -4118,7 +4127,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
       {/* box-none: the header container is as tall as the action-button column and
           spans the full width — without it, it swallows touches over the map
-          (e.g. the radial menu's buttons rendered underneath at zIndex 0). */}
+          (e.g. the radial menu's buttons rendered underneath at zIndex 0).
+
+          Hidden entirely while an incident sheet is open. The sheet can be
+          dragged to its expanded snap, and once the keyboard opens under a
+          composer the whole drawer lifts further — its top edge then slid
+          underneath this header and the status bar. Nothing here is reachable
+          with a drawer over it anyway, so it gets out of the way. */}
+      {!selectedIncident ? (
       <View style={styles.topHeader} pointerEvents="box-none">
         <Pressable
           style={styles.menuButton}
@@ -4222,6 +4238,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </View>
         ) : null}
       </View>
+      ) : null}
 
       {/* Map scale bar (мащаб) — bottom-left, outside the top header so its
           absolute `bottom` offset is relative to the screen, not the header.

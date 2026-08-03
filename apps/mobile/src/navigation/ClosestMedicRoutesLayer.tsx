@@ -38,8 +38,24 @@ export function ClosestMedicRoutesLayer({
 }) {
   if (medics.length === 0) return null;
 
-  // Slowest first so the fastest route is drawn on top of the ones it crosses.
+  // Draw order is paint order: slowest first, so the fastest route sits on top
+  // of the ones it crosses.
   const ordered = [...medics].sort((a, b) => b.rank - a.rank);
+
+  // The selected route is redrawn afterwards in its own always-last pass. It
+  // cannot just be reordered into `ordered`: reshuffling React children does not
+  // reliably restack the underlying native layers, so a slow (red) route stayed
+  // buried under the greener ones exactly when you asked to inspect it. Painting
+  // it a second time is cheap and always wins.
+  const selected = selectedMedicId
+    ? medics.find(
+        (m) =>
+          m.medicId === selectedMedicId &&
+          !m.direct &&
+          (m.route?.geometry?.length ?? 0) >= 2 &&
+          hasFiniteGeometry(m.route!.geometry as LngLat[]),
+      )
+    : undefined;
 
   return (
     <>
@@ -49,10 +65,12 @@ export function ClosestMedicRoutesLayer({
         // dashed, because it is an estimate rather than a way anyone can follow.
         const isDirect = medic.direct || geometry.length < 2 || !hasFiniteGeometry(geometry);
         if (isDirect) return null;
+        // The selected route is painted by the always-last highlight pass below.
+        if (selected?.medicId === medic.medicId) return null;
 
         const color = closestMedicColor(medic.rank);
-        const dimmed = selectedMedicId != null && selectedMedicId !== medic.medicId;
-        const width = selectedMedicId === medic.medicId ? 6 : 4;
+        const dimmed = selectedMedicId != null;
+        const width = 4;
 
         return (
           <React.Fragment key={`cm-${medic.medicId}`}>
@@ -79,6 +97,28 @@ export function ClosestMedicRoutesLayer({
           </React.Fragment>
         );
       })}
+
+      {/* Selected route, redrawn last so it is unambiguously on top. */}
+      {selected ? (
+        <React.Fragment key={`cm-sel-${selected.medicId}`}>
+          <GeoJSONSource id="cm-selected-outline" data={lineFeature(selected.route!.geometry as LngLat[])}>
+            <Layer
+              id="cm-selected-outline-layer"
+              type="line"
+              layout={{ "line-join": "round", "line-cap": "round" }}
+              paint={{ "line-color": "rgba(6,12,22,0.95)", "line-width": 10 }}
+            />
+          </GeoJSONSource>
+          <GeoJSONSource id="cm-selected-line" data={lineFeature(selected.route!.geometry as LngLat[])}>
+            <Layer
+              id="cm-selected-line-layer"
+              type="line"
+              layout={{ "line-join": "round", "line-cap": "round" }}
+              paint={{ "line-color": closestMedicColor(selected.rank), "line-width": 6.5 }}
+            />
+          </GeoJSONSource>
+        </React.Fragment>
+      ) : null}
 
       {/* One tag per medic at their own position: rank colour, vehicle, ETA. */}
       {medics.map((medic) => {

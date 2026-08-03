@@ -126,24 +126,20 @@ export function EventChatScreen({
   // transcript, a photo finishing its load — and scrolling to the end on every
   // one of those yanked you out of the history you were reading.
   const pinnedToBottom = useRef(true);
-  const didInitialScroll = useRef(false);
 
+  // The list is `inverted`, so the newest message is at scroll offset 0 and the
+  // feed opens on it with no scrolling at all. The old approach — render from
+  // the top, then `scrollToEnd` on the first content-size change — is what made
+  // the chat flash its oldest messages for half a second on open, and it landed
+  // short whenever a row grew after measuring (a photo loading, a transcript
+  // wrapping). Neither can happen now: there is nothing to scroll.
   const onListScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const fromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
-    pinnedToBottom.current = fromBottom <= FOLLOW_SLACK_PX;
+    pinnedToBottom.current = e.nativeEvent.contentOffset.y <= FOLLOW_SLACK_PX;
   };
 
-  const onContentSizeChange = () => {
-    // First paint of the history lands at the newest message, no animation.
-    if (!didInitialScroll.current) {
-      didInitialScroll.current = true;
-      pinnedToBottom.current = true;
-      listRef.current?.scrollToEnd({ animated: false });
-      return;
-    }
-    if (pinnedToBottom.current) listRef.current?.scrollToEnd({ animated: true });
-  };
+  /** Jump to the newest message — offset 0 in an inverted list. */
+  const scrollToNewest = (animated: boolean) =>
+    listRef.current?.scrollToOffset({ offset: 0, animated });
 
   // The screen lives in an absolutely-positioned overlay, so KeyboardAvoidingView
   // can't shrink it. Track the keyboard height and lift the composer above it.
@@ -163,8 +159,17 @@ export function EventChatScreen({
   }, [bottomInset]);
 
   useEffect(() => {
-    if (kbHeight > 0) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    if (kbHeight > 0) requestAnimationFrame(() => scrollToNewest(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kbHeight]);
+
+  // New traffic arrives at offset 0 in an inverted list, so a reader sitting at
+  // the newest message follows it for free. This only closes the small gap when
+  // they are a little way up but still counted as following.
+  useEffect(() => {
+    if (pinnedToBottom.current) scrollToNewest(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
 
   // ── Load history + live updates ────────────────────────────────────────────
   useEffect(() => {
@@ -186,8 +191,13 @@ export function EventChatScreen({
   }, []);
 
   // Build display rows with grouping + date separators.
+  //
+  // Grouping is computed in chronological order (each row looks at the message
+  // before it), then the array is reversed for the inverted list — which needs
+  // newest first. Reversing after the fact keeps "same author within 5 min" and
+  // the day separators reading exactly as they did.
   const rows = useMemo<Row[]>(() => {
-    return messages.map((msg, i) => {
+    const chronological = messages.map((msg, i) => {
       const prev = messages[i - 1];
       const mine = msg.authorId != null && msg.authorId === myId;
       const gapMin = prev ? (new Date(msg.createdAt).getTime() - new Date(prev.createdAt).getTime()) / 60000 : 999;
@@ -197,6 +207,7 @@ export function EventChatScreen({
       const dateSep = !prev || dayLabel(prev.createdAt) !== dayLabel(msg.createdAt) ? dayLabel(msg.createdAt) : null;
       return { msg, showHeader, dateSep, mine };
     });
+    return chronological.reverse();
   }, [messages, myId]);
 
   const send = async () => {
@@ -241,11 +252,13 @@ export function EventChatScreen({
       ) : (
         <FlatList
           ref={listRef}
+          // Only invert when there is something to invert: `inverted` flips every
+          // child, and the empty-state card would render upside down.
+          inverted={rows.length > 0}
           data={rows}
           keyExtractor={(r) => r.msg.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => <MessageRow row={item} onFocusLocation={onFocusLocation} />}
-          onContentSizeChange={onContentSizeChange}
           onScroll={onListScroll}
           scrollEventThrottle={64}
           ListEmptyComponent={
@@ -306,6 +319,9 @@ function SystemCard({ msg }: { msg: EventMessageDto }) {
   // the same flow a tapped incident notification takes.
   const targetId =
     (msg.meta?.incidentId as string | undefined) ?? (msg.meta?.poiId as string | undefined);
+  // Logged events are context, not conversation: there are dozens of them in a
+  // busy event and a two-line card each buried the actual chat. One line —
+  // glyph, text, time — still tappable, still colour-coded by feed type.
   return (
     <View style={styles.systemRow}>
       <Pressable
@@ -317,21 +333,16 @@ function SystemCard({ msg }: { msg: EventMessageDto }) {
         }}
         style={({ pressed }) => [
           styles.systemCard,
-          { borderColor: `${meta.color}44`, backgroundColor: `${meta.color}12` },
+          { borderColor: `${meta.color}33`, backgroundColor: `${meta.color}0f` },
           pressed && targetId ? { opacity: 0.7 } : null,
         ]}
       >
-        <View style={[styles.systemIcon, { backgroundColor: `${meta.color}22`, borderColor: `${meta.color}55` }]}>
-          <Feather name={meta.icon} size={14} color={meta.color} />
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.systemLabel, { color: meta.color }]}>{meta.label}</Text>
-          <Text style={styles.systemText}>{msg.text}</Text>
-        </View>
-        <View style={styles.systemRight}>
-          <Text style={styles.systemTime}>{formatTime(msg.createdAt)}</Text>
-          {targetId ? <Feather name="chevron-right" size={14} color="#5f7088" /> : null}
-        </View>
+        <Feather name={meta.icon} size={11} color={meta.color} />
+        <Text style={styles.systemText} numberOfLines={2}>
+          {msg.text}
+        </Text>
+        <Text style={styles.systemTime}>{formatTime(msg.createdAt)}</Text>
+        {targetId ? <Feather name="chevron-right" size={12} color="#5f7088" /> : null}
       </Pressable>
     </View>
   );
@@ -858,7 +869,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  listContent: { paddingHorizontal: 12, paddingTop: 6, paddingBottom: 14, gap: 3 },
+  // Inverted list: the container is flipped, so these two read the other way
+  // round on screen — paddingTop is the visual bottom.
+  listContent: { paddingHorizontal: 12, paddingTop: 14, paddingBottom: 6, gap: 3 },
   emptyWrap: { alignItems: "center", paddingTop: 80, paddingHorizontal: 40, gap: 8 },
   emptyText: { color: "#7d8ea4", fontSize: 15, fontWeight: "800", marginTop: 4 },
   emptySub: { color: "#475569", fontSize: 12.5, textAlign: "center", lineHeight: 18 },
@@ -867,22 +880,19 @@ const styles = StyleSheet.create({
   dateLine: { flex: 1, height: 1, backgroundColor: "rgba(148,163,184,0.12)" },
   dateText: { color: "#5f7088", fontSize: 11, fontWeight: "800" },
 
-  systemRow: { alignItems: "center", marginVertical: 4 },
+  systemRow: { alignItems: "center", marginVertical: 1 },
   systemCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 7,
     borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 11,
-    maxWidth: "92%",
+    borderRadius: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    maxWidth: "94%",
   },
-  systemIcon: { width: 28, height: 28, borderRadius: 9, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  systemLabel: { fontSize: 10.5, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase" },
-  systemText: { color: "#d6e2f0", fontSize: 13, fontWeight: "600", marginTop: 1 },
-  systemTime: { color: "#5f7088", fontSize: 10, fontWeight: "700" },
-  systemRight: { alignItems: "flex-end", gap: 3, alignSelf: "flex-start", marginTop: 2 },
+  systemText: { color: "#a9bdd4", fontSize: 11.5, fontWeight: "600", flexShrink: 1, lineHeight: 15 },
+  systemTime: { color: "#5f7088", fontSize: 9.5, fontWeight: "700" },
 
   bubbleRow: { flexDirection: "row", alignItems: "flex-end", gap: 7, marginVertical: 1.5 },
   bubbleRowMine: { justifyContent: "flex-end" },

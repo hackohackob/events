@@ -14,14 +14,35 @@ import { IncidentsService } from "../incidents/incidents.service";
 /**
  * How close a medic has to be to an incident for what they say in the team chat
  * to also belong on that incident's record.
+ *
+ * 100 m was too tight to ever fire in the field: "I'm at this incident" means a
+ * couple of hundred metres to a medic working a scene, and a fix under tree
+ * cover is routinely ±30-50 m on its own. The medic's own reported accuracy is
+ * added on top (see {@link mirrorToNearbyIncidents}) so a sloppy fix widens the
+ * catchment rather than silently disabling the mirror.
  */
-const NEARBY_INCIDENT_RADIUS_M = 100;
+const NEARBY_INCIDENT_RADIUS_M = 250;
+
+/** Ceiling on the accuracy allowance, so a 2 km "fix" can't match everything. */
+const MAX_ACCURACY_ALLOWANCE_M = 150;
+
+/**
+ * At most this many incidents get a copy. Widening the radius means a cluster of
+ * incidents in a race village could all qualify; the nearest few are the ones
+ * the medic could plausibly have been talking about.
+ */
+const MAX_MIRROR_TARGETS = 3;
 
 /**
  * A fix older than this says nothing about where the author is standing now, so
- * it can't put them "at" an incident. Medics on shift report far more often.
+ * it can't put them "at" an incident.
+ *
+ * Sized against the *slowest* reporting cadence, not the fastest: the default
+ * interval is 3 min, a stationary medic is floored at 7 min, and an Android
+ * Doze freeze can stretch either. Ten minutes silently disqualified medics who
+ * were simply holding a post.
  */
-const FIX_FRESHNESS_MS = 10 * 60 * 1000;
+const FIX_FRESHNESS_MS = 20 * 60 * 1000;
 
 /**
  * Event-wide team chat: a single thread per event that everyone on the response
@@ -273,12 +294,16 @@ export class EventChatService implements OnModuleInit {
     const fix = await this.recentMedicFix(message.eventId, message.authorId);
     if (!fix) return;
 
-    const nearby = await this.incidents.findActiveNear(
-      message.eventId,
-      fix.lat,
-      fix.lng,
-      NEARBY_INCIDENT_RADIUS_M,
-    );
+    // A ±40 m fix means "within 40 m of here", so the catchment has to grow by
+    // the same amount or an honest-but-imprecise position reads as far away.
+    const radius =
+      NEARBY_INCIDENT_RADIUS_M +
+      Math.min(Math.max(fix.accuracy ?? 0, 0), MAX_ACCURACY_ALLOWANCE_M);
+
+    // findActiveNear returns closest-first.
+    const nearby = (
+      await this.incidents.findActiveNear(message.eventId, fix.lat, fix.lng, radius)
+    ).slice(0, MAX_MIRROR_TARGETS);
 
     for (const incident of nearby) {
       await this.incidents.addMessage(message.eventId, incident.id, message.authorId, {
@@ -305,16 +330,25 @@ export class EventChatService implements OnModuleInit {
   private async recentMedicFix(
     eventId: string,
     medicId: string,
-  ): Promise<{ lat: number; lng: number } | null> {
-    const { rows } = await this.db.query<{ lat: number; lng: number; recorded_at: string }>(
-      `SELECT lat, lng, recorded_at FROM medic_last_location WHERE event_id = $1 AND medic_id = $2`,
+  ): Promise<{ lat: number; lng: number; accuracy?: number } | null> {
+    const { rows } = await this.db.query<{
+      lat: number;
+      lng: number;
+      accuracy: number | null;
+      recorded_at: string;
+    }>(
+      `SELECT lat, lng, accuracy, recorded_at FROM medic_last_location WHERE event_id = $1 AND medic_id = $2`,
       [eventId, medicId],
     );
     const row = rows[0];
     if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lng)) return null;
     const recordedAt = new Date(row.recorded_at).getTime();
     if (!Number.isFinite(recordedAt) || Date.now() - recordedAt > FIX_FRESHNESS_MS) return null;
-    return { lat: row.lat, lng: row.lng };
+    return {
+      lat: row.lat,
+      lng: row.lng,
+      accuracy: Number.isFinite(row.accuracy) ? (row.accuracy as number) : undefined,
+    };
   }
 }
 

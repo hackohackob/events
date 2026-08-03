@@ -2,8 +2,8 @@ import React, { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
-/** Max transcript lines before it collapses behind an expand arrow. */
-const MAX_LINES = 3;
+/** Default max transcript lines before it collapses behind an expand arrow. */
+const DEFAULT_MAX_LINES = 3;
 
 /** Fixed gutters so the hidden measuring pass gets the same width as the body. */
 const ICON_GUTTER = 14;
@@ -17,6 +17,12 @@ interface Props {
   containerStyle?: StyleProp<ViewStyle>;
   /** Icon tint, matched to the bubble the transcript sits in. */
   iconColor?: string;
+  /**
+   * Lines to show before clamping. Raise it where the transcript IS the record
+   * rather than passing chatter — an incident thread is read later by someone
+   * who was not there, and a clipped tail reads as "it did not transcribe".
+   */
+  maxLines?: number;
 }
 
 /**
@@ -28,15 +34,24 @@ interface Props {
  * truncation, so the real line count comes from one invisible pass at natural
  * height, laid out over exactly the same width as the visible body.
  */
-export function TranscriptText({ text, style, containerStyle, iconColor = "#64748b" }: Props) {
+export function TranscriptText({
+  text,
+  style,
+  containerStyle,
+  iconColor = "#64748b",
+  maxLines = DEFAULT_MAX_LINES,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [measured, setMeasured] = useState(false);
 
-  const onMeasure = useCallback((e: { nativeEvent: { lines: unknown[] } }) => {
-    setOverflows(e.nativeEvent.lines.length > MAX_LINES);
-    setMeasured(true);
-  }, []);
+  const onMeasure = useCallback(
+    (e: { nativeEvent: { lines: unknown[] } }) => {
+      setOverflows(e.nativeEvent.lines.length > maxLines);
+      setMeasured(true);
+    },
+    [maxLines],
+  );
 
   return (
     <View style={[styles.wrap, containerStyle]}>
@@ -47,7 +62,7 @@ export function TranscriptText({ text, style, containerStyle, iconColor = "#6474
       ) : null}
       <View style={styles.row}>
         <Feather name="file-text" size={10} color={iconColor} style={styles.icon} />
-        <Text style={[style, styles.body]} numberOfLines={expanded ? undefined : MAX_LINES}>
+        <Text style={[style, styles.body]} numberOfLines={expanded ? undefined : maxLines}>
           {text}
         </Text>
         {/* The gutter is always reserved so the measuring pass stays honest. */}

@@ -855,11 +855,6 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
               <View style={[styles.statusDot, { backgroundColor: status.color }]} />
               <Text style={[styles.statusPillText, { color: status.color }]}>{status.label}</Text>
             </View>
-            <Text style={styles.headerMeta} numberOfLines={1}>
-              {[type.label, distanceKm != null ? `${distanceKm.toFixed(1)} km` : null, reportedAgo]
-                .filter(Boolean)
-                .join(" · ")}
-            </Text>
           </View>
         </View>
         {/* Tap to start, tap again (or tap the red bar) to send — straight into chat. */}
@@ -878,6 +873,17 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
         <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
           <Feather name="x" size={18} color="#94a3b8" />
         </Pressable>
+      </View>
+
+      {/* Category · distance · age. Its own full-width row: squeezed in beside
+          the status pill it had only the gap before the mic button to live in,
+          and got clipped mid-word. Full width, but still one quiet line. */}
+      <View style={styles.metaRow}>
+        <Text style={styles.metaText} numberOfLines={1}>
+          {[type.label, distanceKm != null ? `${distanceKm.toFixed(1)} km away` : null, reportedAgo]
+            .filter(Boolean)
+            .join("  ·  ")}
+        </Text>
       </View>
 
       {recordingUi ? (
@@ -941,6 +947,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
         {(incident.patientName || incident.patientBib || incident.patientPhone ||
           incident.allergies || incident.medications || incident.bloodType || incident.conditions) ? (
           <View style={styles.patientCard}>
+            <Text style={styles.patientKicker}>PATIENT INFO</Text>
             <View style={styles.patientHeadRow}>
               <Feather name="user" size={12} color="#fbbf24" />
               <Text style={styles.patientName} numberOfLines={1}>
@@ -982,6 +989,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
         <View style={styles.reporterRow}>
           <Feather name="radio" size={11} color="#5b6b80" />
           <Text style={styles.reporterText} numberOfLines={1}>
+            <Text style={styles.reporterLabel}>Reported by: </Text>
             {incident.reportedBy ?? "Unknown"} ({reporterRole(incident.createdBy)})
           </Text>
           {incident.reporterPhone ? (
@@ -1226,6 +1234,13 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                               text={m.transcript}
                               style={styles.voiceTranscript}
                               containerStyle={styles.voiceTranscriptBox}
+                              // The incident bubble is narrower than the team
+                              // chat's, so the same transcript wrapped onto a
+                              // 4th line and the 3-line clamp ate the last few
+                              // words — reading exactly like a failed
+                              // transcription. This is the casualty record;
+                              // show it, and only fold genuinely long notes.
+                              maxLines={12}
                             />
                           ) : null}
                         </>
@@ -1382,6 +1397,9 @@ const styles = StyleSheet.create({
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   statusPillText: { fontSize: 10.5, fontWeight: "900", letterSpacing: 0.3 },
   headerMeta: { color: "#8da3bd", fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
+  // Category · distance · age, on its own line under the header.
+  metaRow: { paddingHorizontal: 18, paddingBottom: 10, marginTop: -4 },
+  metaText: { color: "#8da3bd", fontSize: 11.5, fontWeight: "700" },
   closeBtn: {
     width: 32,
     height: 32,
@@ -1452,6 +1470,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     gap: 8,
   },
+  patientKicker: { color: "#d6a441", fontSize: 9.5, fontWeight: "900", letterSpacing: 1.2 },
   patientHeadRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   patientName: { flex: 1, color: "#fde68a", fontSize: 14, fontWeight: "900" },
   patientBib: { color: "#d6bd7a", fontSize: 12.5, fontWeight: "800" },
@@ -1470,6 +1489,7 @@ const styles = StyleSheet.create({
   // Provenance line
   reporterRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 2 },
   reporterText: { color: "#7d8ea4", fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
+  reporterLabel: { color: "#5b6b80", fontWeight: "800" },
   reporterCall: { flexDirection: "row", alignItems: "center", gap: 4 },
   reporterCallText: { color: "#34d399", fontSize: 11.5, fontWeight: "800" },
   moveChip: {

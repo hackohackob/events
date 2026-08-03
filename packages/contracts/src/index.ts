@@ -45,9 +45,13 @@ export interface VehicleTypeMeta {
 export const VEHICLE_TYPE_META: Record<VehicleType, VehicleTypeMeta> = {
   foot: { label: "On foot", icon: "🚶", offroad: true },
   bike: { label: "Bike", icon: "🚲", offroad: true },
-  "e-bike": { label: "E-bike", icon: "⚡", offroad: true },
-  "e-motorcycle": { label: "E-motorcycle", icon: "🛵", offroad: true },
-  motorcycle: { label: "Motorcycle", icon: "🏍️", offroad: true },
+  // The electric pair carry a bolt so they read apart from their petrol/pedal
+  // counterparts at a glance — a lone ⚡ said nothing about what it was on.
+  "e-bike": { label: "E-bike", icon: "⚡🚲", offroad: true },
+  // A light electric enduro bike — near-silent, very agile, and narrow enough
+  // to take foot paths, which is what separates it from the petrol motorcycle.
+  "e-motorcycle": { label: "E-motorcycle", icon: "⚡🏍", offroad: true },
+  motorcycle: { label: "Motorcycle", icon: "🏍", offroad: true },
   atv: { label: "ATV", icon: "🛻", offroad: true },
   car: { label: "Car", icon: "🚗", offroad: false },
   "offroad-car": { label: "Offroad car", icon: "🚙", offroad: true },

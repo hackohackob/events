@@ -75,6 +75,27 @@ const MOTORCYCLE_WAYS = {
 } as const;
 
 /**
+ * Light electric enduro bikes are a different vehicle from a petrol motorcycle:
+ * near-silent, narrow and agile enough that the team rides them along foot
+ * paths. So they keep the whole `mtb` network — paths and bridleways included —
+ * and only lose what nothing on two wheels can ride: steps, pedestrian squares,
+ * private ways and scrambling terrain.
+ */
+const E_MOTORCYCLE_WAYS = {
+  priority: [
+    { if: "road_class == STEPS || road_class == PEDESTRIAN", multiply_by: "0" },
+    { if: "road_access == PRIVATE || road_access == NO", multiply_by: "0" },
+    { if: "hike_rating > 1", multiply_by: "0" },
+    // Rideable, but a foot path is somewhere you pick your way rather than make
+    // time — and there may be runners on it.
+    { if: "road_class == FOOTWAY || road_class == PATH", multiply_by: "0.75" },
+  ],
+  speed: [
+    { if: "road_class == FOOTWAY || road_class == PATH", limit_to: "18" },
+  ],
+} as const;
+
+/**
  * A road ambulance: long wheelbase, low clearance, a casualty in the back. No
  * tracks at all, soft surfaces blocked outright, loose surfaces discouraged.
  */
@@ -117,9 +138,11 @@ export const VEHICLE_PROFILES: Record<VehicleType, VehicleProfileOption[]> = {
   // Motor assistance mostly pays off on climbs and flat fire roads.
   "e-bike": [{ profile: "mtb", durationFactor: 0.75, restrict: EBIKE_WAYS, label: "mtb/e-assist" }],
 
-  // Light electric bikes are quiet and quick on trail but limited on open road.
+  // The most capable vehicle on the list for reaching a casualty off-road: it
+  // goes everywhere a mountain bike goes, foot paths included, at motorbike
+  // speed. Limited on open road, where the 4×4 network is quicker.
   "e-motorcycle": [
-    { profile: "mtb", durationFactor: 0.55, restrict: MOTORCYCLE_WAYS, label: "trail" },
+    { profile: "mtb", durationFactor: 0.55, restrict: E_MOTORCYCLE_WAYS, label: "trail/path" },
     { profile: "rescue_4x4", durationFactor: 0.95, label: "road/track" },
   ],
 
