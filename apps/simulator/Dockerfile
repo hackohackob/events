@@ -2,10 +2,18 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Workspace install — the simulator depends on @events/contracts (the vehicle
+# list and its labels are real values, not just types) and resolves it from
+# source via the Vite alias, so the contracts package must be present.
 COPY package.json package-lock.json tsconfig.base.json ./
-COPY apps/simulator/package.json ./apps/simulator/
+COPY apps/simulator/package.json apps/simulator/tsconfig.json ./apps/simulator/
+COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
 
 RUN npm ci -w @events/simulator
+
+# `tsc -b` type-checks against the built .d.ts, so contracts is compiled first.
+COPY packages/contracts/src ./packages/contracts/src
+RUN npm run build -w @events/contracts
 
 COPY apps/simulator ./apps/simulator
 
