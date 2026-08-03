@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
+import { normalizeVehicleType } from "@events/contracts";
 import type { EventActiveHours, TrackGeoJson } from "@events/contracts";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
@@ -529,18 +530,44 @@ export class EventsService implements OnModuleInit {
   async updatePoi(
     eventId: string,
     poiId: string,
-    patch: { name?: string; description?: string; lat?: number; lng?: number },
+    patch: {
+      name?: string;
+      description?: string;
+      lat?: number;
+      lng?: number;
+      type?: string;
+      icon?: string;
+      archived?: boolean;
+    },
   ): Promise<StoredPoi> {
     const event = this.events.find((e) => e.id === eventId);
     if (!event) throw new NotFoundException(`Event ${eventId} not found`);
     for (const day of event.days) {
       const poi = day.pois.find((p) => p.id === poiId);
       if (poi) {
-        if (patch.name !== undefined) poi.name = patch.name;
-        if (patch.description !== undefined) poi.description = patch.description;
+        // Empty strings clear the optional fields rather than storing "".
+        if (patch.name !== undefined) poi.name = patch.name.trim() || undefined;
+        if (patch.description !== undefined) poi.description = patch.description.trim() || undefined;
         if (Number.isFinite(patch.lat)) poi.lat = patch.lat!;
         if (Number.isFinite(patch.lng)) poi.lng = patch.lng!;
+        if (patch.type !== undefined && patch.type.trim()) poi.type = patch.type.trim();
+        if (patch.icon !== undefined) poi.icon = patch.icon.trim() || undefined;
+        const wasArchived = poi.archived === true;
+        if (patch.archived !== undefined) poi.archived = patch.archived || undefined;
         await this.persist();
+        // Restoring a point is a "created" event for everyone who dropped it
+        // when it was archived — a plain update would never put it back.
+        if (wasArchived && poi.archived !== true) {
+          await this.redisService.publish(`event:${eventId}:map`, { type: "poi.created", payload: poi });
+          return poi;
+        }
+        if (!wasArchived && poi.archived === true) {
+          await this.redisService.publish(`event:${eventId}:map`, {
+            type: "poi.removed",
+            payload: { id: poi.id },
+          });
+          return poi;
+        }
         // Live clients (mobile map) upsert the point in place.
         await this.redisService.publish(`event:${eventId}:map`, {
           type: "poi.updated",
@@ -643,7 +670,11 @@ export class EventsService implements OnModuleInit {
       if (!name) continue;
 
       const unit = user?.unit ?? fallback?.unit ?? null;
+      // `vehicle` stays the free-text display label (the builder puts the medic's
+      // position there when no vehicle is picked); `vehicle_type` is the typed
+      // value routing uses, and it must never be derived from a position name.
       const vehicle = assignment?.vehicle ?? assignment?.position ?? null;
+      const vehicleType = normalizeVehicleType(assignment?.vehicle);
 
       // Role is NOT copied onto the event — it is a property of the user (the
       // same for every event) and resolved live from `users` when the roster is
@@ -652,10 +683,13 @@ export class EventsService implements OnModuleInit {
       // If the user UUID were reused as id, a user assigned to two different events would
       // hit a PK conflict on the second insert (ON CONFLICT covers event_id+name, not id).
       await this.db.query(
-        `INSERT INTO event_medics (event_id, name, unit, vehicle)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (event_id, name) DO UPDATE SET unit = EXCLUDED.unit, vehicle = EXCLUDED.vehicle`,
-        [event.id, name, unit, vehicle],
+        `INSERT INTO event_medics (event_id, name, unit, vehicle, vehicle_type)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (event_id, name) DO UPDATE SET
+           unit = EXCLUDED.unit,
+           vehicle = EXCLUDED.vehicle,
+           vehicle_type = EXCLUDED.vehicle_type`,
+        [event.id, name, unit, vehicle, vehicleType],
       );
     }
   }

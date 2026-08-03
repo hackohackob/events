@@ -3,6 +3,7 @@ import { AuthGuard } from "../common/guards/auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
 import { RouteRequestDto } from "./dto/route-request.dto";
+import { ClosestMedicsService } from "./closest-medics.service";
 import { ExitPointsService } from "./exit-points.service";
 import { RoutingService } from "./routing.service";
 import type { LngLat, RouteResponse } from "./routing.types";
@@ -13,6 +14,7 @@ export class RoutingController {
   constructor(
     private readonly routingService: RoutingService,
     private readonly exitPoints: ExitPointsService,
+    private readonly closestMedicsService: ClosestMedicsService,
   ) {}
 
   /**
@@ -26,6 +28,7 @@ export class RoutingController {
     return this.routingService.route(dto.profile, points, dto.alternatives ?? 3, {
       eventId: user.eventId,
       avoidIncomingTraffic: dto.avoidIncomingTraffic,
+      vehicleType: dto.vehicleType,
     });
   }
 
@@ -41,6 +44,22 @@ export class RoutingController {
         ? validatePoint([Number(body.from.lng), Number(body.from.lat)], 1)
         : undefined;
     return this.exitPoints.closestAsphalt(point, from);
+  }
+
+  /**
+   * The five medics who can reach a point soonest, each routed on their own
+   * vehicle's network. `incidentId` marks the ones already responding.
+   */
+  @Post("closest-medics")
+  async closestMedics(
+    @CurrentUser() user: RequestUser,
+    @Body() body: { lat: number; lng: number; incidentId?: string; excludeMedicId?: string },
+  ) {
+    const point = validatePoint([Number(body.lng), Number(body.lat)], 0);
+    return this.closestMedicsService.closestMedics(user.eventId, point, {
+      incidentId: typeof body.incidentId === "string" ? body.incidentId : undefined,
+      excludeMedicId: typeof body.excludeMedicId === "string" ? body.excludeMedicId : undefined,
+    });
   }
 }
 

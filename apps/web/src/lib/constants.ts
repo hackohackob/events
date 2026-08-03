@@ -1,3 +1,4 @@
+import { VEHICLE_TYPE_META, VEHICLE_TYPES } from '@events/contracts'
 import type { POIConfig, VehicleConfig } from './types'
 
 export const POI_CONFIGS: POIConfig[] = [
@@ -15,15 +16,14 @@ export const POI_CONFIGS: POIConfig[] = [
 // Selectable glyphs for a custom point of interest now live in
 // `@/lib/poi-icons` as CUSTOM_POI_ICON_OPTIONS (keyed vector icons).
 
-export const VEHICLE_CONFIGS: VehicleConfig[] = [
-  { value: 'bike', label: 'Bike', icon: '🚲' },
-  { value: 'e-bike', label: 'E-Bike', icon: '⚡🚲' },
-  { value: 'e-motorcycle', label: 'E-Motorcycle', icon: '⚡🏍️' },
-  { value: 'ambulance', label: 'Ambulance', icon: '🚑' },
-  { value: 'offroad-ambulance', label: 'Offroad Ambulance', icon: '🚑' },
-  { value: 'atv', label: 'ATV', icon: '🏎️' },
-  { value: 'motorcycle', label: 'Motorcycle', icon: '🏍️' },
-]
+// Derived from the shared contract so the dashboard, the app and the routing
+// profiles can never offer different vehicles. "On foot" is the default and is
+// therefore first.
+export const VEHICLE_CONFIGS: VehicleConfig[] = VEHICLE_TYPES.map((value) => ({
+  value,
+  label: VEHICLE_TYPE_META[value].label,
+  icon: VEHICLE_TYPE_META[value].icon,
+}))
 
 export const DISCIPLINE_COLORS = [
   '#3b82f6',

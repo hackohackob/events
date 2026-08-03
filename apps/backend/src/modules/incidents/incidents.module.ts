@@ -7,8 +7,9 @@ import { IncidentsService } from "./incidents.service";
 import { TranscriptionService } from "./transcription.service";
 
 @Module({
-  // forwardRef: MedicsModule imports IncidentsModule too (mutual dependency).
-  imports: [NotificationsModule, forwardRef(() => MedicsModule), EventChatModule],
+  // forwardRef: MedicsModule and EventChatModule import IncidentsModule too
+  // (mutual dependencies).
+  imports: [NotificationsModule, forwardRef(() => MedicsModule), forwardRef(() => EventChatModule)],
   controllers: [IncidentsController],
   providers: [IncidentsService, TranscriptionService],
   exports: [IncidentsService],

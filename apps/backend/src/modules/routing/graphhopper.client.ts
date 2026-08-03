@@ -43,12 +43,37 @@ export interface GraphHopperRequestOptions {
   /** Race-corridor avoidance model to merge into the request. */
   corridor?: CorridorModel | null;
   /**
+   * Extra custom-model rules narrowing the base profile to one specific
+   * vehicle (see `vehicle-profiles.ts`). GraphHopper only lets a request-level
+   * custom model *restrict* the profile — never widen it — so the base profile
+   * must already be the most permissive network the vehicle can legally use.
+   */
+  restrict?: Record<string, unknown> | null;
+  /**
    * Keep GraphHopper from snapping a waypoint onto these road classes — an
    * incident beside a motorway must not snap onto the carriageway itself.
    */
   snapPrevention?: string[];
   /** Extra raw body fields (algorithm, alternatives, custom_model tweaks…). */
   extra?: Record<string, unknown>;
+}
+
+/**
+ * Concatenate the `priority` and `speed` rule lists of two custom models,
+ * with `extra` applied last so its blocks win. Any other key (e.g.
+ * `distance_influence`) is taken from `extra` when present.
+ */
+function stackCustomModel(
+  base: Record<string, unknown> | undefined,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  return {
+    ...(base ?? {}),
+    ...extra,
+    priority: [...asList(base?.priority), ...asList(extra.priority)],
+    speed: [...asList(base?.speed), ...asList(extra.speed)],
+  };
 }
 
 /** Map our app profile → the GraphHopper profile name to send. */
@@ -96,6 +121,14 @@ export class GraphHopperClient {
     // send the rescue shaping as an inline custom model instead.
     if (profile === "rescue_4x4" && process.env.GRAPHHOPPER_NATIVE_RESCUE !== "true") {
       body["custom_model"] = { ...RESCUE_4X4_CUSTOM_MODEL };
+    }
+    // Vehicle restriction (what THIS vehicle may drive on) stacks onto whatever
+    // model the profile already carries.
+    if (opts.restrict) {
+      body["custom_model"] = stackCustomModel(
+        body["custom_model"] as Record<string, unknown> | undefined,
+        opts.restrict,
+      );
     }
     // "Avoid incoming traffic": merge the race-corridor penalty into whatever
     // custom model is already on the request. A custom model requires

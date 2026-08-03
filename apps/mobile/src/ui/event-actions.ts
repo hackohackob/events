@@ -1,3 +1,4 @@
+import type { VehicleType } from "@events/contracts";
 import { apiFetch } from "./api-client";
 import { useSessionStore } from "../security/session-store";
 
@@ -40,6 +41,17 @@ export async function setMyRoute(route: SharedRoute | null, destination: Destina
     method: "PATCH",
     body: JSON.stringify({ route, destination }),
   });
+}
+
+/**
+ * Change what a medic travels with (default: me). Coordinators may re-vehicle
+ * anyone mid-event; everyone else only themselves — the server enforces it.
+ */
+export async function setMedicVehicleType(vehicleType: VehicleType, medicId: string = myId()) {
+  return apiFetch<{ medicId: string; vehicleType: VehicleType }>(
+    `/events/${eventId()}/medics/${medicId}/vehicle`,
+    { method: "PATCH", body: JSON.stringify({ vehicleType }) },
+  );
 }
 
 /** Assign a medic (default: me) to a destination, or pass null to clear. */
@@ -150,6 +162,8 @@ export interface PoiDto {
   description?: string;
   /** Custom glyph key for "custom" points; overrides the default type icon. */
   icon?: string;
+  /** Archived points are off the live board for everyone. */
+  archived?: boolean;
 }
 
 /** Drop a new point of interest at the given coordinates. */
@@ -173,10 +187,21 @@ export async function archivePoi(poiId: string): Promise<{ id: string }> {
   return apiFetch<{ id: string }>(`/events/pois/${poiId}`, { method: "DELETE" });
 }
 
-/** Update a POI — e.g. move it to a new position. Broadcast to everyone live. */
+/**
+ * Update a POI — move it, rename it, retype it, or put an archived one back on
+ * the board (`archived: false`). Broadcast to everyone live.
+ */
 export async function updatePoi(
   poiId: string,
-  patch: { name?: string; description?: string; lat?: number; lng?: number },
+  patch: {
+    name?: string;
+    description?: string;
+    lat?: number;
+    lng?: number;
+    type?: string;
+    icon?: string;
+    archived?: boolean;
+  },
 ): Promise<PoiDto> {
   return apiFetch<PoiDto>(`/events/${eventId()}/pois/${poiId}`, {
     method: "PATCH",

@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Logger, OnModuleInit, forwardRef } from "@nestjs/common";
 import type {
   EventFeedType,
   EventMessage,
@@ -9,6 +9,19 @@ import type {
 import { DbService } from "../infra/db.service";
 import { PttBusService } from "../infra/ptt-bus.service";
 import { RedisService } from "../infra/redis.service";
+import { IncidentsService } from "../incidents/incidents.service";
+
+/**
+ * How close a medic has to be to an incident for what they say in the team chat
+ * to also belong on that incident's record.
+ */
+const NEARBY_INCIDENT_RADIUS_M = 100;
+
+/**
+ * A fix older than this says nothing about where the author is standing now, so
+ * it can't put them "at" an incident. Medics on shift report far more often.
+ */
+const FIX_FRESHNESS_MS = 10 * 60 * 1000;
 
 /**
  * Event-wide team chat: a single thread per event that everyone on the response
@@ -29,6 +42,9 @@ export class EventChatService implements OnModuleInit {
     private readonly db: DbService,
     private readonly redisService: RedisService,
     private readonly pttBus: PttBusService,
+    // forwardRef: IncidentsService posts its feed entries here, so the two
+    // services reference each other.
+    @Inject(forwardRef(() => IncidentsService)) private readonly incidents: IncidentsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -232,8 +248,86 @@ export class EventChatService implements OnModuleInit {
       }
     }
 
+    // Fire-and-forget: filing a copy on a nearby incident must never slow down
+    // or fail the team-chat send it came from.
+    void this.mirrorToNearbyIncidents(message).catch((err) =>
+      this.logger.warn(`Incident mirror skipped: ${(err as Error).message}`),
+    );
+
     return message;
   }
+
+  /**
+   * A medic standing on top of an incident is usually talking *about* it, even
+   * when they type into the team chat. Copy what they said onto every active
+   * incident within {@link NEARBY_INCIDENT_RADIUS_M} so the incident record is
+   * complete without asking them to repeat themselves in the right thread.
+   *
+   * The copy is tagged (`meta.mirroredFrom`) so clients can mark it as coming
+   * from the team chat rather than the incident's own thread.
+   */
+  private async mirrorToNearbyIncidents(message: EventMessage): Promise<void> {
+    // System feed entries and PTT traffic have no app author standing anywhere.
+    if (!message.authorId || message.kind === "system" || message.origin) return;
+
+    const fix = await this.recentMedicFix(message.eventId, message.authorId);
+    if (!fix) return;
+
+    const nearby = await this.incidents.findActiveNear(
+      message.eventId,
+      fix.lat,
+      fix.lng,
+      NEARBY_INCIDENT_RADIUS_M,
+    );
+
+    for (const incident of nearby) {
+      await this.incidents.addMessage(message.eventId, incident.id, message.authorId, {
+        text: mirroredText(message),
+        kind: message.kind === "voice" ? "voice" : "text",
+        audioUrl: message.audioUrl,
+        audioDurationMs: message.audioDurationMs,
+        transcript: message.transcript,
+        photoUrl: message.imageUrl,
+        meta: {
+          mirroredFrom: "event-chat",
+          eventMessageId: message.id,
+          distanceMeters: Math.round(incident.distanceMeters),
+        },
+      });
+    }
+  }
+
+  /**
+   * The author's last known position, but only if it is recent enough to place
+   * them somewhere right now. Reading `medic_last_location` directly also does
+   * the role filtering for free — participants are in a different table.
+   */
+  private async recentMedicFix(
+    eventId: string,
+    medicId: string,
+  ): Promise<{ lat: number; lng: number } | null> {
+    const { rows } = await this.db.query<{ lat: number; lng: number; recorded_at: string }>(
+      `SELECT lat, lng, recorded_at FROM medic_last_location WHERE event_id = $1 AND medic_id = $2`,
+      [eventId, medicId],
+    );
+    const row = rows[0];
+    if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lng)) return null;
+    const recordedAt = new Date(row.recorded_at).getTime();
+    if (!Number.isFinite(recordedAt) || Date.now() - recordedAt > FIX_FRESHNESS_MS) return null;
+    return { lat: row.lat, lng: row.lng };
+  }
+}
+
+/** Incident messages are text-first; give the non-text kinds a readable line. */
+function mirroredText(message: EventMessage): string {
+  if (message.text?.trim()) return message.text.trim();
+  if (message.kind === "voice") return message.transcript?.trim() || "🎤 Voice message";
+  if (message.kind === "image") return "📷 Photo";
+  if (message.kind === "location" && message.location) {
+    const { lat, lng, address } = message.location;
+    return address?.trim() || `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+  return "";
 }
 
 interface InsertInput {

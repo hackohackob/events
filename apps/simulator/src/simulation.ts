@@ -1,6 +1,52 @@
 // Simulation engine: manages entities and their movement
 
+import { VEHICLE_TYPES, VEHICLE_TYPE_META, type VehicleType } from '@events/contracts'
+
 export type EntityRole = 'medic' | 'participant'
+
+export { VEHICLE_TYPES, VEHICLE_TYPE_META }
+export type { VehicleType }
+
+/**
+ * Ground speed a simulated medic moves at, per vehicle (m/s), as a
+ * [cruise, dash] range. These are what a medic actually averages on mixed race
+ * terrain — not top speeds — so the positions the backend receives make the
+ * closest-medic ranking behave like a real event.
+ */
+export const VEHICLE_SPEED_MS: Record<VehicleType, [number, number]> = {
+  foot: [1.0, 1.8],
+  bike: [2.5, 4.5],
+  'e-bike': [3.5, 6.0],
+  'e-motorcycle': [5.0, 9.0],
+  motorcycle: [6.0, 11.0],
+  atv: [4.5, 8.5],
+  car: [7.0, 14.0],
+  'offroad-car': [6.0, 12.0],
+  ambulance: [7.0, 13.0],
+  'offroad-ambulance': [5.5, 10.0],
+}
+
+/** A speed drawn from the vehicle's own range — used on create and on change. */
+export function speedForVehicle(vehicle: VehicleType): number {
+  const [min, max] = VEHICLE_SPEED_MS[vehicle] ?? VEHICLE_SPEED_MS.foot
+  return rand(min, max)
+}
+
+export type RouteProfile = 'foot' | 'mtb' | 'car' | 'rescue_4x4'
+
+/** Which network each vehicle rides — mirrors the backend's vehicle-profiles.ts. */
+export const VEHICLE_DEFAULT_PROFILE: Record<VehicleType, RouteProfile> = {
+  foot: 'foot',
+  bike: 'mtb',
+  'e-bike': 'mtb',
+  'e-motorcycle': 'mtb',
+  motorcycle: 'mtb',
+  atv: 'rescue_4x4',
+  car: 'car',
+  'offroad-car': 'rescue_4x4',
+  ambulance: 'car',
+  'offroad-ambulance': 'rescue_4x4',
+}
 
 export interface RoutePoint {
   lat: number
@@ -40,6 +86,7 @@ export interface SimEntity {
   sendChannel?: SendChannel    // medic transport (ws | http)
   status?: MedicStatus         // live medic status
   assignedIncidentId?: string  // incident this medic is responding to
+  vehicleType?: VehicleType    // what this medic travels with (drives speed + ETAs)
 }
 
 // Sofia city center + trails
@@ -73,15 +120,36 @@ function randomName(role: EntityRole, index: number): string {
   return runnerNames[index % runnerNames.length]
 }
 
-export function createMedic(index: number, name?: string): SimEntity {
+/**
+ * The mix a spawned team gets, cycled by index. Deliberately not uniform over
+ * all ten types: a real race team is mostly foot and bikes with a couple of
+ * vehicles, and that spread is what makes the closest-medic ranking interesting
+ * to look at (a car 4 km away beating a walker 800 m away across a ridge).
+ */
+const MEDIC_VEHICLE_ROTATION: VehicleType[] = [
+  'foot',
+  'bike',
+  'ambulance',
+  'e-bike',
+  'foot',
+  'offroad-car',
+  'motorcycle',
+  'atv',
+  'foot',
+  'offroad-ambulance',
+]
+
+export function createMedic(index: number, name?: string, vehicleType?: VehicleType): SimEntity {
   const pos = randomNearby()
+  const vehicle = vehicleType ?? MEDIC_VEHICLE_ROTATION[index % MEDIC_VEHICLE_ROTATION.length]
   return {
     id: `sim-medic-${Date.now()}-${index}`,
     role: 'medic',
     name: name ?? randomName('medic', index),
     lat: pos.lat,
     lng: pos.lng,
-    speed: rand(0.5, 2.0),
+    vehicleType: vehicle,
+    speed: speedForVehicle(vehicle),
     heading: rand(0, 360),
     joined: false,
     color: MEDIC_COLORS[index % MEDIC_COLORS.length],

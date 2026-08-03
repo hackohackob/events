@@ -5,7 +5,10 @@ import * as Haptics from "expo-haptics";
 import { useNavStore } from "./nav-store";
 import { useLocationStatus } from "../debug/location-status";
 import { distanceMeters, formatDistance } from "./geo";
-import { PROFILE_META, PROFILE_ORDER } from "./surface";
+import { PROFILE_META, PROFILE_ORDER, VEHICLE_DEFAULT_PROFILE } from "./surface";
+import { useRosterStore } from "../security/roster-store";
+import { useSessionStore } from "../security/session-store";
+import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPE_META } from "@events/contracts";
 import type { RouteProfile } from "./types";
 
 const BOTTOM_BAR_HEIGHT = 60;
@@ -31,6 +34,12 @@ export function TransportSheet() {
   const cancel = useNavStore((s) => s.cancel);
   const loadingProfile = useNavStore((s) => (s.loading ? s.profile : null));
   const fix = useLocationStatus((s) => s.lastFix);
+  // The network my own vehicle rides — highlighted so the right choice is the
+  // obvious one, without taking the decision away from the medic.
+  const myId = useSessionStore((s) => s.userId);
+  const myVehicle =
+    useRosterStore((s) => s.medics.find((m) => m.id === myId)?.vehicleType) ?? DEFAULT_VEHICLE_TYPE;
+  const suggested = VEHICLE_DEFAULT_PROFILE[myVehicle];
 
   if (phase !== "transport" || !destination) return null;
 
@@ -60,15 +69,25 @@ export function TransportSheet() {
 
       {!fix ? <Text style={styles.warn}>Waiting for GPS fix…</Text> : null}
 
-      <Text style={styles.sectionTitle}>CHOOSE MODE OF TRANSPORTATION</Text>
+      <Text style={styles.sectionTitle}>
+        CHOOSE MODE OF TRANSPORTATION
+        <Text style={styles.sectionTitleHint}>
+          {"   "}you're on {VEHICLE_TYPE_META[myVehicle].icon} {VEHICLE_TYPE_META[myVehicle].label.toLowerCase()}
+        </Text>
+      </Text>
 
       <View style={styles.row}>
         {PROFILE_ORDER.map((profile) => {
           const busy = loadingProfile === profile;
+          const isSuggested = profile === suggested;
           return (
             <Pressable
               key={profile}
-              style={({ pressed }) => [styles.choice, pressed && styles.choicePressed]}
+              style={({ pressed }) => [
+                styles.choice,
+                isSuggested && styles.choiceSuggested,
+                pressed && styles.choicePressed,
+              ]}
               onPress={() => choose(profile)}
               disabled={!fix}
             >
@@ -77,7 +96,9 @@ export function TransportSheet() {
               ) : (
                 <ProfileIcon profile={profile} active={false} />
               )}
-              <Text style={styles.choiceLabel}>{PROFILE_META[profile].label}</Text>
+              <Text style={[styles.choiceLabel, isSuggested && styles.choiceLabelSuggested]}>
+                {PROFILE_META[profile].label}
+              </Text>
             </Pressable>
           );
         })}
@@ -135,6 +156,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     marginBottom: 9,
   },
+  sectionTitleHint: { color: "#4b5c73", fontWeight: "700", letterSpacing: 0.2 },
   row: { flexDirection: "row", gap: 9 },
   choice: {
     flex: 1,
@@ -147,6 +169,8 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   choicePressed: { backgroundColor: "#16243c", borderColor: "rgba(52,211,153,0.5)" },
+  choiceSuggested: { borderColor: "rgba(52,211,153,0.55)", backgroundColor: "rgba(34,197,94,0.09)" },
   choiceLabel: { color: "#dbe7f5", fontSize: 12.5, fontWeight: "800" },
+  choiceLabelSuggested: { color: "#6ee7b7" },
   glyph: { fontSize: 20 },
 });

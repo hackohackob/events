@@ -37,6 +37,8 @@ import { uploadIncidentPhoto, uploadIncidentVoice } from "./incident-api";
 import { debugLog } from "../debug/debug-log";
 import { TranscriptText } from "../ui/TranscriptText";
 import { useIncidentReadsStore } from "./incident-reads-store";
+import { ClosestMedicsPanel } from "./ClosestMedicsPanel";
+import { fetchClosestMedics, type ClosestMedic } from "./closest-medics-api";
 
 const TYPE_META: Record<string, { label: string; icon: string }> = {
   medical: { label: "Medical", icon: "🏥" },
@@ -114,6 +116,10 @@ interface Props {
   /** Select an exit point: draws its path/direct line + opens the preview card
    *  outside the drawer. Null clears the selection. */
   onSelectAsphaltPoint?: (point: AsphaltPoint | null) => void;
+  /** Show (or clear with null) the colour-coded closest-medic routes on the map. */
+  onClosestMedics?: (medics: ClosestMedic[] | null) => void;
+  /** Emphasise one medic's route; null returns every route to equal weight. */
+  onSelectClosestMedic?: (medic: ClosestMedic | null) => void;
 }
 
 /** Drawable walk path from the incident to an exit point. */
@@ -205,7 +211,7 @@ export function exitLabel(point: AsphaltPoint): string {
  * with coordinator assign/unassign, live team chat, and the close/archive flow.
  * Rendered inside the map screen's marker BottomSheet.
  */
-export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onAsphaltPins, onSelectAsphaltPoint }: Props) {
+export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpenPhoto, onMoveLocation, onAsphaltPins, onSelectAsphaltPoint, onClosestMedics, onSelectClosestMedic }: Props) {
   const myId = useSessionStore((s) => s.userId);
   const amCoordinator = useRosterStore((s) => s.amCoordinator);
   const rosterMedics = useRosterStore((s) => s.medics);
@@ -232,11 +238,22 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
 
   const [selectedExit, setSelectedExit] = useState<number | null>(null);
 
-  // Never leave orphaned exit pins / paths on the map when this sheet goes away.
+  // ── Closest medic (in-drawer dispatch view) ───────────────────────────────
+  const [closestMedics, setClosestMedics] = useState<ClosestMedic[]>([]);
+  const [closestUnlocated, setClosestUnlocated] = useState(0);
+  const [closestLoading, setClosestLoading] = useState(false);
+  const [closestView, setClosestView] = useState(false);
+  const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null);
+  const [assigningClosestId, setAssigningClosestId] = useState<string | null>(null);
+
+  // Never leave orphaned exit pins / medic routes on the map when this sheet
+  // goes away.
   useEffect(() => {
     return () => {
       onAsphaltPins?.(null);
       onSelectAsphaltPoint?.(null);
+      onClosestMedics?.(null);
+      onSelectClosestMedic?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -291,6 +308,68 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
       Alert.alert("No asphalt found", "Couldn't find a reachable paved road around this incident.");
     } finally {
       setAsphaltLoading(false);
+    }
+  };
+
+  const closeClosestView = () => {
+    setClosestView(false);
+    setSelectedMedicId(null);
+    onSelectClosestMedic?.(null);
+    onClosestMedics?.(null);
+  };
+
+  /**
+   * Always re-routes rather than reusing a cached answer: medics move, and a
+   * stale "4 min" is worse than a two-second wait. The view opens immediately
+   * with a spinner so the map can already reframe.
+   */
+  const loadClosestMedics = async () => {
+    if (closestLoading) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setClosestView(true);
+    setClosestLoading(true);
+    // Announce the view before the routes exist: the parent locks the drawer to
+    // its single half-open snap now, so it can't be expanded and then yanked
+    // back down the moment the results land.
+    onClosestMedics?.([]);
+    try {
+      const res = await fetchClosestMedics(incident.lat, incident.lng, { incidentId: incident.id });
+      setClosestMedics(res.medics);
+      setClosestUnlocated(res.unlocatedCount);
+      onClosestMedics?.(res.medics);
+    } catch (err) {
+      debugLog("api", "error", "closest medics failed", String(err));
+      setClosestMedics([]);
+      Alert.alert("Couldn't rank medics", "The routing service did not answer. Please try again.");
+    } finally {
+      setClosestLoading(false);
+    }
+  };
+
+  const toggleClosestMedic = (medic: ClosestMedic) => {
+    const next = selectedMedicId === medic.medicId ? null : medic.medicId;
+    setSelectedMedicId(next);
+    onSelectClosestMedic?.(next ? medic : null);
+  };
+
+  const assignClosestMedic = async (medic: ClosestMedic) => {
+    if (assigningClosestId) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setAssigningClosestId(medic.medicId);
+    try {
+      await assignIncidentResponder(incident.id, medic.medicId);
+      updateRespondersLocally([...responders, medic.medicId]);
+      // Reflect it in the list rather than closing: dispatching a second medic
+      // to the same incident is normal, and the ranking is still what you need.
+      setClosestMedics((prev) =>
+        prev.map((m) => (m.medicId === medic.medicId ? { ...m, assigned: true } : m)),
+      );
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      debugLog("api", "error", "assign closest medic failed", String(err));
+      Alert.alert("Assign failed", `Could not assign ${medic.name}. Please try again.`);
+    } finally {
+      setAssigningClosestId(null);
     }
   };
 
@@ -587,6 +666,24 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
     ]);
   };
 
+  // ── In-drawer "closest medic" view: the five fastest responders, mirrored as
+  //    colour-matched routes on the map above the drawer. ──
+  if (closestView) {
+    return (
+      <ClosestMedicsPanel
+        medics={closestMedics}
+        unlocatedCount={closestUnlocated}
+        loading={closestLoading}
+        assigningId={assigningClosestId}
+        selectedId={selectedMedicId}
+        onBack={closeClosestView}
+        onClose={onClose}
+        onSelect={toggleClosestMedic}
+        onAssign={(medic) => void assignClosestMedic(medic)}
+      />
+    );
+  }
+
   // ── In-drawer "exit points" view: numbered asphalt access points, mirrored
   //    as numbered pins on the map above the drawer. ──
   if (asphaltView && asphaltPoints) {
@@ -741,9 +838,14 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
 
   return (
     <View style={styles.root}>
-      {/* ── Hero header ── */}
+      {/* ── Hero header ──
+          One identity line and one meta line. The category used to be repeated
+          as a second full-width block below; it lives here now, next to the
+          status and the distance, so the top of the sheet is a single glance
+          instead of three competing ones. */}
       <View style={styles.header}>
-        <View style={[styles.heroBadge, { borderColor: `${status.color}55` }]}>
+        <View style={[styles.statusRail, { backgroundColor: status.color }]} />
+        <View style={[styles.heroBadge, { borderColor: `${status.color}55`, backgroundColor: `${status.color}12` }]}>
           <Text style={styles.heroIcon}>{type.icon}</Text>
         </View>
         <View style={styles.headerText}>
@@ -753,9 +855,11 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
               <View style={[styles.statusDot, { backgroundColor: status.color }]} />
               <Text style={[styles.statusPillText, { color: status.color }]}>{status.label}</Text>
             </View>
-            {distanceKm != null ? (
-              <Text style={styles.headerMeta} numberOfLines={1}>{distanceKm.toFixed(1)} km away</Text>
-            ) : null}
+            <Text style={styles.headerMeta} numberOfLines={1}>
+              {[type.label, distanceKm != null ? `${distanceKm.toFixed(1)} km` : null, reportedAgo]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
           </View>
         </View>
         {/* Tap to start, tap again (or tap the red bar) to send — straight into chat. */}
@@ -795,91 +899,117 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
           />
         ) : null}
 
-        {/* Coordinator-only: relocate the incident pin (logged in the timeline). */}
-        {amCoordinator && !isClosed && onMoveLocation ? (
-          <Pressable
-            style={styles.moveLocationBtn}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onMoveLocation();
-            }}
-          >
-            <Feather name="move" size={14} color="#7dd3fc" />
-            <Text style={styles.moveLocationBtnText}>Move location (tap the new spot)</Text>
-          </Pressable>
-        ) : null}
-
-        {/* ── Closest asphalt: opens the in-drawer exit-points view ── */}
+        {/* ── Dispatch pair: who can get here, and where a vehicle can reach.
+            Split 50/50 — they answer the same question from two directions and
+            neither deserves to be the wider one. ── */}
         {!isClosed ? (
-          <Pressable style={styles.asphaltBtn} onPress={() => void loadClosestAsphalt()} disabled={asphaltLoading}>
-            {asphaltLoading ? (
-              <ActivityIndicator size="small" color="#a5b4fc" />
-            ) : (
-              <Text style={styles.asphaltBtnIcon} allowFontScaling={false}>🛣</Text>
-            )}
-            <Text style={styles.asphaltBtnText}>
-              {asphaltLoading ? "Scanning roads…" : "Closest asphalt"}
-            </Text>
-            <Feather name="chevron-right" size={15} color="#a5b4fc" />
-          </Pressable>
+          <View style={styles.dispatchRow}>
+            <Pressable
+              style={[styles.dispatchBtn, styles.dispatchMedic]}
+              onPress={() => void loadClosestMedics()}
+              disabled={closestLoading}
+            >
+              {closestLoading ? (
+                <ActivityIndicator size="small" color="#6ee7b7" />
+              ) : (
+                <Text style={styles.dispatchIcon} allowFontScaling={false}>🚑</Text>
+              )}
+              <Text style={[styles.dispatchLabel, styles.dispatchLabelMedic]} numberOfLines={1}>
+                Closest medic
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.dispatchBtn, styles.dispatchAsphalt]}
+              onPress={() => void loadClosestAsphalt()}
+              disabled={asphaltLoading}
+            >
+              {asphaltLoading ? (
+                <ActivityIndicator size="small" color="#a5b4fc" />
+              ) : (
+                <Text style={styles.dispatchIcon} allowFontScaling={false}>🛣</Text>
+              )}
+              <Text style={[styles.dispatchLabel, styles.dispatchLabelAsphalt]} numberOfLines={1}>
+                Closest asphalt
+              </Text>
+            </Pressable>
+          </View>
         ) : null}
 
-        {/* ── Category (prominent) + who reported it ── */}
-        <View style={styles.reportBlock}>
-          <View style={styles.categoryRow}>
-            <Text style={styles.categoryIcon}>{type.icon}</Text>
-            <Text style={styles.categoryBig} numberOfLines={2}>{type.label}</Text>
-          </View>
-          <View style={styles.reportedRow}>
-            <Feather name="user" size={12} color="#64748b" />
-            <Text style={styles.reportedByText} numberOfLines={1}>
-              Reported by {incident.reportedBy ?? "Unknown"} ({reporterRole(incident.createdBy)})
-              {reportedAgo ? ` · ${reportedAgo}` : ""}
-            </Text>
-          </View>
-
-          {/* Contact + patient medical — compact, tap a number to call. */}
-          {(incident.reporterPhone || incident.patientPhone || incident.patientBib ||
-            incident.patientName || incident.allergies || incident.medications ||
-            incident.bloodType || incident.conditions) && (
-            <View style={styles.contactBlock}>
-              {incident.reporterPhone ? (
-                <Pressable style={styles.phoneRow} onPress={() => void Linking.openURL(`tel:${incident.reporterPhone}`)}>
-                  <Feather name="phone" size={12} color="#34d399" />
-                  <Text style={styles.phoneText}>Sender {incident.reporterPhone}</Text>
+        {/* ── Patient card. Only rendered when there is something clinical to
+            say — the medical chips are the reason a medic opens this sheet, so
+            they sit above everything else and never behind a scroll. ── */}
+        {(incident.patientName || incident.patientBib || incident.patientPhone ||
+          incident.allergies || incident.medications || incident.bloodType || incident.conditions) ? (
+          <View style={styles.patientCard}>
+            <View style={styles.patientHeadRow}>
+              <Feather name="user" size={12} color="#fbbf24" />
+              <Text style={styles.patientName} numberOfLines={1}>
+                {incident.patientName ?? "Patient"}
+                {incident.patientBib ? <Text style={styles.patientBib}>  #{incident.patientBib}</Text> : null}
+              </Text>
+              {incident.patientPhone ? (
+                <Pressable
+                  style={styles.callPill}
+                  onPress={() => void Linking.openURL(`tel:${incident.patientPhone}`)}
+                  hitSlop={6}
+                >
+                  <Feather name="phone" size={11} color="#04121f" />
+                  <Text style={styles.callPillText} allowFontScaling={false}>Call</Text>
                 </Pressable>
               ) : null}
-              {(incident.patientName || incident.patientBib || incident.patientPhone) ? (
-                <View style={styles.patientRow}>
-                  <Feather name="alert-triangle" size={12} color="#f59e0b" />
-                  <Text style={styles.patientText} numberOfLines={1}>
-                    Patient {incident.patientName ?? ""}{incident.patientBib ? ` #${incident.patientBib}` : ""}
-                  </Text>
-                  {incident.patientPhone ? (
-                    <Pressable onPress={() => void Linking.openURL(`tel:${incident.patientPhone}`)}>
-                      <Text style={styles.phoneText}>{incident.patientPhone}</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ) : null}
-              {(incident.allergies || incident.medications || incident.bloodType || incident.conditions) ? (
-                <View style={styles.medChipRow}>
-                  {incident.bloodType ? (
-                    <Text style={[styles.medChip, styles.bloodChip]} numberOfLines={1}>🩸 {incident.bloodType}</Text>
-                  ) : null}
-                  {incident.allergies ? (
-                    <Text style={[styles.medChip, styles.allergyChip]} numberOfLines={1}>⚠ {incident.allergies}</Text>
-                  ) : null}
-                  {incident.medications ? (
-                    <Text style={[styles.medChip, styles.medsChip]} numberOfLines={1}>💊 {incident.medications}</Text>
-                  ) : null}
-                  {incident.conditions ? (
-                    <Text style={[styles.medChip, styles.conditionChip]} numberOfLines={1}>🩺 {incident.conditions}</Text>
-                  ) : null}
-                </View>
-              ) : null}
             </View>
-          )}
+            {(incident.allergies || incident.medications || incident.bloodType || incident.conditions) ? (
+              <View style={styles.medChipRow}>
+                {incident.bloodType ? (
+                  <Text style={[styles.medChip, styles.bloodChip]} numberOfLines={1}>🩸 {incident.bloodType}</Text>
+                ) : null}
+                {incident.allergies ? (
+                  <Text style={[styles.medChip, styles.allergyChip]} numberOfLines={1}>⚠ {incident.allergies}</Text>
+                ) : null}
+                {incident.medications ? (
+                  <Text style={[styles.medChip, styles.medsChip]} numberOfLines={1}>💊 {incident.medications}</Text>
+                ) : null}
+                {incident.conditions ? (
+                  <Text style={[styles.medChip, styles.conditionChip]} numberOfLines={1}>🩺 {incident.conditions}</Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* ── Provenance: one quiet line, with a call pill when we have a
+            number for whoever raised it. ── */}
+        <View style={styles.reporterRow}>
+          <Feather name="radio" size={11} color="#5b6b80" />
+          <Text style={styles.reporterText} numberOfLines={1}>
+            {incident.reportedBy ?? "Unknown"} ({reporterRole(incident.createdBy)})
+          </Text>
+          {incident.reporterPhone ? (
+            <Pressable
+              style={styles.reporterCall}
+              onPress={() => void Linking.openURL(`tel:${incident.reporterPhone}`)}
+              hitSlop={6}
+            >
+              <Feather name="phone" size={10.5} color="#34d399" />
+              <Text style={styles.reporterCallText} allowFontScaling={false}>{incident.reporterPhone}</Text>
+            </Pressable>
+          ) : null}
+          {/* Coordinator-only: relocate the pin. A quiet affordance at the end
+              of the provenance line rather than a full-width button — it is a
+              correction, not an action anyone takes on most incidents. */}
+          {amCoordinator && !isClosed && onMoveLocation ? (
+            <Pressable
+              style={styles.moveChip}
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onMoveLocation();
+              }}
+              hitSlop={6}
+            >
+              <Feather name="move" size={10.5} color="#7dd3fc" />
+              <Text style={styles.moveChipText} allowFontScaling={false}>Move</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* ── Notes (may include the patient's medical info, then the
@@ -1073,6 +1203,11 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                       ]}
                     >
                       {!mine ? <Text style={styles.bubbleAuthor}>{m.authorName}</Text> : null}
+                      {/* Copied in from the team chat because its author was
+                          standing on this incident when they said it. */}
+                      {(m.meta as { mirroredFrom?: string } | undefined)?.mirroredFrom === "event-chat" ? (
+                        <Text style={styles.bubbleMirrorTag}>📻 FROM TEAM CHAT</Text>
+                      ) : null}
                       {m.audioUrl ? (
                         <>
                           <Pressable style={styles.voiceRow} onPress={() => toggleVoicePlayback(m.id, m.audioUrl!)}>
@@ -1219,33 +1354,34 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
 const styles = StyleSheet.create({
   root: { flex: 1 },
 
-  // Header
-  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingBottom: 12 },
+  // Header — tightened: a 44px badge, one title line, one meta line.
+  header: { flexDirection: "row", alignItems: "center", gap: 11, paddingLeft: 14, paddingRight: 16, paddingBottom: 11 },
+  // Vertical status accent: colour without spending a row on it.
+  statusRail: { width: 3, height: 40, borderRadius: 2, opacity: 0.9 },
   heroBadge: {
-    width: 50,
-    height: 50,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 15,
     borderWidth: 1.5,
-    backgroundColor: "rgba(255,255,255,0.04)",
     alignItems: "center",
     justifyContent: "center",
   },
-  heroIcon: { fontSize: 24 },
-  headerText: { flex: 1, minWidth: 0, gap: 5 },
-  title: { color: "#f4f8ff", fontSize: 19, fontWeight: "900", letterSpacing: 0.2 },
-  headerChips: { flexDirection: "row", alignItems: "center", gap: 8 },
+  heroIcon: { fontSize: 21 },
+  headerText: { flex: 1, minWidth: 0, gap: 4 },
+  title: { color: "#f4f8ff", fontSize: 18, fontWeight: "900", letterSpacing: 0.2 },
+  headerChips: { flexDirection: "row", alignItems: "center", gap: 7 },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 4.5,
     borderRadius: 999,
     borderWidth: 1,
-    paddingVertical: 3,
-    paddingHorizontal: 9,
+    paddingVertical: 2.5,
+    paddingHorizontal: 8,
   },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusPillText: { fontSize: 11, fontWeight: "900", letterSpacing: 0.3 },
-  headerMeta: { color: "#8da3bd", fontSize: 12, fontWeight: "700", flexShrink: 1 },
+  statusPillText: { fontSize: 10.5, fontWeight: "900", letterSpacing: 0.3 },
+  headerMeta: { color: "#8da3bd", fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
   closeBtn: {
     width: 32,
     height: 32,
@@ -1287,46 +1423,73 @@ const styles = StyleSheet.create({
   // bar at the 42% snap, so without it the archive button gets clipped.
   bodyContent: { paddingHorizontal: 18, paddingBottom: 120, gap: 16 },
 
-  // Category + reporter block
-  reportBlock: {
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderRadius: 16,
+  // Dispatch pair (closest medic | closest asphalt), equal halves.
+  dispatchRow: { flexDirection: "row", gap: 9, marginTop: 10 },
+  dispatchBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.1)",
-    padding: 14,
+  },
+  dispatchMedic: { borderColor: "rgba(52,211,153,0.34)", backgroundColor: "rgba(34,197,94,0.09)" },
+  dispatchAsphalt: { borderColor: "rgba(129,140,248,0.32)", backgroundColor: "rgba(99,102,241,0.09)" },
+  dispatchIcon: { fontSize: 15, lineHeight: 18, includeFontPadding: false },
+  dispatchLabel: { fontSize: 12.5, fontWeight: "800", flexShrink: 1 },
+  dispatchLabelMedic: { color: "#6ee7b7" },
+  dispatchLabelAsphalt: { color: "#a5b4fc" },
+
+  // Patient card — the clinical picture, above everything else.
+  patientCard: {
+    backgroundColor: "rgba(245,158,11,0.07)",
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.24)",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     gap: 8,
   },
-  categoryRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  categoryIcon: { fontSize: 24 },
-  categoryBig: { flex: 1, color: "#f4f8ff", fontSize: 20, fontWeight: "900", letterSpacing: 0.2 },
-  reportedRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  reportedByText: { flex: 1, color: "#8da3bd", fontSize: 12.5, fontWeight: "700" },
-  contactBlock: { marginTop: 8, gap: 5 },
-  phoneRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  phoneText: { color: "#34d399", fontSize: 12.5, fontWeight: "800" },
-  patientRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  patientText: { color: "#e2b04a", fontSize: 12.5, fontWeight: "800", flexShrink: 1 },
-  medChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 1 },
+  patientHeadRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  patientName: { flex: 1, color: "#fde68a", fontSize: 14, fontWeight: "900" },
+  patientBib: { color: "#d6bd7a", fontSize: 12.5, fontWeight: "800" },
+  callPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#34d399",
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  callPillText: { color: "#04121f", fontSize: 11, fontWeight: "900" },
+  medChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+
+  // Provenance line
+  reporterRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 2 },
+  reporterText: { color: "#7d8ea4", fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
+  reporterCall: { flexDirection: "row", alignItems: "center", gap: 4 },
+  reporterCallText: { color: "#34d399", fontSize: 11.5, fontWeight: "800" },
+  moveChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: "auto",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.28)",
+    backgroundColor: "rgba(56,189,248,0.08)",
+    paddingVertical: 3.5,
+    paddingHorizontal: 9,
+  },
+  moveChipText: { color: "#7dd3fc", fontSize: 11, fontWeight: "800" },
   medChip: { fontSize: 11.5, fontWeight: "700", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, overflow: "hidden", maxWidth: "100%" },
   allergyChip: { backgroundColor: "rgba(239,68,68,0.16)", color: "#fca5a5" },
   medsChip: { backgroundColor: "rgba(168,85,247,0.16)", color: "#c4b5fd" },
   bloodChip: { backgroundColor: "rgba(239,68,68,0.22)", color: "#fca5a5" },
   conditionChip: { backgroundColor: "rgba(245,158,11,0.16)", color: "#fcd34d" },
-
-  // Meta strip (legacy)
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.1)",
-    paddingVertical: 10,
-  },
-  metaCell: { flex: 1, alignItems: "center", gap: 3, paddingHorizontal: 6 },
-  metaDivider: { width: 1, backgroundColor: "rgba(148,163,184,0.12)", marginVertical: 4 },
-  metaValue: { color: "#e8eef7", fontSize: 12.5, fontWeight: "800" },
-  metaLabel: { color: "#64748b", fontSize: 8.5, fontWeight: "900", letterSpacing: 1 },
 
   // Sections
   section: { gap: 8 },
@@ -1463,6 +1626,7 @@ const styles = StyleSheet.create({
   bubbleMine: { alignSelf: "flex-end", backgroundColor: "rgba(34,197,94,0.16)", borderTopRightRadius: 4 },
   bubbleOther: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.05)", borderTopLeftRadius: 4 },
   bubbleAuthor: { color: "#93c5fd", fontSize: 10.5, fontWeight: "900", marginBottom: 2 },
+  bubbleMirrorTag: { color: "#7dd3fc", fontSize: 9, fontWeight: "900", letterSpacing: 0.6, marginBottom: 3 },
   bubbleText: { color: "#dbe5f1", fontSize: 13, lineHeight: 18 },
   chatPhoto: { width: 180, height: 135, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.05)" },
   bubbleTime: { color: "#5b6b80", fontSize: 9.5, fontWeight: "700", marginTop: 3, alignSelf: "flex-end" },
@@ -1539,35 +1703,6 @@ const styles = StyleSheet.create({
   },
   archiveText: { color: "#94a3b8", fontSize: 13, fontWeight: "800" },
 
-  moveLocationBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginTop: 10,
-    paddingVertical: 11,
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: "rgba(56,189,248,0.28)",
-    backgroundColor: "rgba(56,189,248,0.08)",
-  },
-  moveLocationBtnText: { color: "#7dd3fc", fontSize: 13, fontWeight: "800" },
-
-  // Closest asphalt
-  asphaltBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginTop: 10,
-    paddingVertical: 11,
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: "rgba(129,140,248,0.3)",
-    backgroundColor: "rgba(99,102,241,0.09)",
-  },
-  asphaltBtnIcon: { fontSize: 14, lineHeight: 17, includeFontPadding: false },
-  asphaltBtnText: { color: "#a5b4fc", fontSize: 13, fontWeight: "800" },
   // ── In-drawer exit-points view ──
   asphaltViewHeader: {
     flexDirection: "row",

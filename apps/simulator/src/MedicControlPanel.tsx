@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   X, Gauge, Crosshair, Pause, Play, WifiOff, Wifi, Navigation, Flag,
-  Route as RouteIcon, AlertTriangle, MessageSquare, Trash2, RefreshCw, Send, MapPin, Activity, Radio,
+  Route as RouteIcon, AlertTriangle, MessageSquare, Trash2, RefreshCw, Send, MapPin, Activity, Radio, Truck,
 } from 'lucide-react'
-import type { SimEntity, MedicStatus, RouteMode } from './simulation'
+import {
+  VEHICLE_SPEED_MS, VEHICLE_TYPE_META, VEHICLE_TYPES,
+  type SimEntity, type MedicStatus, type RouteMode, type VehicleType,
+} from './simulation'
 import type { SimIncident, Track } from './api'
 
 export type MapMode = null | { kind: 'sendHere' | 'addWaypoint' | 'report'; id: string }
@@ -16,6 +19,7 @@ interface Props {
   onClose: () => void
   onPatch: (patch: Partial<SimEntity>) => void
   onStatus: (status: MedicStatus) => void
+  onVehicle: (vehicleType: VehicleType) => void
   onSetMapMode: (m: MapMode) => void
   onSendToIncident: (incident: SimIncident) => void
   onFollowTrack: (trackId: string, mode: RouteMode, dir: 1 | -1) => void
@@ -80,6 +84,9 @@ export function MedicControlPanel(props: Props) {
             {medic.offline && <Tag color="#64748b" icon={<WifiOff size={9} />}>offline</Tag>}
             {medic.paused && <Tag color="#f59e0b" icon={<Pause size={9} />}>frozen</Tag>}
             <Tag color="#60a5fa" icon={<Radio size={9} />}>{(medic.sendChannel ?? 'ws').toUpperCase()}</Tag>
+            <Tag color="#7dd3fc">
+              {VEHICLE_TYPE_META[medic.vehicleType ?? 'foot'].icon} {VEHICLE_TYPE_META[medic.vehicleType ?? 'foot'].label}
+            </Tag>
           </div>
         </div>
         <button onClick={onClose} style={iconBtn}><X size={16} color="#94a3b8" /></button>
@@ -111,6 +118,33 @@ export function MedicControlPanel(props: Props) {
                 color: medic.status === s ? STATUS_META[s].color : '#94a3b8',
               }}>{STATUS_META[s].label}</button>
             ))}
+          </div>
+        </Section>
+
+        {/* Vehicle — pushed to the real roster, so the backend's closest-medic
+            ETAs are computed on the same vehicle this medic is simulated at. */}
+        <Section title="Vehicle" icon={<Truck size={12} />}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {VEHICLE_TYPES.map(v => {
+              const active = (medic.vehicleType ?? 'foot') === v
+              return (
+                <button key={v} onClick={() => props.onVehicle(v)} title={VEHICLE_TYPE_META[v].label} style={{
+                  display: 'flex', alignItems: 'center', gap: 5, padding: '6px 9px', borderRadius: 999, cursor: 'pointer',
+                  fontSize: 10.5, fontWeight: 700,
+                  border: `1px solid ${active ? accent : 'rgba(148,163,184,0.14)'}`,
+                  background: active ? `${accent}20` : 'rgba(255,255,255,0.03)',
+                  color: active ? accent : '#94a3b8',
+                }}>
+                  <span style={{ fontSize: 12 }}>{VEHICLE_TYPE_META[v].icon}</span>
+                  {VEHICLE_TYPE_META[v].label}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: 10, color: '#475569', marginTop: 7 }}>
+            Typical {VEHICLE_SPEED_MS[medic.vehicleType ?? 'foot'][0].toFixed(1)}–
+            {VEHICLE_SPEED_MS[medic.vehicleType ?? 'foot'][1].toFixed(1)} m/s. Picking a vehicle
+            re-rolls the speed below; the slider still overrides it.
           </div>
         </Section>
 

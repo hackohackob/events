@@ -58,7 +58,9 @@ interface SettingsState {
 }
 
 const DEFAULTS = {
-  locationIntervalMs: 60_000,
+  // 3 minutes is the battery/liveness balance a full race day needs; medics who
+  // want a tighter picture can still pick 30 s in Settings.
+  locationIntervalMs: 180_000,
   // Off by default — overlapping tracks draw on top of each other unless the
   // user explicitly asks for the side-by-side spread.
   trackOffsetEnabled: false,

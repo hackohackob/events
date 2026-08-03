@@ -65,25 +65,45 @@ export class EventsController {
     return this.eventsService.listPoisForEvent(user.eventId, wantsArchived && user.role === "coordinator");
   }
 
+  /** Points are the team's board — participants read them, never edit them. */
+  private assertPoiWriteAccess(user: RequestUser): void {
+    if (user.role === "runner" || user.role === "spectator") {
+      throw new ForbiddenException("Points of interest are read-only for participants");
+    }
+  }
+
   @Post("pois")
   createPoi(
     @CurrentUser() user: RequestUser,
     @Body() body: { lat: number; lng: number; type?: string; name?: string; description?: string; icon?: string },
   ) {
+    this.assertPoiWriteAccess(user);
     return this.eventsService.createPoi(user.eventId, body);
   }
 
   @Delete("pois/:poiId")
   archivePoi(@CurrentUser() user: RequestUser, @Param("poiId") poiId: string) {
+    this.assertPoiWriteAccess(user);
     return this.eventsService.archivePoi(user.eventId, poiId);
   }
 
   @Patch(":id/pois/:poiId")
   updatePoi(
+    @CurrentUser() user: RequestUser,
     @Param("id") id: string,
     @Param("poiId") poiId: string,
-    @Body() body: { name?: string; description?: string; lat?: number; lng?: number },
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      lat?: number;
+      lng?: number;
+      type?: string;
+      icon?: string;
+      archived?: boolean;
+    },
   ) {
+    this.assertPoiWriteAccess(user);
     return this.eventsService.updatePoi(id, poiId, body);
   }
 

@@ -6,6 +6,7 @@ import { AddMedicDto } from "./dto/add-medic.dto";
 import { AssignDestinationDto } from "./dto/assign-destination.dto";
 import { BroadcastDto } from "./dto/broadcast.dto";
 import { UpdateMedicStatusDto } from "./dto/update-medic-status.dto";
+import { UpdateMedicVehicleDto } from "./dto/update-medic-vehicle.dto";
 import { SetMedicRouteDto } from "./dto/set-medic-route.dto";
 import { RegisterParticipantDto } from "./dto/register-participant.dto";
 import { MedicsService } from "./medics.service";
@@ -117,6 +118,23 @@ export class MedicsController {
     @Body() body: UpdateMedicStatusDto,
   ) {
     return this.medicsService.updateStatus(eventId, medicId, body.status);
+  }
+
+  /** Change a medic's vehicle mid-event (coordinator for anyone, medic for self). */
+  @Patch("medics/:medicId/vehicle")
+  updateVehicle(
+    @CurrentUser() user: RequestUser,
+    @Param("eventId") eventId: string,
+    @Param("medicId") medicId: string,
+    @Body() body: UpdateMedicVehicleDto,
+  ) {
+    return this.medicsService.updateVehicleType(
+      eventId,
+      medicId,
+      body.vehicleType,
+      user.userId,
+      user.role === "coordinator",
+    );
   }
 
   @Post("broadcast")

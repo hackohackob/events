@@ -194,7 +194,9 @@ export class IncidentsService implements OnModuleInit {
     private readonly db: DbService,
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
-    private readonly eventChat: EventChatService,
+    // forwardRef: EventChatService mirrors nearby team-chat messages back onto
+    // incidents, so it injects this service in turn.
+    @Inject(forwardRef(() => EventChatService)) private readonly eventChat: EventChatService,
     // forwardRef: MedicsModule already imports IncidentsModule (its controller
     // needs IncidentsService), so the two modules reference each other.
     @Inject(forwardRef(() => MedicsService)) private readonly medicsService: MedicsService,
@@ -933,6 +935,44 @@ export class IncidentsService implements OnModuleInit {
     });
 
     return incident;
+  }
+
+  /** Medic ids already responding to an incident. Empty for an unknown id. */
+  async getResponders(eventId: string, incidentId: string): Promise<string[]> {
+    const { rows } = await this.db.query<{ responders: unknown }>(
+      `SELECT responders FROM incidents WHERE id = $1 AND event_id = $2`,
+      [incidentId, eventId],
+    );
+    const value = rows[0]?.responders;
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  }
+
+  /**
+   * Still-running incidents within `radiusMeters` of a point, closest first.
+   * Used to decide which incident chats a nearby medic's team-chat message
+   * belongs in.
+   */
+  async findActiveNear(
+    eventId: string,
+    lat: number,
+    lng: number,
+    radiusMeters: number,
+  ): Promise<Array<IncidentRecord & { distanceMeters: number }>> {
+    const { rows } = await this.db.query<IncidentRow>(
+      `SELECT *
+       FROM incidents
+       WHERE event_id = $1
+         AND status NOT IN ('resolved', 'closed', 'archived')`,
+      [eventId],
+    );
+
+    return rows
+      .map((row) => {
+        const incident = rowToRecord(row);
+        return { ...incident, distanceMeters: haversineMeters(lat, lng, incident.lat, incident.lng) };
+      })
+      .filter((incident) => incident.distanceMeters <= radiusMeters)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters);
   }
 
   async noteNearbyResponderArrivals(

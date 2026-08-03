@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { X, BatteryMedium, BatteryCharging, Navigation, MapPin, Crosshair, AlertCircle } from 'lucide-react'
-import type { MedicState } from '@events/contracts'
+import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPE_META, VEHICLE_TYPES, type MedicState, type VehicleType } from '@events/contracts'
 import type { LiveIncident } from '@/hooks/useLiveMap'
 
 const STATUS_STYLE: Record<string, { label: string; color: string }> = {
@@ -30,13 +30,15 @@ interface Props {
   onClose: () => void
   onAssignToIncident: (medicId: string, incidentId: string) => void
   onClearDestination: (medicId: string) => void
+  onChangeVehicle: (medicId: string, vehicleType: VehicleType) => void
 }
 
 /** Right-side detail drawer for a medic — status, telemetry, and dispatch actions. */
-export default function MedicDrawer({ medic, incidents, onClose, onAssignToIncident, onClearDestination }: Props) {
+export default function MedicDrawer({ medic, incidents, onClose, onAssignToIncident, onClearDestination, onChangeVehicle }: Props) {
   const [showAssign, setShowAssign] = useState(false)
   const st = STATUS_STYLE[medic.status] ?? STATUS_STYLE.available
   const openIncidents = incidents.filter(i => i.status !== 'resolved' && i.status !== 'closed')
+  const vehicle = medic.vehicleType ?? DEFAULT_VEHICLE_TYPE
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex flex-col" style={{ width: 'min(92vw, 400px)', background: 'rgba(8,15,28,0.99)', borderLeft: '1px solid rgba(148,163,184,0.12)', boxShadow: '-24px 0 80px rgba(0,0,0,0.6)' }}>
@@ -71,6 +73,22 @@ export default function MedicDrawer({ medic, incidents, onClose, onAssignToIncid
           <Stat icon={<Crosshair className="w-3.5 h-3.5" />} label="GPS" value={medic.accuracy != null ? `±${Math.round(medic.accuracy)} m` : '—'} />
           <Stat icon={<MapPin className="w-3.5 h-3.5" />} label="Position" value={`${medic.lat.toFixed(4)}, ${medic.lng.toFixed(4)}`} />
           <Stat icon={<Navigation className="w-3.5 h-3.5" />} label="Last seen" value={lastSeen(medic.lastSeenAt)} />
+        </div>
+
+        {/* Vehicle — editable live, because it decides every ETA we quote for
+            this medic and it changes mid-event (bike goes flat, car arrives). */}
+        <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.1)' }}>
+          <div className="text-[10px] font-bold tracking-widest mb-1.5" style={{ color: '#475569' }}>VEHICLE</div>
+          <select
+            value={vehicle}
+            onChange={e => onChangeVehicle(medic.medicId, e.target.value as VehicleType)}
+            className="w-full px-2.5 py-1.5 rounded-lg text-sm outline-none appearance-none cursor-pointer text-slate-100"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(148,163,184,0.14)' }}
+          >
+            {VEHICLE_TYPES.map(v => (
+              <option key={v} value={v}>{VEHICLE_TYPE_META[v].icon} {VEHICLE_TYPE_META[v].label}</option>
+            ))}
+          </select>
         </div>
 
         {medic.destination && (

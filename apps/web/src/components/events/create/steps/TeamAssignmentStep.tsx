@@ -10,6 +10,7 @@ import type { MedicMarker } from '@/components/map/MapWrapper'
 import { useQuery } from '@tanstack/react-query'
 import { fetchUsers } from '@/api/users'
 import { VEHICLE_CONFIGS, MAP_CENTER, POI_CONFIGS } from '@/lib/constants'
+import { DEFAULT_VEHICLE_TYPE } from '@events/contracts'
 import { getInitials, computeTrackBounds } from '@/lib/utils'
 
 const AVATAR_GRADIENTS = [
@@ -104,7 +105,7 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
     if (isAssigned(userId)) {
       updateDayAssignments(selectedDay.id, currentAssignments.filter(a => a.userId !== userId))
     } else {
-      updateDayAssignments(selectedDay.id, [...currentAssignments, { userId }])
+      updateDayAssignments(selectedDay.id, [...currentAssignments, { userId, vehicle: DEFAULT_VEHICLE_TYPE }])
     }
   }
 
@@ -124,7 +125,9 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
     return { ...a, user }
   }).filter(a => a.user)
 
-  const vehiclesAssigned = currentAssignments.filter(a => a.vehicle).length
+  // Everyone has a vehicle now ("on foot" is the default), so the stat that
+  // still says something is how many of them are motorised.
+  const vehiclesAssigned = currentAssignments.filter(a => a.vehicle && a.vehicle !== 'foot').length
   const positionsCovered = new Set(currentAssignments.filter(a => a.position).map(a => a.position)).size
 
   const medicMapMarkers: MedicMarker[] = useMemo(() => {
@@ -435,17 +438,18 @@ export default function TeamAssignmentStep({ data, update, onNext, onBack }: Pro
 
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: '#64748b' }}>Vehicle</label>
+                    {/* Never "none": what a medic travels with decides how fast
+                        they reach an incident, and everyone at least walks. */}
                     <select
-                      value={vehicle || ''}
-                      onChange={e => updateAssignment(userId, { vehicle: e.target.value as VehicleType || undefined })}
+                      value={vehicle || DEFAULT_VEHICLE_TYPE}
+                      onChange={e => updateAssignment(userId, { vehicle: e.target.value as VehicleType })}
                       className="w-full px-3 py-2 rounded-xl text-sm outline-none appearance-none cursor-pointer"
                       style={{
                         background: 'rgba(255,255,255,0.06)',
                         border: '1px solid rgba(148,163,184,0.12)',
-                        color: vehicle ? '#f1f5f9' : '#64748b',
+                        color: '#f1f5f9',
                       }}
                     >
-                      <option value="">No vehicle</option>
                       {VEHICLE_CONFIGS.map(v => <option key={v.value} value={v.value}>{v.icon} {v.label}</option>)}
                     </select>
                   </div>

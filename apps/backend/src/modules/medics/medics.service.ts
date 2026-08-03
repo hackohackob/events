@@ -1,5 +1,16 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
-import { computeFreshness, MedicDestination, MedicRoute, MedicState, MedicStatus, MedicType, PublicMedicState } from "@events/contracts";
+import {
+  computeFreshness,
+  DEFAULT_VEHICLE_TYPE,
+  MedicDestination,
+  MedicRoute,
+  MedicState,
+  MedicStatus,
+  MedicType,
+  normalizeVehicleType,
+  PublicMedicState,
+  VehicleType,
+} from "@events/contracts";
 import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -10,10 +21,14 @@ interface RosterRow {
   name: string;
   unit: string | null;
   vehicle: string | null;
+  vehicle_type: string | null;
   type: string | null;
   skills: unknown;
   capabilities: unknown;
 }
+
+/** Columns every roster read selects — one list so they cannot drift apart. */
+const ROSTER_COLUMNS = "id, name, unit, vehicle, vehicle_type, type, skills, capabilities";
 
 function asStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
@@ -26,6 +41,9 @@ function rosterRowToMedic(r: RosterRow) {
     name: r.name,
     unit: r.unit ?? undefined,
     vehicle: r.vehicle ?? undefined,
+    // Rosters written before typed vehicles only have the free-text column, so
+    // fall back to parsing it; anything unrecognised lands on "foot".
+    vehicleType: normalizeVehicleType(r.vehicle_type ?? r.vehicle),
     type: (r.type ?? undefined) as MedicType | undefined,
     skills: asStringArray(r.skills),
     capabilities: asStringArray(r.capabilities),
@@ -83,6 +101,7 @@ export class MedicsService implements OnModuleInit {
       `ALTER TABLE medic_last_location ADD COLUMN IF NOT EXISTS nav_route JSONB`,
       `ALTER TABLE participant_last_location ADD COLUMN IF NOT EXISTS battery DOUBLE PRECISION`,
       `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS type TEXT`,
+      `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS vehicle_type TEXT`,
       `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'`,
       `ALTER TABLE event_medics ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL DEFAULT '[]'`,
     ];
@@ -134,7 +153,7 @@ export class MedicsService implements OnModuleInit {
     // from `users` by name — never stored on the event. Changing a user's role
     // applies to every event the moment the roster is fetched.
     const { rows } = await this.db.query<RosterRow>(
-      `SELECT em.id, em.name, em.unit, em.vehicle,
+      `SELECT em.id, em.name, em.unit, em.vehicle, em.vehicle_type,
               CASE WHEN u.role = 'coordinator' THEN 'coordinator' ELSE 'paramedic' END AS type,
               em.skills, em.capabilities
        FROM event_medics em
@@ -148,23 +167,33 @@ export class MedicsService implements OnModuleInit {
 
   async addMedic(
     eventId: string,
-    data: { name: string; unit?: string; vehicle?: string; type?: MedicType; skills?: string[]; capabilities?: string[] },
+    data: {
+      name: string;
+      unit?: string;
+      vehicle?: string;
+      vehicleType?: VehicleType;
+      type?: MedicType;
+      skills?: string[];
+      capabilities?: string[];
+    },
   ) {
     const { rows } = await this.db.query<RosterRow>(
-      `INSERT INTO event_medics (event_id, name, unit, vehicle, type, skills, capabilities)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+      `INSERT INTO event_medics (event_id, name, unit, vehicle, vehicle_type, type, skills, capabilities)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
        ON CONFLICT (event_id, name) DO UPDATE SET
          unit = EXCLUDED.unit,
          vehicle = EXCLUDED.vehicle,
+         vehicle_type = EXCLUDED.vehicle_type,
          type = EXCLUDED.type,
          skills = EXCLUDED.skills,
          capabilities = EXCLUDED.capabilities
-       RETURNING id, name, unit, vehicle, type, skills, capabilities`,
+       RETURNING ${ROSTER_COLUMNS}`,
       [
         eventId,
         data.name,
         data.unit ?? null,
         data.vehicle ?? null,
+        normalizeVehicleType(data.vehicleType ?? data.vehicle),
         data.type ?? null,
         JSON.stringify(data.skills ?? []),
         JSON.stringify(data.capabilities ?? []),
@@ -177,10 +206,55 @@ export class MedicsService implements OnModuleInit {
     const { rows } = await this.db.query<RosterRow>(
       // id::text so a non-UUID medicId (external/guest joins like
       // "external_pesho") doesn't error on the UUID column — it returns no row.
-      "SELECT id, name, unit, vehicle, type, skills, capabilities FROM event_medics WHERE event_id = $1 AND id::text = $2",
+      `SELECT ${ROSTER_COLUMNS} FROM event_medics WHERE event_id = $1 AND id::text = $2`,
       [eventId, medicId],
     );
     return rows[0] ? rosterRowToMedic(rows[0]) : null;
+  }
+
+  /**
+   * Change what a medic is travelling with, mid-event. Coordinators may
+   * re-vehicle anyone; everyone else only themselves.
+   *
+   * The new type is pushed out twice: on the live map state (so every marker
+   * and the closest-medic ETAs pick it up immediately) and as a roster-level
+   * `medic.vehicle` op, which also reaches medics who have no position fix yet.
+   */
+  async updateVehicleType(
+    eventId: string,
+    medicId: string,
+    vehicleType: VehicleType,
+    requesterId?: string,
+    requesterIsCoordinatorRole = false,
+  ): Promise<{ medicId: string; vehicleType: VehicleType }> {
+    const isSelf = !requesterId || requesterId === medicId;
+    if (!isSelf && !requesterIsCoordinatorRole && !(await this.isCoordinator(eventId, requesterId!))) {
+      throw new ForbiddenException("Only a coordinator can change another medic's vehicle");
+    }
+
+    const { rowCount } = await this.db.query(
+      `UPDATE event_medics SET vehicle_type = $1 WHERE event_id = $2 AND id::text = $3`,
+      [vehicleType, eventId, medicId],
+    );
+    if (!rowCount) throw new NotFoundException(`Medic ${medicId} is not on the roster for event ${eventId}`);
+
+    const existing = await this.getMedicLastLocation(eventId, medicId);
+    if (existing) await this.publishMedicLocation(eventId, { ...existing, vehicleType });
+    await this.redis.publish(`event:${eventId}:ops`, {
+      type: "medic.vehicle",
+      payload: { medicId, vehicleType },
+    });
+
+    return { medicId, vehicleType };
+  }
+
+  /** medicId → roster vehicle, for stamping live states without an N+1 join. */
+  private async vehicleTypesByMedic(eventId: string): Promise<Map<string, VehicleType>> {
+    const { rows } = await this.db.query<{ id: string; vehicle: string | null; vehicle_type: string | null }>(
+      "SELECT id::text AS id, vehicle, vehicle_type FROM event_medics WHERE event_id = $1",
+      [eventId],
+    );
+    return new Map(rows.map((r) => [r.id, normalizeVehicleType(r.vehicle_type ?? r.vehicle)]));
   }
 
   async isCoordinator(eventId: string, medicId: string): Promise<boolean> {
@@ -216,6 +290,12 @@ export class MedicsService implements OnModuleInit {
       medicId: params.medicId,
       eventId: params.eventId,
       name: params.name,
+      // After the first fix the roster vehicle rides along on `existing` (the
+      // read joins the roster); only the very first ping needs a lookup.
+      vehicleType:
+        existing?.vehicleType ??
+        (await this.getMedicById(params.eventId, params.medicId))?.vehicleType ??
+        DEFAULT_VEHICLE_TYPE,
       lat: params.lat,
       lng: params.lng,
       heading: params.heading,
@@ -430,10 +510,13 @@ export class MedicsService implements OnModuleInit {
       [eventId],
     );
 
+    const vehicles = await this.vehicleTypesByMedic(eventId);
+
     return rows.map((r) => ({
       medicId: r.medic_id,
       eventId: r.event_id,
       name: r.name,
+      vehicleType: vehicles.get(r.medic_id) ?? DEFAULT_VEHICLE_TYPE,
       lat: r.lat,
       lng: r.lng,
       heading: r.heading ?? undefined,
@@ -485,11 +568,15 @@ export class MedicsService implements OnModuleInit {
       nav_route: unknown;
       recorded_at: string;
       last_seen_at: string;
+      vehicle: string | null;
+      vehicle_type: string | null;
     }>(
-      `SELECT medic_id, event_id, name, lat, lng, heading, speed, accuracy, battery, charging,
-              status, destination, nav_route, recorded_at, last_seen_at
-       FROM medic_last_location
-       WHERE event_id = $1 AND medic_id = $2`,
+      `SELECT l.medic_id, l.event_id, l.name, l.lat, l.lng, l.heading, l.speed, l.accuracy,
+              l.battery, l.charging, l.status, l.destination, l.nav_route,
+              l.recorded_at, l.last_seen_at, em.vehicle, em.vehicle_type
+       FROM medic_last_location l
+       LEFT JOIN event_medics em ON em.event_id = l.event_id AND em.id::text = l.medic_id
+       WHERE l.event_id = $1 AND l.medic_id = $2`,
       [eventId, medicId],
     );
     if (!rows[0]) return null;
@@ -498,6 +585,7 @@ export class MedicsService implements OnModuleInit {
       medicId: r.medic_id,
       eventId: r.event_id,
       name: r.name,
+      vehicleType: normalizeVehicleType(r.vehicle_type ?? r.vehicle),
       lat: r.lat,
       lng: r.lng,
       heading: r.heading ?? undefined,

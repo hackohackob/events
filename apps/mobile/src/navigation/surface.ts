@@ -1,3 +1,4 @@
+import type { VehicleType } from "@events/contracts";
 import type { ManeuverKind, RouteProfile, SurfaceClass } from "./types";
 
 /** Segment colours — Blue road / Yellow off-road / Red walking path. */
@@ -25,6 +26,24 @@ export const PROFILE_META: Record<RouteProfile, { label: string; icon: string }>
 };
 
 export const PROFILE_ORDER: RouteProfile[] = ["foot", "mtb", "car", "rescue_4x4"];
+
+/**
+ * Which network each vehicle rides by default. Mirrors the backend's
+ * `vehicle-profiles.ts` — kept in step so the sheet pre-selects the same
+ * network the server would have picked for a closest-medic estimate.
+ */
+export const VEHICLE_DEFAULT_PROFILE: Record<VehicleType, RouteProfile> = {
+  foot: "foot",
+  bike: "mtb",
+  "e-bike": "mtb",
+  "e-motorcycle": "mtb",
+  motorcycle: "mtb",
+  atv: "rescue_4x4",
+  car: "car",
+  "offroad-car": "rescue_4x4",
+  ambulance: "car",
+  "offroad-ambulance": "rescue_4x4",
+};
 
 /**
  * Unicode arrow + short label for a maneuver — used by the next-turn card. We

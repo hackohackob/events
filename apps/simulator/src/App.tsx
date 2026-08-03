@@ -5,17 +5,17 @@ import {
   ChevronDown, ChevronUp,
 } from 'lucide-react'
 import {
-  createMedic, createParticipant, stepEntity,
-  type SimEntity, type MedicStatus, type RouteMode,
+  createMedic, createParticipant, stepEntity, speedForVehicle, VEHICLE_TYPE_META,
+  type SimEntity, type MedicStatus, type RouteMode, type VehicleType,
 } from './simulation'
 import {
   setApiBase, connectMedicSocket, disconnectMedicSocket, disconnectAllSockets,
   joinAsParticipant, joinAsMedic, sendMedicLocation,
   sendParticipantLocation, fetchMedicRoster, addMedicToRoster,
   createIncident, fetchTracks, fetchIncidents,
-  assignMedicDestination, setMedicStatus, respondToIncident, fetchMedicRoute, setMedicRoute,
+  assignMedicDestination, setMedicStatus, setMedicVehicle, respondToIncident, fetchMedicRoute, setMedicRoute,
   sendIncidentMessage, createIncidentAsMedic,
-  type LogEntry, type Track, type SimIncident,
+  type LogEntry, type Track, type SimIncident, type SimRosterMedic,
 } from './api'
 import { MedicControlPanel, type MapMode } from './MedicControlPanel'
 
@@ -60,7 +60,7 @@ export default function App() {
   const [tab, setTab] = useState<'medics' | 'participants' | 'settings'>('medics')
   const [bulkCount, setBulkCount] = useState(5)
   const [showLog, setShowLog] = useState(true)
-  const [medicRoster, setMedicRoster] = useState<{ id: string; name: string }[]>([])
+  const [medicRoster, setMedicRoster] = useState<SimRosterMedic[]>([])
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; lat: number; lng: number } | null>(null)
   const [tracks, setTracks] = useState<Track[]>([])
   // 'random' means random walk; otherwise it's a track id
@@ -175,7 +175,9 @@ export default function App() {
           cursor: pointer; transition: box-shadow 0.2s, border 0.2s, opacity 0.2s;
         `
         el.style.background = entity.color
-        el.title = entity.name
+        el.title = entity.role === 'medic'
+          ? `${entity.name} — ${VEHICLE_TYPE_META[entity.vehicleType ?? 'foot'].label}`
+          : entity.name
         el.textContent = entity.name.split(' ').slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('')
 
         if (entity.role === 'medic') {
@@ -316,9 +318,11 @@ export default function App() {
         }
       }
 
-      // Register in roster and get a real medicId
+      // Register in roster and get a real medicId. The vehicle goes up with the
+      // roster entry so the backend's closest-medic ETAs match how fast this
+      // simulated medic actually moves.
       try {
-        const rosterEntry = await addMedicToRoster(eventId, entity.name)
+        const rosterEntry = await addMedicToRoster(eventId, entity.name, entity.vehicleType)
         const token = await joinAsMedic(eventId, entity, rosterEntry.id, log)
         if (token) {
           connectMedicSocket(entity.id, eventId, token, log)
@@ -409,7 +413,7 @@ export default function App() {
     const idx = entitiesRef.current.filter(e => e.role === 'medic').length
     const entity = { ...createMedic(idx), lat, lng }
     try {
-      const rosterEntry = await addMedicToRoster(eventId, entity.name)
+      const rosterEntry = await addMedicToRoster(eventId, entity.name, entity.vehicleType)
       const token = await joinAsMedic(eventId, entity, rosterEntry.id, log)
       if (token) {
         connectMedicSocket(entity.id, eventId, token, log)
@@ -520,6 +524,15 @@ export default function App() {
     void setMedicStatus(eventId, e, status, log)
   }, [eventId, getEntity, log, patchEntity])
 
+  /** Re-vehicle a medic: push it to the roster AND re-roll how fast it moves,
+   *  so the simulated motion and the backend's ETA stay describing the same
+   *  medic. An explicit speed set afterwards still wins. */
+  const setMedicVehicleFn = useCallback((id: string, vehicleType: VehicleType) => {
+    const e = getEntity(id); if (!e) return
+    patchEntity(id, { vehicleType, speed: speedForVehicle(vehicleType) })
+    void setMedicVehicle(eventId, e, vehicleType, log)
+  }, [eventId, getEntity, log, patchEntity])
+
   const sendMedicHere = useCallback(async (id: string, lat: number, lng: number, label = 'map point') => {
     const e = getEntity(id); if (!e) return
     const from = { lat: e.lat, lng: e.lng }
@@ -528,7 +541,7 @@ export default function App() {
     void assignMedicDestination(eventId, e, { lat, lng, label }, log)
     void setMedicStatus(eventId, e, 'going_to', log)
     // Legit navigation: follow real roads (GraphHopper), straight-line fallback.
-    const route = await fetchMedicRoute(eventId, e, from, { lat, lng }, 'car', log)
+    const route = await fetchMedicRoute(eventId, e, from, { lat, lng }, undefined, log)
     const routePoints = route ? route.geometry.map(([lng2, lat2]) => ({ lat: lat2, lng: lng2 })) : [from, { lat, lng }]
     patchEntity(id, { routePoints, routeIndex: 0, routeMode: 'once', routeDir: 1 })
     // Broadcast the path so it shows on all devices + the dashboard.
@@ -577,7 +590,7 @@ export default function App() {
     void respondToIncident(eventId, incident.id, e, log)
     void setMedicStatus(eventId, e, 'going_to', log)
     // Legit navigation along real roads to the incident.
-    const route = await fetchMedicRoute(eventId, e, from, { lat: incident.lat, lng: incident.lng }, 'car', log)
+    const route = await fetchMedicRoute(eventId, e, from, { lat: incident.lat, lng: incident.lng }, undefined, log)
     const routePoints = route ? route.geometry.map(([lng2, lat2]) => ({ lat: lat2, lng: lng2 })) : [from, { lat: incident.lat, lng: incident.lng }]
     patchEntity(id, { routePoints, routeIndex: 0, routeMode: 'once', routeDir: 1 })
     // Broadcast the path (tagged to the incident) so all devices + dashboard see it.
@@ -901,6 +914,7 @@ export default function App() {
             onClose={() => selectMedic(null)}
             onPatch={(patch) => patchEntity(selectedEntity.id, patch)}
             onStatus={(s) => setMedicStatusFn(selectedEntity.id, s)}
+            onVehicle={(v) => setMedicVehicleFn(selectedEntity.id, v)}
             onSetMapMode={setMapMode}
             onSendToIncident={(inc) => sendToIncident(selectedEntity.id, inc)}
             onFollowTrack={(tid, mode, dir) => followTrack(selectedEntity.id, tid, mode, dir)}
@@ -1168,6 +1182,7 @@ function EntityList({ entities, onRemove, accentColor, onSelect, selectedId }: {
               {e.name}
             </div>
             <div style={{ fontSize: 10, color: e.joined ? accentColor : '#475569' }}>
+              {e.role === 'medic' ? `${VEHICLE_TYPE_META[e.vehicleType ?? 'foot'].icon} ` : ''}
               {e.offline ? 'offline' : e.paused ? 'frozen' : e.role === 'medic' ? (e.status ?? 'available') : e.joined ? 'joined' : 'not joined'}
               {e.bibNumber ? ` · #${e.bibNumber}` : ''}{e.role === 'medic' && e.routeLabel ? ` · → ${e.routeLabel}` : ''}
             </div>

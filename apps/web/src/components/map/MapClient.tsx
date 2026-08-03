@@ -222,6 +222,10 @@ interface MapClientProps {
   onAddPoi?: (coords: [number, number]) => void
   /** Clicking an incident → open its detail drawer (map focuses automatically). */
   onIncidentClick?: (incidentId: string) => void
+  /** Clicking a POI → open its detail drawer instead of the inline popup. */
+  onPoiClick?: (poiId: string) => void
+  /** POI whose marker is highlighted while its drawer is open. */
+  selectedPoiId?: string | null
   /** Clicking a medic → open its detail drawer (map focuses automatically). */
   onMedicClick?: (medicId: string) => void
   /** Live participant roster as clickable, identity-carrying dots. */
@@ -314,10 +318,22 @@ function freshnessColor(ageMs: number): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string, coords: [number, number]) => void }) {
+function POIMarker({
+  poi,
+  onMove,
+  onSelect,
+  selected,
+}: {
+  poi: PointOfInterest
+  onMove?: (id: string, coords: [number, number]) => void
+  /** When set, clicking opens the detail drawer instead of the inline popup. */
+  onSelect?: (poiId: string) => void
+  selected?: boolean
+}) {
   const config = getPOIIcon(poi.type)
   const meta = POI_CONFIGS.find(p => p.type === poi.type)
   const [showPopup, setShowPopup] = useState(false)
+  const active = showPopup || !!selected
   return (
     <>
       <Marker
@@ -334,11 +350,16 @@ function POIMarker({ poi, onMove }: { poi: PointOfInterest; onMove?: (id: string
             width: poi.type === 'base-medical-camp' ? 34 : 28,
             height: poi.type === 'base-medical-camp' ? 34 : 28,
             background: config.color,
-            border: showPopup ? '2px solid #fff' : '2px solid rgba(255,255,255,0.9)',
-            boxShadow: showPopup ? `0 0 0 4px ${config.color}55, 0 2px 8px rgba(0,0,0,0.4)` : '0 2px 8px rgba(0,0,0,0.4)',
+            border: active ? '2px solid #fff' : '2px solid rgba(255,255,255,0.9)',
+            boxShadow: active ? `0 0 0 4px ${config.color}55, 0 2px 8px rgba(0,0,0,0.4)` : '0 2px 8px rgba(0,0,0,0.4)',
+            opacity: poi.archived ? 0.5 : 1,
           }}
           title={poi.name || poi.type}
-          onClick={e => { e.stopPropagation(); setShowPopup(v => !v) }}
+          onClick={e => {
+            e.stopPropagation()
+            if (onSelect) { onSelect(poi.id); return }
+            setShowPopup(v => !v)
+          }}
         >
           <PoiIcon type={poi.type} icon={poi.icon} size={poi.type === 'base-medical-camp' ? 18 : 15} color="#fff" />
         </div>
@@ -1340,6 +1361,8 @@ export default function MapClient({
   availablePois = [],
   onAddPoi,
   onIncidentClick,
+  onPoiClick,
+  selectedPoiId,
   onMedicClick,
   participantMarkers = [],
   showParticipantDots = false,
@@ -1718,7 +1741,13 @@ export default function MapClient({
 
       {/* POI markers */}
       {pois.map(poi => (
-        <POIMarker key={poi.id} poi={poi} onMove={onPOIMove} />
+        <POIMarker
+          key={poi.id}
+          poi={poi}
+          onMove={onPOIMove}
+          onSelect={onPoiClick}
+          selected={selectedPoiId === poi.id}
+        />
       ))}
 
       {/* Static medic markers (wizard / setup) */}

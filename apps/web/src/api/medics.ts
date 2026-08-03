@@ -1,4 +1,4 @@
-import type { EventMedic, MedicState, ParticipantLastLocation } from "@events/contracts";
+import type { EventMedic, MedicState, ParticipantLastLocation, VehicleType } from "@events/contracts";
 import client from "./client";
 
 export async function getMedicRoster(eventId: string): Promise<EventMedic[]> {
@@ -31,6 +31,19 @@ export async function updateMedicStatus(
   status: "available" | "stationary" | "rest" | "sweeper",
 ): Promise<MedicState> {
   const { data } = await client.patch<MedicState>(`/events/${eventId}/medics/${medicId}/status`, { status });
+  return data;
+}
+
+/** Re-vehicle a medic mid-event (coordinator only for anyone but themselves). */
+export async function updateMedicVehicle(
+  eventId: string,
+  medicId: string,
+  vehicleType: VehicleType,
+): Promise<{ medicId: string; vehicleType: VehicleType }> {
+  const { data } = await client.patch<{ medicId: string; vehicleType: VehicleType }>(
+    `/events/${eventId}/medics/${medicId}/vehicle`,
+    { vehicleType },
+  );
   return data;
 }
 

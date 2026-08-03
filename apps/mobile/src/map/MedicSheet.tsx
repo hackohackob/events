@@ -1,8 +1,14 @@
-import React, { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Feather } from "@expo/vector-icons";
-import type { RosterMedic } from "../security/roster-store";
+import * as Haptics from "expo-haptics";
+import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPE_META, VEHICLE_TYPES, type VehicleType } from "@events/contracts";
+import { useRosterStore, type RosterMedic } from "../security/roster-store";
+import { useSessionStore } from "../security/session-store";
+import { setMedicVehicleType } from "../ui/event-actions";
+import { useMapStore } from "./map-store";
+import { debugLog } from "../debug/debug-log";
 import { freshnessColor, freshnessLabel } from "./freshness";
 
 /** The subset of a map marker a medic detail sheet needs. */
@@ -13,6 +19,7 @@ export interface MedicSheetMarker {
   lat: number;
   lng: number;
   vehicle?: string;
+  vehicleType?: VehicleType;
   accuracy?: number;
   battery?: number;
   charging?: boolean;
@@ -66,6 +73,46 @@ export function MedicSheet({ marker, rosterEntry, onClose, onClearDestination }:
     () => [...(rosterEntry?.skills ?? []), ...(rosterEntry?.capabilities ?? [])],
     [rosterEntry],
   );
+
+  // ── Vehicle (editable live) ───────────────────────────────────────────────
+  // A coordinator can re-vehicle anyone mid-event; everyone else only
+  // themselves. The server enforces the same rule — this only hides the UI.
+  const amCoordinator = useRosterStore((s) => s.amCoordinator);
+  const myId = useSessionStore((s) => s.userId);
+  const canEditVehicle = amCoordinator || marker.id === myId;
+  const vehicleType = marker.vehicleType ?? rosterEntry?.vehicleType ?? DEFAULT_VEHICLE_TYPE;
+  const [vehicleOpen, setVehicleOpen] = useState(false);
+  const [savingVehicle, setSavingVehicle] = useState<VehicleType | null>(null);
+
+  const chooseVehicle = (next: VehicleType) => {
+    if (next === vehicleType) {
+      setVehicleOpen(false);
+      return;
+    }
+    void Haptics.selectionAsync();
+    setSavingVehicle(next);
+    const previous = vehicleType;
+    // Optimistic on both stores, rolled back if the server refuses.
+    const patch = (value: VehicleType) => {
+      useRosterStore.getState().setVehicleType(marker.id, value);
+      const markers = useMapStore.getState().markers;
+      useMapStore.getState().setMarkers(
+        markers.map((m) => (m.id === marker.id ? { ...m, vehicleType: value } : m)),
+      );
+    };
+    patch(next);
+    void setMedicVehicleType(next, marker.id)
+      .then(() => {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setVehicleOpen(false);
+      })
+      .catch((err) => {
+        debugLog("api", "error", "set vehicle failed", String(err));
+        patch(previous);
+        Alert.alert("Couldn't change vehicle", "The change was not saved. Please try again.");
+      })
+      .finally(() => setSavingVehicle(null));
+  };
 
   const battery = marker.battery;
   const batColor = battery != null ? batteryColor(battery, marker.charging) : "#64748b";
@@ -159,17 +206,63 @@ export function MedicSheet({ marker, rosterEntry, onClose, onClearDestination }:
             </Text>
           </View>
 
-          {/* Unit / vehicle */}
-          <View style={styles.card}>
+          {/* Vehicle — tappable when I'm allowed to change it. What a medic
+              travels with decides every ETA quoted for them, and it changes
+              mid-event (bike goes flat, the 4×4 finally arrives). */}
+          <Pressable
+            style={[styles.card, canEditVehicle && styles.cardEditable]}
+            onPress={canEditVehicle ? () => setVehicleOpen((v) => !v) : undefined}
+            disabled={!canEditVehicle}
+          >
             <View style={styles.cardLabelRow}>
               <Feather name="truck" size={11} color="#64748b" />
-              <Text style={styles.cardLabel}>UNIT</Text>
+              <Text style={styles.cardLabel}>VEHICLE</Text>
+              {canEditVehicle ? (
+                <Feather
+                  name={vehicleOpen ? "chevron-up" : "chevron-down"}
+                  size={12}
+                  color="#7dd3fc"
+                  style={styles.cardLabelChevron}
+                />
+              ) : null}
             </View>
-            <Text style={styles.cardValue} numberOfLines={1}>
+            <View style={styles.vehicleValueRow}>
+              <Text style={styles.vehicleGlyph} allowFontScaling={false}>
+                {VEHICLE_TYPE_META[vehicleType].icon}
+              </Text>
+              <Text style={styles.cardValue} numberOfLines={1}>
+                {VEHICLE_TYPE_META[vehicleType].label}
+              </Text>
+            </View>
+            <Text style={styles.cardSub} numberOfLines={1}>
               {marker.vehicle ?? rosterEntry?.vehicle ?? rosterEntry?.unit ?? "Mobile unit"}
             </Text>
-          </View>
+          </Pressable>
         </View>
+
+        {/* Vehicle picker — inline so the change takes two taps in the field. */}
+        {vehicleOpen && canEditVehicle ? (
+          <View style={styles.vehiclePicker}>
+            {VEHICLE_TYPES.map((type) => {
+              const meta = VEHICLE_TYPE_META[type];
+              const active = type === vehicleType;
+              return (
+                <Pressable
+                  key={type}
+                  style={[styles.vehicleOption, active && styles.vehicleOptionActive]}
+                  onPress={() => chooseVehicle(type)}
+                  disabled={savingVehicle != null}
+                >
+                  <Text style={styles.vehicleOptionGlyph} allowFontScaling={false}>{meta.icon}</Text>
+                  <Text style={[styles.vehicleOptionText, active && styles.vehicleOptionTextActive]} numberOfLines={1}>
+                    {meta.label}
+                  </Text>
+                  {savingVehicle === type ? <ActivityIndicator size="small" color="#7dd3fc" /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* ── En-route card ── */}
         {marker.destination || marker.route ? (
@@ -281,8 +374,37 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     gap: 5,
   },
+  cardEditable: { borderColor: "rgba(125,211,252,0.28)" },
   cardLabelRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   cardLabel: { color: "#4A5F7A", fontSize: 9.5, fontWeight: "900", letterSpacing: 1.1 },
+  cardLabelChevron: { marginLeft: "auto" },
+  vehicleValueRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  vehicleGlyph: { fontSize: 15, lineHeight: 19, includeFontPadding: false },
+  vehiclePicker: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+    backgroundColor: "rgba(56,189,248,0.05)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.2)",
+    padding: 10,
+  },
+  vehicleOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.2)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+  },
+  vehicleOptionActive: { borderColor: "#38bdf8", backgroundColor: "rgba(56,189,248,0.16)" },
+  vehicleOptionGlyph: { fontSize: 13, lineHeight: 16, includeFontPadding: false },
+  vehicleOptionText: { color: "#c3d3e6", fontSize: 12.5, fontWeight: "800" },
+  vehicleOptionTextActive: { color: "#e0f2fe" },
   cardValueRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   cardValue: { color: "#E2E8F0", fontSize: 16, fontWeight: "900", letterSpacing: 0.2 },
   cardValueMuted: { color: "#475569", fontSize: 16, fontWeight: "900" },

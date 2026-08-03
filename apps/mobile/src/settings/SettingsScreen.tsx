@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AppState, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, AppState, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPE_META, VEHICLE_TYPES, type VehicleType } from "@events/contracts";
 import {
   KM_MARKER_INTERVAL_OPTIONS,
   LOCATION_INTERVAL_OPTIONS,
@@ -12,6 +13,9 @@ import { startLocationLoop } from "../location/location-tracker";
 import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
 import { PttBridgeSection } from "../ptt/PttBridgeSection";
 import { useRosterStore } from "../security/roster-store";
+import { useSessionStore } from "../security/session-store";
+import { setMedicVehicleType } from "../ui/event-actions";
+import { debugLog } from "../debug/debug-log";
 
 export function SettingsScreen({ onClose }: { onClose: () => void }) {
   // Only coordinators change what the event puts on the air.
@@ -43,6 +47,26 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     // Restart the background updates so the new cadence takes effect immediately.
     void startLocationLoop();
+  };
+
+  // ── My vehicle ─────────────────────────────────────────────────────────────
+  // Self-service so a medic who swaps a bike for a 4×4 mid-event fixes their own
+  // ETAs; a coordinator can also change it from the medic's map sheet.
+  const myId = useSessionStore((s) => s.userId);
+  const myVehicleType =
+    useRosterStore((s) => s.medics.find((m) => m.id === myId)?.vehicleType) ?? DEFAULT_VEHICLE_TYPE;
+  const [vehicleOpen, setVehicleOpen] = useState(false);
+
+  const pickVehicle = (type: VehicleType) => {
+    setVehicleOpen(false);
+    if (type === myVehicleType || !myId) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    useRosterStore.getState().setVehicleType(myId, type);
+    void setMedicVehicleType(type).catch((err) => {
+      debugLog("api", "error", "set my vehicle failed", String(err));
+      useRosterStore.getState().setVehicleType(myId, myVehicleType);
+      Alert.alert("Couldn't change vehicle", "The change was not saved. Please try again.");
+    });
   };
 
   // Whether the incident alarm may ring through Do Not Disturb (Android DND
@@ -185,6 +209,48 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
             </View>
           </>
         ) : null}
+
+        {/* ── My vehicle ──────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>MY VEHICLE</Text>
+        <View style={styles.card}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>What you're travelling with</Text>
+            <Text style={styles.rowSub}>
+              Decides how the command centre estimates your time to an incident. A coordinator can change it too.
+            </Text>
+          </View>
+          <Pressable
+            style={styles.dropdownButton}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setVehicleOpen((o) => !o);
+            }}
+          >
+            <Text style={styles.dropdownValue}>
+              {VEHICLE_TYPE_META[myVehicleType].icon}  {VEHICLE_TYPE_META[myVehicleType].label}
+            </Text>
+            <Feather name={vehicleOpen ? "chevron-up" : "chevron-down"} size={18} color="#7e90a8" />
+          </Pressable>
+          {vehicleOpen ? (
+            <View style={styles.dropdownMenu}>
+              {VEHICLE_TYPES.map((type) => {
+                const active = type === myVehicleType;
+                return (
+                  <Pressable
+                    key={type}
+                    onPress={() => pickVehicle(type)}
+                    style={[styles.dropdownItem, active && styles.dropdownItemActive]}
+                  >
+                    <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>
+                      {VEHICLE_TYPE_META[type].icon}  {VEHICLE_TYPE_META[type].label}
+                    </Text>
+                    {active ? <Feather name="check" size={15} color="#34d399" /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
 
         {/* ── Location tracking ───────────────────────────────── */}
         <Text style={styles.sectionLabel}>LOCATION TRACKING</Text>

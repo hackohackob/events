@@ -1,7 +1,7 @@
 // API + WS communication with the backend
 
 import { io, Socket } from 'socket.io-client'
-import { jitterPoint, type SimEntity, type MedicStatus } from './simulation'
+import { jitterPoint, VEHICLE_DEFAULT_PROFILE, VEHICLE_TYPE_META, type SimEntity, type MedicStatus, type RouteProfile, type VehicleType } from './simulation'
 
 export interface LogEntry {
   id: string
@@ -211,22 +211,31 @@ export interface SimMedicRoute {
  * in a straight line. Returns the full route (geometry + colour segments + ETA),
  * or null on failure (caller should fall back to a straight line).
  */
+/**
+ * Route a simulated medic. `profile` defaults to the network their vehicle
+ * rides, and the vehicle is sent along so the backend applies the same
+ * way-restrictions and travel times the real app would get — an ambulance is
+ * kept off tracks here exactly as it is in the field.
+ */
 export async function fetchMedicRoute(
   eventId: string,
   entity: SimEntity,
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
-  profile: 'car' | 'foot' | 'mtb' | 'rescue_4x4',
+  profile: RouteProfile | undefined,
   log: LogFn,
 ): Promise<SimMedicRoute | null> {
+  const vehicleType = entity.vehicleType ?? 'foot'
+  const chosen = profile ?? VEHICLE_DEFAULT_PROFILE[vehicleType]
   try {
     const res = await fetch(`${apiBase}/api/routing/route`, {
       method: 'POST',
       headers: medicHeaders(eventId, entity),
       body: JSON.stringify({
-        profile,
+        profile: chosen,
         points: [[from.lng, from.lat], [to.lng, to.lat]],
         alternatives: 1,
+        vehicleType,
       }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -235,7 +244,7 @@ export async function fetchMedicRoute(
     }
     const r = data.routes?.[0]
     if (!r || !r.geometry || r.geometry.length < 2) return null
-    log({ type: 'info', message: `[M] ${entity.name} routed (${r.geometry.length} pts, ${profile})` })
+    log({ type: 'info', message: `[M] ${entity.name} routed (${r.geometry.length} pts, ${chosen}/${vehicleType})` })
     return {
       geometry: r.geometry,
       segments: r.segments ?? [],
@@ -422,18 +431,53 @@ export async function fetchTracks(eventId: string): Promise<Track[]> {
 
 // ─── Medic roster ─────────────────────────────────────────────────────────────
 
-export async function fetchMedicRoster(eventId: string): Promise<{ id: string; name: string }[]> {
+export interface SimRosterMedic {
+  id: string
+  name: string
+  vehicleType?: VehicleType
+}
+
+export async function fetchMedicRoster(eventId: string): Promise<SimRosterMedic[]> {
   const res = await fetch(`${apiBase}/api/events/${eventId}/medics`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
 
-export async function addMedicToRoster(eventId: string, name: string): Promise<{ id: string; name: string }> {
+/** Register a simulated medic, carrying its vehicle onto the real roster. */
+export async function addMedicToRoster(
+  eventId: string,
+  name: string,
+  vehicleType?: VehicleType,
+): Promise<SimRosterMedic> {
   const res = await fetch(`${apiBase}/api/events/${eventId}/medics`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, vehicleType }),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
+}
+
+/**
+ * Re-vehicle a joined medic, exactly as a coordinator would from the app —
+ * the backend re-routes every closest-medic estimate for them afterwards.
+ */
+export async function setMedicVehicle(
+  eventId: string,
+  entity: SimEntity,
+  vehicleType: VehicleType,
+  log: LogFn,
+) {
+  if (!entity.medicId) return
+  try {
+    const res = await fetch(`${apiBase}/api/events/${eventId}/medics/${entity.medicId}/vehicle`, {
+      method: 'PATCH',
+      headers: medicHeaders(eventId, entity),
+      body: JSON.stringify({ vehicleType }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    log({ type: 'success', message: `[M] ${entity.name} vehicle → ${VEHICLE_TYPE_META[vehicleType].label}` })
+  } catch (err) {
+    log({ type: 'error', message: `[M] ${entity.name} vehicle failed: ${(err as Error).message}` })
+  }
 }

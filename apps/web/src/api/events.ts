@@ -130,12 +130,42 @@ export async function updateEvent(id: string, data: EventFormData) {
   return res.data as ApiEventSummary;
 }
 
+export interface ApiPoi {
+  id: string;
+  type: string;
+  lat: number;
+  lng: number;
+  name?: string;
+  description?: string;
+  icon?: string;
+  archived?: boolean;
+}
+
+/**
+ * Edit a live point: rename/retype it, move it, or put an archived one back on
+ * the board (`archived: false`). Broadcast to every connected client.
+ */
 export async function updatePoi(
   eventId: string,
   poiId: string,
-  patch: { name?: string; description?: string },
-): Promise<{ id: string; type: string; lat: number; lng: number; name?: string; description?: string }> {
+  patch: {
+    name?: string;
+    description?: string;
+    lat?: number;
+    lng?: number;
+    type?: string;
+    icon?: string;
+    archived?: boolean;
+  },
+): Promise<ApiPoi> {
   const res = await client.patch(`/events/${eventId}/pois/${poiId}`, patch);
+  return res.data;
+}
+
+/** Archive a point — off the live board for everyone, still in archive review. */
+export async function archivePoi(eventId: string, poiId: string): Promise<{ id: string }> {
+  // This endpoint scopes by the caller's event header rather than the path.
+  const res = await client.delete(`/events/pois/${poiId}`, { headers: { "x-event-id": eventId } });
   return res.data;
 }
 

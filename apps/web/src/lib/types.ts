@@ -1,11 +1,7 @@
-export type VehicleType =
-  | 'bike'
-  | 'e-bike'
-  | 'e-motorcycle'
-  | 'ambulance'
-  | 'offroad-ambulance'
-  | 'atv'
-  | 'motorcycle'
+// The vehicle set is shared with the backend + mobile app (it drives routing
+// profiles for "closest medic"), so it is owned by the contracts package.
+export type { VehicleType } from '@events/contracts'
+import type { VehicleType } from '@events/contracts'
 
 export type POIType =
   | 'base-medical-camp'

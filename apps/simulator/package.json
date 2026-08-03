@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@events/contracts": "*",
     "lucide-react": "^0.469.0",
     "maplibre-gl": "^5.0.0",
     "react": "19.1.0",

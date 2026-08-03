@@ -15,19 +15,8 @@ import * as Haptics from "expo-haptics";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { createPoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon, CUSTOM_POI_ICON_OPTIONS } from "./poi-icons";
+import { POI_TYPES } from "./poi-types";
 import { debugLog } from "../debug/debug-log";
-
-const POI_TYPES: Array<{ id: string; label: string; icon: string; color: string }> = [
-  { id: "base-medical-camp", label: "Base Camp", icon: "🏥", color: "#ef4444" },
-  { id: "ambulance", label: "Ambulance", icon: "🚑", color: "#ef4444" },
-  { id: "medical-point", label: "Medical", icon: "✚", color: "#ef4444" },
-  { id: "water-point", label: "Water", icon: "💧", color: "#3b82f6" },
-  { id: "wc", label: "WC", icon: "🚻", color: "#8b5cf6" },
-  { id: "wardrobe", label: "Wardrobe", icon: "👕", color: "#f97316" },
-  { id: "parking", label: "Parking", icon: "🅿️", color: "#f59e0b" },
-  { id: "mrs", label: "Mountain Rescue", icon: "⛰️", color: "#0ea5e9" },
-  { id: "custom", label: "Other", icon: "★", color: "#94a3b8" },
-];
 
 interface Props {
   pending: { lat: number; lng: number } | null;

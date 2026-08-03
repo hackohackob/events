@@ -66,6 +66,7 @@ import {
 import { ExitPointPreview } from "../incidents/ExitPointPreview";
 import * as Haptics from "expo-haptics";
 import { NewPoiSheet } from "./NewPoiSheet";
+import { EditPoiSheet, type EditablePoi } from "./EditPoiSheet";
 import { SettingsScreen } from "../settings/SettingsScreen";
 import { FieldGuideScreen } from "../guide/FieldGuideScreen";
 import { ParticipantsScreen } from "../participants/ParticipantsScreen";
@@ -75,7 +76,7 @@ import { setNavModeTracking } from "../location/location-tracker";
 import { archivePoi, assignDestination, moveIncidentLocation, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
 import { OfflineControlButton } from "./OfflineControlButton";
-import type { EventZone } from "@events/contracts";
+import type { EventZone, VehicleType } from "@events/contracts";
 import { useZonesStore } from "./zones/zones-store";
 import { useZoneDrawStore } from "./zones/zone-draw-store";
 import { ZonesLayer } from "./zones/ZonesLayer";
@@ -103,6 +104,8 @@ import { useNavigationCamera } from "../navigation/useNavigationCamera";
 import { NavigationMapLayers } from "../navigation/NavigationMapLayers";
 import { TransportPreviewLayer } from "../navigation/TransportPreviewLayer";
 import { MedicRoutesLayer } from "../navigation/MedicRoutesLayer";
+import { ClosestMedicRoutesLayer } from "../navigation/ClosestMedicRoutesLayer";
+import type { ClosestMedic } from "../incidents/closest-medics-api";
 import { AssignedRoutesLayer } from "../navigation/AssignedRoutesLayer";
 import { AssignedIncidentBanner } from "../navigation/AssignedIncidentBanner";
 import { NavRadialMenu, type RadialAnchor } from "../navigation/NavRadialMenu";
@@ -135,6 +138,8 @@ const SHEET_HIDDEN_Y = SHEET_HEIGHT + 40;
 const MARKER_SHEET_SNAP_POINTS = ["42%", "88%"];
 /** Closest-asphalt view: one stop only, so the drawer stays half-open. */
 const ASPHALT_SHEET_SNAP_POINTS = ["46%"];
+/** Closest-medic view: same rule — the routes it describes are on the map above. */
+const CLOSEST_MEDIC_SHEET_SNAP_POINTS = ["52%"];
 const TRACK_SHEET_SNAP_POINTS = ["46%", "84%"];
 const PARTICIPANTS_SHEET_SNAP_POINTS = ["48%", "88%"];
 const USE_MAPY_TILES = process.env.EXPO_PUBLIC_USE_MAPY_TILES === "true";
@@ -198,6 +203,7 @@ interface MedicActiveResponse {
   medicId: string;
   eventId: string;
   name: string;
+  vehicleType?: VehicleType;
   lat: number;
   lng: number;
   accuracy?: number;
@@ -1619,6 +1625,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Move-POI mode: set from the POI sheet; the next map tap becomes the point's
   // new position (confirmed to the server via PATCH + broadcast to everyone).
   const [movingPoi, setMovingPoi] = useState<{ id: string; label: string } | null>(null);
+  // Coordinator POI editor (name / type / icon / note), opened from its sheet.
+  const [editingPoi, setEditingPoi] = useState<EditablePoi | null>(null);
   // Coordinator "move incident" mode — the next map tap repositions the pin.
   const [movingIncident, setMovingIncident] = useState<{ id: string; label: string } | null>(null);
   // Temporary preview pin (e.g. a search result being inspected).
@@ -1629,12 +1637,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // and the currently selected one (path + floating preview card).
   const [asphaltPins, setAsphaltPins] = useState<AsphaltPoint[] | null>(null);
   const [selectedExitPoint, setSelectedExitPoint] = useState<AsphaltPoint | null>(null);
-  // The exit-points view is a half-height drawer that must NOT expand to full —
-  // a single snap point removes the expanded stop entirely (the preview card
-  // and the map both need the upper half of the screen).
+  // Colour-coded closest-medic candidate routes, and the one being emphasised.
+  const [closestMedicRoutes, setClosestMedicRoutes] = useState<ClosestMedic[] | null>(null);
+  const [selectedClosestMedicId, setSelectedClosestMedicId] = useState<string | null>(null);
+  // The exit-points and closest-medic views are half-height drawers that must
+  // NOT expand to full — a single snap point removes the expanded stop entirely
+  // (the preview card, the routes and the map all need the upper half).
   const markerSheetSnapPoints = useMemo(
-    () => (asphaltPins ? ASPHALT_SHEET_SNAP_POINTS : MARKER_SHEET_SNAP_POINTS),
-    [asphaltPins],
+    () =>
+      closestMedicRoutes
+        ? CLOSEST_MEDIC_SHEET_SNAP_POINTS
+        : asphaltPins
+          ? ASPHALT_SHEET_SNAP_POINTS
+          : MARKER_SHEET_SNAP_POINTS,
+    [asphaltPins, closestMedicRoutes],
   );
   const [radialAnchor, setRadialAnchor] = useState<RadialAnchor | null>(null);
   const navPhase = useNavStore((s) => s.phase);
@@ -1926,6 +1942,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             type: "paramedic" as const,
             label: medic.name ?? medic.medicId,
             name: medic.name,
+            vehicleType: medic.vehicleType,
             lat: medic.lat,
             lng: medic.lng,
             accuracy: medic.accuracy,
@@ -2021,7 +2038,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     // and apply them in ONE store write: immediately when the map is quiet,
     // otherwise at most once per window.
     const LOCATION_APPLY_INTERVAL_MS = 30_000;
-    type MedicLocationPayload = { medicId: string; name?: string; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; charging?: boolean; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null };
+    type MedicLocationPayload = { medicId: string; name?: string; vehicleType?: VehicleType; lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; battery?: number; charging?: boolean; lastSeenAt?: string; status?: string; destination?: { lat: number; lng: number; label: string } | null; route?: MedicMarkerRoute | null };
     type RunnerLocationPayload = { userId: string; lat: number; lng: number; freshness?: "fresh" | "warning" | "stale" | "offline" };
     const pendingRunners = new Map<string, RunnerLocationPayload>();
     const pendingMedics = new Map<string, MedicLocationPayload>();
@@ -2053,6 +2070,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           label: previous?.label ?? payload.name ?? payload.medicId,
           name: previous?.name ?? payload.name,
           vehicle: previous?.vehicle,
+          vehicleType: payload.vehicleType ?? previous?.vehicleType,
           lat: payload.lat,
           lng: payload.lng,
           accuracy: payload.accuracy ?? previous?.accuracy,
@@ -2185,6 +2203,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
     });
 
+    // A coordinator re-vehicled someone mid-event. The roster is the source of
+    // truth for medics with no position fix, and the marker carries it for the
+    // ones on the map — patch both rather than refetching either.
+    socket.on("medic.vehicle", (payload: { medicId: string; vehicleType: VehicleType }) => {
+      useRosterStore.getState().setVehicleType(payload.medicId, payload.vehicleType);
+      const existing = useMapStore.getState().markers;
+      setMarkers(
+        existing.map((m) => (m.id === payload.medicId ? { ...m, vehicleType: payload.vehicleType } : m)),
+      );
+    });
+
     // Team zones drawn/toggled elsewhere (dashboard or another medic). These
     // arrive on the medic-only :incidents room, so runners never receive them.
     socket.on("zone.created", (zone: EventZone) => useZonesStore.getState().upsert(zone));
@@ -2203,6 +2232,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       socket.off("poi.created");
       socket.off("poi.removed");
       socket.off("poi.updated");
+      socket.off("medic.vehicle");
       socket.off("zone.created");
       socket.off("zone.updated");
       socket.off("zone.removed");
@@ -2902,6 +2932,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     setPreviewPoint(null);
     setAsphaltPins(null);
     setSelectedExitPoint(null);
+    setClosestMedicRoutes(null);
+    setSelectedClosestMedicId(null);
   };
 
   // Starting navigation (e.g. "Navigate" from a marker sheet) opens the transport
@@ -3847,6 +3879,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           </GeoJSONSource>
         ) : null}
 
+        {/* Closest-medic candidates: one coloured line per medic, fastest green
+            through to slowest red, matching the stripes in the drawer. */}
+        {closestMedicRoutes && closestMedicRoutes.length > 0 ? (
+          <ClosestMedicRoutesLayer
+            medics={closestMedicRoutes}
+            selectedMedicId={selectedClosestMedicId}
+          />
+        ) : null}
+
         {/* Selected exit-point leg. A routed point draws its real path, shaded by
             climb/descent exactly like the race tracks; the off-path stretch the
             router used to hide is drawn dashed, because that part is a carry over
@@ -4775,6 +4816,47 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 duration: 620,
               });
             }}
+            onClosestMedics={(medics) => {
+              setClosestMedicRoutes(medics);
+              if (!medics) {
+                setSelectedClosestMedicId(null);
+                return;
+              }
+              // Hold the collapsed snap the moment the view opens; the routes
+              // themselves may still be loading.
+              markerSheetRef.current?.snapToIndex(0);
+              if (medics.length === 0) return;
+              // Frame the incident plus every candidate medic in the visible
+              // upper half of the map.
+              let minLat = selectedIncident.lat;
+              let maxLat = selectedIncident.lat;
+              let minLng = selectedIncident.lng;
+              let maxLng = selectedIncident.lng;
+              for (const medic of medics) {
+                if (!Number.isFinite(medic.lat) || !Number.isFinite(medic.lng)) continue;
+                minLat = Math.min(minLat, medic.lat);
+                maxLat = Math.max(maxLat, medic.lat);
+                minLng = Math.min(minLng, medic.lng);
+                maxLng = Math.max(maxLng, medic.lng);
+              }
+              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                padding: { top: 90, right: 48, bottom: Math.round(SCREEN_HEIGHT * 0.54), left: 48 },
+                duration: 640,
+              });
+            }}
+            onSelectClosestMedic={(medic) => {
+              setSelectedClosestMedicId(medic?.medicId ?? null);
+              if (!medic) return;
+              // Frame just this medic's leg so its route reads clearly.
+              const minLat = Math.min(medic.lat, selectedIncident.lat);
+              const maxLat = Math.max(medic.lat, selectedIncident.lat);
+              const minLng = Math.min(medic.lng, selectedIncident.lng);
+              const maxLng = Math.max(medic.lng, selectedIncident.lng);
+              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                padding: { top: 100, right: 56, bottom: Math.round(SCREEN_HEIGHT * 0.58), left: 56 },
+                duration: 560,
+              });
+            }}
             onSelectAsphaltPoint={(point) => {
               setSelectedExitPoint(point);
               if (!point) return;
@@ -4894,6 +4976,28 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                       label: selectedMarker.name ?? selectedMarker.label,
                     }}
                   />
+                  {/* Editing the point itself is the coordinator's call — every
+                      medic can still move or archive one from the field. */}
+                  {isCoordinator ? (
+                    <Pressable
+                      style={styles.poiEditBtn}
+                      onPress={() => {
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        setEditingPoi({
+                          id: selectedMarker.id,
+                          type: selectedMarker.poiType,
+                          name: selectedMarker.name,
+                          description: selectedMarker.poiDescription,
+                          icon: selectedMarker.poiIcon,
+                          lat: selectedMarker.lat,
+                          lng: selectedMarker.lng,
+                        });
+                        closeSelection();
+                      }}
+                    >
+                      <Text style={styles.poiEditBtnText}>✏️  Edit point details</Text>
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     style={styles.poiMoveBtn}
                     onPress={() => {
@@ -4907,21 +5011,41 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   >
                     <Text style={styles.poiMoveBtnText}>📍  Move point (tap the new location)</Text>
                   </Pressable>
-                  <Pressable
-                    style={styles.poiArchiveBtn}
-                    onPress={() => {
-                      const poiId = selectedMarker.id;
-                      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                      const existing = useMapStore.getState().markers;
-                      setMarkers(existing.filter((m) => m.id !== poiId));
-                      closeSelection();
-                      void archivePoi(poiId).catch((err) =>
-                        debugLog("api", "error", "archive POI failed", String(err)),
-                      );
-                    }}
-                  >
-                    <Text style={styles.poiArchiveBtnText}>🗄  Archive point (hide for everyone)</Text>
-                  </Pressable>
+                  {selectedMarker.poiArchived ? (
+                    <Pressable
+                      style={styles.poiArchiveBtn}
+                      onPress={() => {
+                        const poiId = selectedMarker.id;
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        const existing = useMapStore.getState().markers;
+                        setMarkers(
+                          existing.map((m) => (m.id === poiId ? { ...m, poiArchived: undefined } : m)),
+                        );
+                        closeSelection();
+                        void updatePoi(poiId, { archived: false }).catch((err) =>
+                          debugLog("api", "error", "restore POI failed", String(err)),
+                        );
+                      }}
+                    >
+                      <Text style={styles.poiArchiveBtnText}>♻️  Restore point (show to everyone)</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={styles.poiArchiveBtn}
+                      onPress={() => {
+                        const poiId = selectedMarker.id;
+                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                        const existing = useMapStore.getState().markers;
+                        setMarkers(existing.filter((m) => m.id !== poiId));
+                        closeSelection();
+                        void archivePoi(poiId).catch((err) =>
+                          debugLog("api", "error", "archive POI failed", String(err)),
+                        );
+                      }}
+                    >
+                      <Text style={styles.poiArchiveBtnText}>🗄  Archive point (hide for everyone)</Text>
+                    </Pressable>
+                  )}
                 </>
               ) : (
                 <>
@@ -5076,6 +5200,18 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           const existing = useMapStore.getState().markers;
           setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
           setPendingPoi(null);
+        }}
+      />
+
+      <EditPoiSheet
+        poi={editingPoi}
+        onClose={() => setEditingPoi(null)}
+        onSaved={(poi: PoiDto) => {
+          // The broadcast lands too, but updating here means the point reads
+          // correctly the moment the sheet closes even on a flaky socket.
+          const existing = useMapStore.getState().markers;
+          setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+          setEditingPoi(null);
         }}
       />
 
@@ -6148,6 +6284,17 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#f25656",
   },
+  poiEditBtn: {
+    marginTop: 4,
+    marginBottom: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.35)",
+    backgroundColor: "rgba(56,189,248,0.08)",
+  },
+  poiEditBtnText: { color: "#38bdf8", fontSize: 13, fontWeight: "800" },
   poiMoveBtn: {
     marginTop: 4,
     marginBottom: 8,

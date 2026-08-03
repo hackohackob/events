@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { IncidentMessage, MedicState } from '@events/contracts'
+import type { IncidentMessage, MedicState, VehicleType } from '@events/contracts'
 import { getActiveMedics } from '@/api/medics'
 import {
   listIncidents,
@@ -252,6 +252,22 @@ export function useLiveMap({ eventId, enabled = true, includeArchived = false }:
     [eventId, scheduleSync],
   )
 
+  /** Re-vehicle a medic mid-event. Patched locally so the drawer reflects the
+   *  change instantly; the server's medic_location broadcast confirms it. */
+  const changeMedicVehicle = useCallback(
+    async (medicId: string, vehicleType: VehicleType) => {
+      if (!eventId) return
+      const existing = medicsRef.current.get(medicId)
+      if (existing) {
+        medicsRef.current.set(medicId, { ...existing, vehicleType })
+        scheduleSync()
+      }
+      const { updateMedicVehicle } = await import('@/api/medics')
+      await updateMedicVehicle(eventId, medicId, vehicleType)
+    },
+    [eventId, scheduleSync],
+  )
+
   const removeActiveMedic = useCallback(
     async (medicId: string) => {
       if (!eventId) return
@@ -390,6 +406,7 @@ export function useLiveMap({ eventId, enabled = true, includeArchived = false }:
     broadcasts,
     dismissBroadcast,
     assignDestination,
+    changeMedicVehicle,
     removeActiveMedic,
     assignIncident,
     unassignIncident,

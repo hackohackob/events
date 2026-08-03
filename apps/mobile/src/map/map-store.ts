@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { VehicleType } from "@events/contracts";
 
 export interface MedicMarkerRoute {
   geometry: Array<[number, number]>;
@@ -18,7 +19,10 @@ interface Marker {
   staleState?: "fresh" | "warning" | "stale" | "offline";
   name?: string;
   bibNumber?: string;
+  /** Free-text unit label shown on the medic sheet. */
   vehicle?: string;
+  /** Typed vehicle from the roster — drives closest-medic ETAs and the glyph. */
+  vehicleType?: VehicleType;
   avatarUrl?: string;
   description?: string;
   respondingIncidentId?: string;

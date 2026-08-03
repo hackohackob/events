@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse, Move, Archive, Eye, Route } from 'lucide-react'
+import { X, Send, CheckCircle2, MessageSquare, ClipboardList, AlertTriangle, MapPin, Pencil, Check, Phone, Pill, Droplet, HeartPulse, Move, Archive, Eye, Route, Radio } from 'lucide-react'
 import VoiceMessage from './VoiceMessage'
 import { closestAsphalt, type AsphaltAccessPoint } from '@/api/routing'
 import type { IncidentMessage } from '@events/contracts'
@@ -14,6 +14,14 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
   in_progress: { label: 'In Progress', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)' },
   resolved:    { label: 'Resolved',    color: '#22c55e', bg: 'rgba(34,197,94,0.14)' },
   closed:      { label: 'Closed',      color: '#64748b', bg: 'rgba(100,116,139,0.14)' },
+}
+
+/**
+ * True for messages the server copied here from the event-wide team chat,
+ * because their author was standing within ~100 m of this incident.
+ */
+function isMirrored(m: IncidentMessage): boolean {
+  return (m.meta as { mirroredFrom?: string } | undefined)?.mirroredFrom === 'event-chat'
 }
 
 function photoSrc(url?: string) {
@@ -614,7 +622,16 @@ export default function IncidentDrawer({
                   <div key={m.id} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.07)' }}>
                     <div className="flex items-center justify-between gap-2 mb-0.5">
                       <span className="text-xs font-bold text-slate-200">{m.authorName}</span>
-                      <span className="text-[10px]" style={{ color: '#475569' }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      {isMirrored(m) && (
+                        <span
+                          className="text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1"
+                          style={{ background: 'rgba(56,189,248,0.12)', color: '#7dd3fc' }}
+                          title="Said in the team chat while standing at this incident"
+                        >
+                          <Radio className="w-2.5 h-2.5" /> TEAM CHAT
+                        </span>
+                      )}
+                      <span className="text-[10px] ml-auto" style={{ color: '#475569' }}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                     {m.audioUrl ? (
                       <div className="mt-1">

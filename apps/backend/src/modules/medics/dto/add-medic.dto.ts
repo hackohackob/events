@@ -1,4 +1,4 @@
-import { AddMedicRequest, MedicType } from "@events/contracts";
+import { AddMedicRequest, MedicType, VEHICLE_TYPES, VehicleType } from "@events/contracts";
 import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class AddMedicDto implements AddMedicRequest {
@@ -13,6 +13,10 @@ export class AddMedicDto implements AddMedicRequest {
   @IsString()
   @IsOptional()
   vehicle?: string;
+
+  @IsOptional()
+  @IsIn(VEHICLE_TYPES)
+  vehicleType?: VehicleType;
 
   @IsOptional()
   @IsIn(["coordinator", "paramedic", "medic"])

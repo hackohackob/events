@@ -1,11 +1,12 @@
 'use client'
 
 import { use, useState, useEffect, useMemo, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
   ChevronRight, Calendar, MapPin, Users, Activity,
   Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
-  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, Check, MessageCircle, ChevronDown, Clock
+  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, MessageCircle, ChevronDown, Clock
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
@@ -17,6 +18,7 @@ import BroadcastModal from '@/components/BroadcastModal'
 import IncidentDrawer from '@/components/IncidentDrawer'
 import MedicDrawer from '@/components/MedicDrawer'
 import ChatDrawer from '@/components/ChatDrawer'
+import PoiDrawer, { type PoiPatch } from '@/components/PoiDrawer'
 import ParticipantsPanel from '@/components/ParticipantsPanel'
 import { useEventChat } from '@/hooks/useEventChat'
 import { useParticipants } from '@/hooks/useParticipants'
@@ -24,9 +26,10 @@ import { useZones } from '@/hooks/useZones'
 import ZonesPanel from '@/components/map/ZonesPanel'
 import TracksPanel, { TrackElevationOverlay } from '@/components/map/TracksPanel'
 import { POI_CONFIGS } from '@/lib/constants'
+import { PoiIcon } from '@/lib/poi-icons'
 import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
-import { updatePoi } from '@/api/events'
+import { updatePoi, archivePoi } from '@/api/events'
 import type { EventMedic, MedicState } from '@events/contracts'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
@@ -328,29 +331,42 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [addPoiType, setAddPoiType] = useState<POIType>('medical-point')
   const [addPoiName, setAddPoiName] = useState('')
   const [localExtraPois, setLocalExtraPois] = useState<PointOfInterest[]>([])
-  const [editingPoiId, setEditingPoiId] = useState<string | null>(null)
-  const [poiDescDraft, setPoiDescDraft] = useState('')
-  const [poiDescOverrides, setPoiDescOverrides] = useState<Record<string, string>>({})
+  // Point whose detail drawer is open (clicked on the map or in the panel).
+  const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null)
+  // Move-point mode: the next map click becomes the point's new position.
+  const [movingPoi, setMovingPoi] = useState<{ id: string; name: string } | null>(null)
 
   // Team zones (medic-only regions): freehand drawing + list management.
   const { zones, createZone, updateZone: patchZone, removeZone } = useZones(id)
   const [zoneDraw, setZoneDraw] = useState(false)
   const [pendingZonePolygon, setPendingZonePolygon] = useState<[number, number][] | null>(null)
 
-  async function savePoiDescription(poiId: string) {
-    const description = poiDescDraft.trim()
-    setPoiDescOverrides(prev => ({ ...prev, [poiId]: description }))
-    setEditingPoiId(null)
-    try {
-      await updatePoi(id, poiId, { description })
-    } catch {/* keep optimistic value */}
+  // POI edits are broadcast to the field over WS, but the dashboard reads its
+  // points off the event document — so refetch it after every change.
+  const queryClient = useQueryClient()
+  const refreshEvent = () => queryClient.invalidateQueries({ queryKey: ['events', id] })
+
+  async function savePoi(poiId: string, patch: PoiPatch) {
+    await updatePoi(id, poiId, patch)
+    await refreshEvent()
+  }
+
+  async function archivePoint(poiId: string) {
+    await archivePoi(id, poiId)
+    setSelectedPoiId(null)
+    await refreshEvent()
+  }
+
+  async function restorePoint(poiId: string) {
+    await updatePoi(id, poiId, { archived: false })
+    await refreshEvent()
   }
 
   const isActive = event?.status === 'active'
   const {
     medics, incidents: liveIncidents, incidentMessages, connected,
     alarmSignal, broadcasts, dismissBroadcast,
-    assignDestination, removeActiveMedic, assignIncident, unassignIncident,
+    assignDestination, changeMedicVehicle, removeActiveMedic, assignIncident, unassignIncident,
     resolveIncident, closeIncident, updateIncidentNotes, moveIncident, archiveIncident,
     loadMessages, sendMessage,
   } = useLiveMap({ eventId: id, enabled: isActive, includeArchived: showArchived })
@@ -482,18 +498,31 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     [trackIds.join('|'), hiddenTrackIds],
   )
 
-  // Archived points are off the board unless archive review is on.
-  const filteredPois = filteredDays.flatMap(d => d.pois || []).filter(p => showArchived || !p.archived)
-
-  const mapPois = [
-    ...filteredPois.map((p, i) => ({
-      id: `poi-${i}`,
-      type: p.type as any,
+  // Every point of the event as the map/drawer model. The server id is carried
+  // through — a positional key would make the marker uneditable and would shift
+  // whenever the day filter changed.
+  const allPoiPoints: PointOfInterest[] = [
+    ...allPois.map((p, i) => ({
+      id: p.id ?? `poi-${i}`,
+      type: p.type as POIType,
       coordinates: [p.lng, p.lat] as [number, number],
       name: p.name,
+      description: p.description,
+      icon: p.icon,
+      archived: p.archived,
     })),
     ...localExtraPois,
   ]
+
+  // On the map: the selected day only, and archived points only in review mode.
+  const poisInSelectedDays = new Set(filteredDays.flatMap(d => d.pois || []))
+  const mapPois = allPoiPoints.filter((point, i) => {
+    const stored = allPois[i]
+    if (!stored) return true // locally-added points are never day-filtered
+    return poisInSelectedDays.has(stored) && (showArchived || !stored.archived)
+  })
+
+  const selectedPoi = allPoiPoints.find(p => p.id === selectedPoiId) ?? null
 
   function handleAddPoi() {
     if (!addPoiCoords) return
@@ -882,60 +911,48 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   </div>
                 )}
 
-                {/* Points of interest — editable descriptions (live + draft) */}
-                {allPois.length > 0 && (
+                {/* Points of interest — each row opens the detail drawer */}
+                {allPoiPoints.length > 0 && (
                   <div>
                     <div className="text-xs font-semibold mb-3" style={{ color: '#64748b' }}>POINTS OF INTEREST</div>
                     <div className="space-y-1.5">
-                      {allPois.map((poi: any, i: number) => {
-                        const poiId = poi.id ?? `idx-${i}`
-                        const desc = poiDescOverrides[poiId] ?? poi.description
-                        const editing = editingPoiId === poiId
-                        const canEdit = Boolean(poi.id)
+                      {allPoiPoints.map(poi => {
+                        const config = POI_CONFIGS.find(c => c.type === poi.type)
+                        const active = selectedPoiId === poi.id
                         return (
-                          <div key={poiId} className="flex items-start gap-2.5 p-2.5 rounded-xl"
-                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(148,163,184,0.07)' }}>
-                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
-                              style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>
-                              {POI_ICON[poi.type] ?? '•'}
+                          <button
+                            key={poi.id}
+                            onClick={() => {
+                              setSelectedIncidentId(null)
+                              setSelectedMedicId(null)
+                              setSelectedPoiId(poi.id)
+                            }}
+                            className="w-full flex items-start gap-2.5 p-2.5 rounded-xl text-left transition-colors hover:bg-white/[0.06]"
+                            style={{
+                              background: active ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${active ? 'rgba(34,197,94,0.3)' : 'rgba(148,163,184,0.07)'}`,
+                              opacity: poi.archived ? 0.55 : 1,
+                            }}
+                          >
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                              style={{ background: `${config?.color ?? '#94a3b8'}22`, color: config?.color ?? '#94a3b8' }}>
+                              <PoiIcon type={poi.type} icon={poi.icon} size={15} color={config?.color ?? '#94a3b8'} />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm font-medium text-slate-200 truncate">
-                                  {poi.name || POI_CONFIGS.find(c => c.type === poi.type)?.label || poi.type}
+                                  {poi.name || config?.label || poi.type}
                                 </span>
-                                {canEdit && !editing && (
-                                  <button onClick={() => { setEditingPoiId(poiId); setPoiDescDraft(desc ?? '') }}
-                                    className="ml-auto p-1 rounded hover:bg-white/10 flex-shrink-0" title="Edit description">
-                                    <Pencil className="w-3 h-3" style={{ color: '#64748b' }} />
-                                  </button>
+                                {poi.archived && (
+                                  <span className="text-[10px] font-bold flex-shrink-0" style={{ color: '#64748b' }}>ARCHIVED</span>
                                 )}
+                                <Pencil className="w-3 h-3 ml-auto flex-shrink-0" style={{ color: '#475569' }} />
                               </div>
-                              {editing ? (
-                                <div className="flex items-center gap-1.5 mt-1.5">
-                                  <input
-                                    autoFocus
-                                    value={poiDescDraft}
-                                    onChange={e => setPoiDescDraft(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter') void savePoiDescription(poiId); if (e.key === 'Escape') setEditingPoiId(null) }}
-                                    placeholder="Short description…"
-                                    className="flex-1 min-w-0 px-2 py-1 rounded-lg text-xs text-slate-100 outline-none"
-                                    style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(34,197,94,0.4)' }}
-                                  />
-                                  <button onClick={() => void savePoiDescription(poiId)} className="p-1 rounded hover:bg-green-500/20">
-                                    <Check className="w-3.5 h-3.5 text-green-400" />
-                                  </button>
-                                  <button onClick={() => setEditingPoiId(null)} className="p-1 rounded hover:bg-white/10">
-                                    <X className="w-3.5 h-3.5 text-slate-500" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="text-xs mt-0.5" style={{ color: desc ? '#94a3b8' : '#475569' }}>
-                                  {desc || 'No description — click ✎ to add one'}
-                                </div>
-                              )}
+                              <div className="text-xs mt-0.5 truncate" style={{ color: poi.description ? '#94a3b8' : '#475569' }}>
+                                {poi.description || 'No description — click to add one'}
+                              </div>
                             </div>
-                          </div>
+                          </button>
                         )
                       })}
                     </div>
@@ -1165,8 +1182,10 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             availableMedics={onlineMedics.map(m => ({ medicId: m.medicId, name: m.name }))}
             availablePois={mapPois}
             onAddPoi={setAddPoiCoords}
-            onIncidentClick={(id) => { setSelectedMedicId(null); setSelectedIncidentId(id) }}
-            onMedicClick={(id) => { setSelectedIncidentId(null); setSelectedMedicId(id) }}
+            onIncidentClick={(id) => { setSelectedMedicId(null); setSelectedPoiId(null); setSelectedIncidentId(id) }}
+            onMedicClick={(id) => { setSelectedIncidentId(null); setSelectedPoiId(null); setSelectedMedicId(id) }}
+            onPoiClick={(poiId) => { setSelectedIncidentId(null); setSelectedMedicId(null); setSelectedPoiId(poiId) }}
+            selectedPoiId={selectedPoiId}
             zones={[
               ...zones.filter(z => z.visible),
               // Preview of the just-drawn (smoothed) region while naming it.
@@ -1180,8 +1199,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               setZoneDraw(false)
               setPendingZonePolygon(polygon)
             }}
-            pickLocationActive={!!movingIncident}
+            pickLocationActive={!!movingIncident || !!movingPoi}
             onPickLocation={([lng, lat]) => {
+              if (movingPoi) {
+                const poiId = movingPoi.id
+                setMovingPoi(null)
+                void updatePoi(id, poiId, { lat, lng }).then(refreshEvent)
+                return
+              }
               if (!movingIncident) return
               const incidentId = movingIncident.id
               setMovingIncident(null)
@@ -1491,6 +1516,42 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
 
+      {/* Point of interest detail drawer (edit / move / archive) */}
+      {selectedPoi && (
+        <PoiDrawer
+          poi={selectedPoi}
+          onClose={() => setSelectedPoiId(null)}
+          onSave={savePoi}
+          onArchive={archivePoint}
+          onRestore={restorePoint}
+          onMove={(poiId) => {
+            const point = allPoiPoints.find(p => p.id === poiId)
+            setMovingPoi({ id: poiId, name: point?.name || 'point' })
+            setSelectedPoiId(null)
+          }}
+          onViewOnMap={(point) => setParticipantFocus({ ...point, nonce: Date.now(), avoidRightDrawer: true })}
+        />
+      )}
+
+      {/* Move-point helper: the next map click relocates the pin. */}
+      {movingPoi && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2.5 rounded-2xl pointer-events-auto"
+          style={{ top: 18, zIndex: 80, background: 'rgba(8,15,28,0.97)', border: '1px solid rgba(56,189,248,0.4)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+        >
+          <span className="text-sm font-semibold" style={{ color: '#7dd3fc' }}>
+            📍 Click the map to move “{movingPoi.name}”
+          </span>
+          <button
+            onClick={() => setMovingPoi(null)}
+            className="text-xs font-bold px-2.5 py-1 rounded-lg"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8' }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {selectedMedic && (
         <MedicDrawer
           medic={selectedMedic}
@@ -1498,6 +1559,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           onClose={() => setSelectedMedicId(null)}
           onAssignToIncident={(medicId, incidentId) => assignIncident(incidentId, medicId)}
           onClearDestination={(medicId) => void assignDestination(medicId, null)}
+          onChangeVehicle={(medicId, vehicleType) => void changeMedicVehicle(medicId, vehicleType)}
         />
       )}
 

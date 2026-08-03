@@ -1,13 +1,91 @@
 export type UserRole = "runner" | "paramedic" | "coordinator" | "spectator" | "medic";
 
+/**
+ * What a medic is travelling with. This drives the routing profile used to
+ * estimate how fast they can reach an incident, so the set is deliberately
+ * ordered slowest → fastest-on-road and every medic always has one ("foot").
+ */
 export type VehicleType =
   | "foot"
-  | "bicycle"
+  | "bike"
   | "e-bike"
-  | "electric-motorcycle"
+  | "e-motorcycle"
+  | "motorcycle"
   | "atv"
-  | "suv"
-  | "ambulance";
+  | "car"
+  | "offroad-car"
+  | "ambulance"
+  | "offroad-ambulance";
+
+/** Canonical order — used for every picker so the lists never disagree. */
+export const VEHICLE_TYPES: VehicleType[] = [
+  "foot",
+  "bike",
+  "e-bike",
+  "e-motorcycle",
+  "motorcycle",
+  "atv",
+  "car",
+  "offroad-car",
+  "ambulance",
+  "offroad-ambulance",
+];
+
+/** Everyone is on foot until someone says otherwise. */
+export const DEFAULT_VEHICLE_TYPE: VehicleType = "foot";
+
+export interface VehicleTypeMeta {
+  label: string;
+  /** Emoji glyph — the one visual the mobile app, dashboard and PWA share. */
+  icon: string;
+  /** True when the vehicle can leave the road network. */
+  offroad: boolean;
+}
+
+export const VEHICLE_TYPE_META: Record<VehicleType, VehicleTypeMeta> = {
+  foot: { label: "On foot", icon: "🚶", offroad: true },
+  bike: { label: "Bike", icon: "🚲", offroad: true },
+  "e-bike": { label: "E-bike", icon: "⚡", offroad: true },
+  "e-motorcycle": { label: "E-motorcycle", icon: "🛵", offroad: true },
+  motorcycle: { label: "Motorcycle", icon: "🏍️", offroad: true },
+  atv: { label: "ATV", icon: "🛻", offroad: true },
+  car: { label: "Car", icon: "🚗", offroad: false },
+  "offroad-car": { label: "Offroad car", icon: "🚙", offroad: true },
+  ambulance: { label: "Ambulance", icon: "🚑", offroad: false },
+  "offroad-ambulance": { label: "Offroad ambulance", icon: "🚐", offroad: true },
+};
+
+/**
+ * Coerce anything stored in the legacy free-text `vehicle` column (or sent by an
+ * older client) into a canonical type. Rosters created before typed vehicles
+ * hold values like "Ambulance Type B" or "Rapid Response SUV", and the event
+ * builder used to copy the medic's *position* ("Mobile", a camp name) in there —
+ * anything unrecognised falls back to {@link DEFAULT_VEHICLE_TYPE}.
+ */
+export function normalizeVehicleType(value: unknown): VehicleType {
+  if (typeof value !== "string") return DEFAULT_VEHICLE_TYPE;
+  const raw = value.trim().toLowerCase();
+  if (!raw) return DEFAULT_VEHICLE_TYPE;
+  if ((VEHICLE_TYPES as string[]).includes(raw)) return raw as VehicleType;
+
+  // Legacy spellings from the first VehicleType union.
+  if (raw === "bicycle") return "bike";
+  if (raw === "electric-motorcycle") return "e-motorcycle";
+  if (raw === "suv") return "offroad-car";
+
+  // Free text, longest/most specific match first ("offroad ambulance" must not
+  // be swallowed by the plain "ambulance" test).
+  const has = (...needles: string[]) => needles.some((n) => raw.includes(n));
+  const offroad = has("offroad", "off-road", "off road", "4x4", "4wd", "suv");
+  if (has("ambulance")) return offroad ? "offroad-ambulance" : "ambulance";
+  if (has("atv", "quad", "utv", "buggy")) return "atv";
+  if (has("moto", "motorbike")) return has("e-", "electric") ? "e-motorcycle" : "motorcycle";
+  if (has("bike", "bicycle", "cycl")) return has("e-", "electric") ? "e-bike" : "bike";
+  if (has("car", "jeep", "van", "truck", "vehicle")) return offroad ? "offroad-car" : "car";
+  if (offroad) return "offroad-car";
+  if (has("foot", "walk", "pedestrian")) return "foot";
+  return DEFAULT_VEHICLE_TYPE;
+}
 
 export type MedicStatus = "available" | "stationary" | "rest" | "going_to" | "sweeper";
 
@@ -44,7 +122,10 @@ export interface EventMedic {
   eventId: string;
   name: string;
   unit?: string;
+  /** Free-text unit/position label ("Mobile", "Base camp") — display only. */
   vehicle?: string;
+  /** What they travel with. Always set; defaults to "foot". */
+  vehicleType: VehicleType;
   type?: MedicType;
   /** Medical skills, e.g. "ALS", "Paediatrics" */
   skills?: string[];
@@ -56,6 +137,7 @@ export interface AddMedicRequest {
   name: string;
   unit?: string;
   vehicle?: string;
+  vehicleType?: VehicleType;
   type?: MedicType;
   skills?: string[];
   capabilities?: string[];
@@ -63,6 +145,11 @@ export interface AddMedicRequest {
 
 export interface UpdateMedicStatusRequest {
   status: Extract<MedicStatus, "available" | "stationary" | "rest" | "sweeper">;
+}
+
+/** Coordinators may re-vehicle anyone mid-event; medics may re-vehicle themselves. */
+export interface UpdateMedicVehicleRequest {
+  vehicleType: VehicleType;
 }
 
 /** Dashboard → all medics broadcast alert */
@@ -111,6 +198,9 @@ export interface MedicState {
   medicId: string;
   eventId: string;
   name: string;
+  /** Roster vehicle, mirrored onto the live state so map clients don't have to
+   *  join against the roster on every position update. */
+  vehicleType?: VehicleType;
   lat: number;
   lng: number;
   heading?: number;
@@ -143,6 +233,56 @@ export interface WsMedicLocation {
 
 export interface AssignMedicDestinationRequest {
   destination: MedicDestination | null;
+}
+
+// ─── Closest medic (incident dispatch) ───────────────────────────────────────
+
+/**
+ * The rank colours the drawer and the map lines share, fastest → slowest. Five
+ * distinguishable hues so a glance at the map tells you which line is whose
+ * without reading a label.
+ */
+export const CLOSEST_MEDIC_COLORS = ["#22c55e", "#a3e635", "#facc15", "#fb923c", "#ef4444"];
+
+/** How many medics the closest-medic search ranks and draws. */
+export const CLOSEST_MEDIC_LIMIT = 5;
+
+export function closestMedicColor(rank: number): string {
+  return CLOSEST_MEDIC_COLORS[Math.min(Math.max(rank, 0), CLOSEST_MEDIC_COLORS.length - 1)];
+}
+
+/** One ranked medic → incident leg, routed on that medic's own vehicle profile. */
+export interface ClosestMedic {
+  medicId: string;
+  name: string;
+  status: MedicStatus;
+  vehicleType: VehicleType;
+  /** Medic's position the leg was measured from. */
+  lat: number;
+  lng: number;
+  /** 0-based rank by travel time — index into {@link CLOSEST_MEDIC_COLORS}. */
+  rank: number;
+  distanceMeters: number;
+  durationMs: number;
+  /**
+   * True when no route could be built and the numbers are a straight-line
+   * estimate at the vehicle's cross-country speed. The client draws these
+   * dashed and says so.
+   */
+  direct: boolean;
+  /** Already responding to this incident. */
+  assigned: boolean;
+  lastSeenAt?: string;
+  battery?: number;
+  /** Drawable, surface-classified path medic → incident. Null for `direct` legs. */
+  route?: { geometry: [number, number][]; segments: MedicRouteSegment[] } | null;
+}
+
+export interface ClosestMedicsResponse {
+  origin: { lat: number; lng: number };
+  medics: ClosestMedic[];
+  /** Medics on the roster that had no position fix and so could not be ranked. */
+  unlocatedCount: number;
 }
 
 // ─── Participant location ─────────────────────────────────────────────────────
