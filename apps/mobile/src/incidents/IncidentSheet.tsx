@@ -1234,13 +1234,14 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                               text={m.transcript}
                               style={styles.voiceTranscript}
                               containerStyle={styles.voiceTranscriptBox}
-                              // The incident bubble is narrower than the team
-                              // chat's, so the same transcript wrapped onto a
-                              // 4th line and the 3-line clamp ate the last few
-                              // words — reading exactly like a failed
-                              // transcription. This is the casualty record;
-                              // show it, and only fold genuinely long notes.
-                              maxLines={12}
+                              // Never clamped here. The incident bubble is
+                              // narrower than the team chat's, so the same
+                              // transcript wrapped onto an extra line and the
+                              // clamp ate the tail — indistinguishable from a
+                              // failed transcription. This is the casualty
+                              // record: the thread already scrolls, so there is
+                              // no reason to ever hide part of it.
+                              maxLines={null}
                             />
                           ) : null}
                         </>
@@ -1599,7 +1600,9 @@ const styles = StyleSheet.create({
   },
 
   // Chat
-  chatList: { gap: 7, marginBottom: 10 },
+  // Negative side margins undo the card's 12px padding for the message list
+  // only, so bubbles get the full sheet width; the composer keeps the inset.
+  chatList: { gap: 7, marginBottom: 10, marginHorizontal: -6 },
   logRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 3 },
   logLine: { flex: 1, height: 1, backgroundColor: "rgba(148,163,184,0.14)" },
   logText: { color: "#7d8ea4", fontSize: 11, fontWeight: "700", textAlign: "center", maxWidth: "78%" },
@@ -1641,8 +1644,11 @@ const styles = StyleSheet.create({
   handoverValue: { color: "#dbe7f3", fontSize: 11.5, fontWeight: "600", lineHeight: 16 },
   handoverEmpty: { color: "#7d8ea4", fontSize: 11.5, fontWeight: "600" },
   bubble: { maxWidth: "85%", borderRadius: 13, paddingVertical: 7, paddingHorizontal: 11 },
-  /** Voice notes: the transcript is the content, so give it nearly the full row. */
-  bubbleVoice: { maxWidth: "97%" },
+  /** Voice notes: the transcript is the content, so give it the whole row. The
+   *  chat card claws back its own side padding (see chatList) so this is wider
+   *  than it looks — the nested paddings were what squeezed transcripts onto an
+   *  extra line in the first place. */
+  bubbleVoice: { maxWidth: "100%", alignSelf: "stretch" },
   bubbleMine: { alignSelf: "flex-end", backgroundColor: "rgba(34,197,94,0.16)", borderTopRightRadius: 4 },
   bubbleOther: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.05)", borderTopLeftRadius: 4 },
   bubbleAuthor: { color: "#93c5fd", fontSize: 10.5, fontWeight: "900", marginBottom: 2 },

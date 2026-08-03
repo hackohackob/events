@@ -15,6 +15,10 @@ import { basename } from "node:path";
  *   • OpenAI `gpt-4o-transcribe` (fallback) — single-call, also strong on BG.
  * Selected by whichever key is present; override with TRANSCRIPTION_PROVIDER.
  */
+/** Soniox poll cadence. 90s of budget covers a long note under load. */
+const SONIOX_POLL_INTERVAL_MS = 1000;
+const SONIOX_POLL_ATTEMPTS = 90;
+
 @Injectable()
 export class TranscriptionService {
   private readonly logger = new Logger(TranscriptionService.name);
@@ -55,7 +59,17 @@ export class TranscriptionService {
           provider === "soniox"
             ? await this.transcribeSoniox(audioPath, mimetype)
             : await this.transcribeOpenAI(audioPath, mimetype);
-        if (text && text.trim()) return text.trim();
+        if (text && text.trim()) {
+          // Logged so "the last words are missing" is answerable from the logs
+          // instead of by re-deriving it from the audio: a suspiciously short
+          // transcript for a long note shows up here as a low word count.
+          const trimmed = text.trim();
+          this.logger.log(
+            `STT ok via ${provider}: ${trimmed.split(/\s+/).length} words, ${trimmed.length} chars ` +
+              `from ${basename(audioPath)}`,
+          );
+          return trimmed;
+        }
       } catch (err) {
         this.logger.warn(`STT provider "${provider}" failed: ${String(err)} — trying next`);
       }
@@ -91,14 +105,30 @@ export class TranscriptionService {
       if (!tid) throw new Error("no transcription id");
 
       try {
-        // Short voice notes finish in ~1-2s; poll up to ~30s then give up.
-        for (let i = 0; i < 30; i += 1) {
+        // Poll until the job reports "completed" — and ONLY then read it.
+        //
+        // This loop used to fall through on timeout and fetch the transcript
+        // anyway. A job that was still running returns the text it has so far,
+        // so a slow transcription silently produced a voice note missing its
+        // last few words, with nothing in the logs to say so. An incomplete job
+        // now throws, which lets the OpenAI fallback have a go instead.
+        let completed = false;
+        for (let i = 0; i < SONIOX_POLL_ATTEMPTS; i += 1) {
           const stRes = await fetch(`${base}/v1/transcriptions/${tid}`, { headers: auth });
           const st = (await stRes.json()) as { status?: string; error_message?: string };
-          if (st.status === "completed") break;
+          if (st.status === "completed") {
+            completed = true;
+            break;
+          }
           if (st.status === "error") throw new Error(st.error_message || "transcription error");
-          await delay(1000);
+          await delay(SONIOX_POLL_INTERVAL_MS);
         }
+        if (!completed) {
+          throw new Error(
+            `still running after ${(SONIOX_POLL_ATTEMPTS * SONIOX_POLL_INTERVAL_MS) / 1000}s — refusing a partial transcript`,
+          );
+        }
+
         const trRes = await fetch(`${base}/v1/transcriptions/${tid}/transcript`, { headers: auth });
         if (!trRes.ok) throw new Error(`transcript ${trRes.status}`);
         return ((await trRes.json()) as { text?: string }).text ?? null;

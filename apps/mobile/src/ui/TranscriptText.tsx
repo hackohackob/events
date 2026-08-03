@@ -18,11 +18,14 @@ interface Props {
   /** Icon tint, matched to the bubble the transcript sits in. */
   iconColor?: string;
   /**
-   * Lines to show before clamping. Raise it where the transcript IS the record
-   * rather than passing chatter — an incident thread is read later by someone
-   * who was not there, and a clipped tail reads as "it did not transcribe".
+   * Lines to show before clamping, or `null` to never clamp.
+   *
+   * Pass `null` where the transcript IS the record rather than passing chatter:
+   * an incident thread is read later by someone who was not there, and a
+   * clipped tail is indistinguishable from a failed transcription — which is
+   * exactly how it was reported.
    */
-  maxLines?: number;
+  maxLines?: number | null;
 }
 
 /**
@@ -47,22 +50,28 @@ export function TranscriptText({
 
   const onMeasure = useCallback(
     (e: { nativeEvent: { lines: unknown[] } }) => {
-      setOverflows(e.nativeEvent.lines.length > maxLines);
+      setOverflows(maxLines != null && e.nativeEvent.lines.length > maxLines);
       setMeasured(true);
     },
     [maxLines],
   );
 
+  // Nothing to measure when it can never clamp — skip the probe pass entirely.
+  const needsProbe = maxLines != null && !measured;
+
   return (
     <View style={[styles.wrap, containerStyle]}>
-      {!measured ? (
+      {needsProbe ? (
         <Text style={[style, styles.probe]} onTextLayout={onMeasure}>
           {text}
         </Text>
       ) : null}
       <View style={styles.row}>
         <Feather name="file-text" size={10} color={iconColor} style={styles.icon} />
-        <Text style={[style, styles.body]} numberOfLines={expanded ? undefined : maxLines}>
+        <Text
+          style={[style, styles.body]}
+          numberOfLines={expanded || maxLines == null ? undefined : maxLines}
+        >
           {text}
         </Text>
         {/* The gutter is always reserved so the measuring pass stays honest. */}
