@@ -7,6 +7,7 @@ import { useSessionStore } from "../security/session-store";
 import { useLocationStatus } from "../debug/location-status";
 import { standDownIncident } from "../ui/event-actions";
 import { debugLog } from "../debug/debug-log";
+import { incidentTitle } from "../incidents/IncidentSheet";
 import { useNavStore } from "./nav-store";
 import { distanceMeters } from "./geo";
 
@@ -62,7 +63,7 @@ export function AssignedIncidentBanner() {
 
   if (!visible || !incident) return null;
 
-  const label = incident.name ?? incident.label ?? "incident";
+  const label = incidentTitle(incident);
   const distance =
     myFix != null
       ? formatDistance(distanceMeters({ lat: myFix.lat, lng: myFix.lng }, { lat: incident.lat, lng: incident.lng }))

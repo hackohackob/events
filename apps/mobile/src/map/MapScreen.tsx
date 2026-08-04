@@ -61,6 +61,7 @@ import {
   IncidentSheet,
   exitColor,
   formatDistance as formatExitDistance,
+  incidentTitle,
   type AsphaltPoint,
 } from "../incidents/IncidentSheet";
 import { ExitPointPreview } from "../incidents/ExitPointPreview";
@@ -2898,31 +2899,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     }
     setActiveTab("map");
     didInitialEventFitRef.current = true; // the tracks-overview fit must not override this
-    // Frame BOTH me and the incident, horizontally centred on their midpoint and
-    // pushed into the upper part of the screen — the incident sheet covers the
-    // lower ~half of the map.
-    const myFix = useLocationStatus.getState().lastFix;
-    if (myFix && isFiniteCoord(myFix.lng, myFix.lat)) {
-      const midLng = (myFix.lng + marker.lng) / 2;
-      const midLat = (myFix.lat + marker.lat) / 2;
-      const latSpan = Math.abs(myFix.lat - marker.lat);
-      const lngSpan = Math.abs(myFix.lng - marker.lng) * Math.cos((midLat * Math.PI) / 180);
-      const spanDeg = Math.max(latSpan, lngSpan, 0.003) * 2.6; // breathing room
-      const zoom = Math.max(10.5, Math.min(16.5, Math.log2(360 / spanDeg)));
-      cameraRef.current?.easeTo({
-        center: [midLng, midLat],
-        zoom,
-        padding: { top: 90, bottom: Math.round(SCREEN_HEIGHT * 0.5), left: 0, right: 0 },
-        duration: 600,
-      });
-    } else {
-      cameraRef.current?.easeTo({
-        center: [marker.lng, marker.lat],
-        zoom: USER_FOCUS_ZOOM,
-        padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.4), left: 0, right: 0 },
-        duration: 550,
-      });
-    }
+    // Go to the point itself, close in.
+    //
+    // This used to frame the midpoint between the medic and the target so both
+    // were on screen. That answers "where is it relative to me", but the actual
+    // question behind tapping a chat card is "what is there" — and when the two
+    // were kilometres apart the fit zoomed out far enough that the point was a
+    // dot in a field of nothing. Distance to it is already on the sheet, and
+    // "Navigate" frames the pair properly.
+    cameraRef.current?.easeTo({
+      center: [marker.lng, marker.lat],
+      zoom: USER_FOCUS_ZOOM,
+      // The sheet covers the lower half, so bias the point into the visible top.
+      padding: { top: 0, bottom: Math.round(SCREEN_HEIGHT * 0.4), left: 0, right: 0 },
+      duration: 550,
+    });
     setSelectedMarkerId(marker.id);
     clearNotificationFocus();
   }, [focusRequestId, focusIncidentId, markers, clearNotificationFocus, refreshIncidents]);
@@ -4943,7 +4934,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 )}
               </View>
               <View style={styles.sheetHeaderTextWrap}>
-                <Text style={styles.sheetTitle}>{selectedMarker.name ?? selectedMarker.label}</Text>
+                <Text style={styles.sheetTitle}>
+                  {selectedMarker.type === "incident" ? incidentTitle(selectedMarker) : selectedMarker.name ?? selectedMarker.label}
+                </Text>
                 <Text style={styles.sheetMetaText}>
                   {selectedMarker.type === "incident"
                     ? `${incidentTypeLabel(selectedIncident?.incidentType)} · ${incidentStatusLabel(selectedIncident?.status)}`

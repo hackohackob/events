@@ -66,6 +66,20 @@ function statusMeta(status?: string) {
   return STATUS_META[status ?? "open"] ?? STATUS_META.open;
 }
 
+/**
+ * What an incident is called on screen. The backend now names new incidents by
+ * category ("Chest pain #34"), but everything raised before that is stored as a
+ * bare "Incident 34" — so the legacy form is rewritten here from the incident's
+ * own type rather than left to read as nothing at all. The sequence survives
+ * either way: it is how the incident gets called over the radio.
+ */
+export function incidentTitle(incident: { name?: string; label?: string; incidentType?: string }): string {
+  const stored = incident.name ?? incident.label ?? "Incident";
+  const legacy = /^incident\s+(\d+)$/i.exec(stored.trim());
+  if (!legacy) return stored;
+  return `${typeMeta(incident.incidentType).label} #${legacy[1]}`;
+}
+
 /** Derive the reporter's role from their user id. Runners (from the participant
  *  PWA) have `runner_*` ids; everyone else reporting today is a medic.
  *  Organizer is reserved for a later role and isn't detected yet. */
@@ -849,7 +863,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
           <Text style={styles.heroIcon}>{type.icon}</Text>
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.title} numberOfLines={1}>{incident.name ?? incident.label}</Text>
+          <Text style={styles.title} numberOfLines={1}>{incidentTitle(incident)}</Text>
           <View style={styles.headerChips}>
             <View style={[styles.statusPill, { backgroundColor: `${status.color}22`, borderColor: `${status.color}66` }]}>
               <View style={[styles.statusDot, { backgroundColor: status.color }]} />
@@ -880,9 +894,10 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
           and got clipped mid-word. Full width, but still one quiet line. */}
       <View style={styles.metaRow}>
         <Text style={styles.metaText} numberOfLines={1}>
-          {[type.label, distanceKm != null ? `${distanceKm.toFixed(1)} km away` : null, reportedAgo]
+          {/* The category leads the title now, so it is not repeated here. */}
+          {[distanceKm != null ? `${distanceKm.toFixed(1)} km away` : null, reportedAgo]
             .filter(Boolean)
-            .join("  ·  ")}
+            .join("  ·  ") || "Locating you…"}
         </Text>
       </View>
 

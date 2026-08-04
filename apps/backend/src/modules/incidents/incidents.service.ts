@@ -113,6 +113,17 @@ interface IncidentRow {
   closed_at: string | null;
 }
 
+/**
+ * "chest_pain" / "chest pain" → "Chest pain" — the human label an incident is
+ * titled by. Categories arrive underscored from the runner PWA and already
+ * spaced from `type`, so both are normalised here.
+ */
+function incidentTitle(type: string | undefined | null): string {
+  const words = (type ?? "").replace(/_/g, " ").trim();
+  if (!words) return "Incident";
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function toIso(value: string | Date | null): string | undefined {
   if (!value) return undefined;
   return typeof value === "string" ? value : new Date(value).toISOString();
@@ -428,7 +439,6 @@ export class IncidentsService implements OnModuleInit {
       [eventId],
     );
     const sequence = Number(countRows[0]?.count ?? 0) + 1;
-    const name = `Incident ${sequence}`;
 
     // Runners send their name in the payload (the session userId is a slug);
     // medics/dashboard resolve from the roster. Prefer an explicit runnerName.
@@ -440,6 +450,13 @@ export class IncidentsService implements OnModuleInit {
     const severity =
       input.severity ?? (category ? INCIDENT_CATEGORY_SEVERITY[category] : null);
     const type = input.type ?? (category ? category.replace(/_/g, " ") : "other");
+
+    // "Chest pain #34" rather than "Incident 34": what it IS is the thing a
+    // medic needs off a notification or a chat line, and it is what the title
+    // has to lead with. The sequence stays on the end — it is how the incident
+    // gets referred to over the radio, and dropping it would cost more than the
+    // words are worth.
+    const name = `${incidentTitle(type)} #${sequence}`;
 
     // Contact + medical enrichment. The reporter's phone is always recorded.
     // For "someone else" we resolve the patient's phone + medical by BIB from

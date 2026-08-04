@@ -19,6 +19,11 @@ import { useLocationStatus } from "../debug/location-status";
 import { useSessionStore } from "../security/session-store";
 import { extractCoordinates, formatCoordinate, type ParsedCoordinate } from "./coordinate-parser";
 import { usePlacesStore, type PlaceCategory, type PlaceMatch } from "./places-store";
+import { VEHICLE_TYPE_META } from "@events/contracts";
+import { useSearchRecents } from "./search-recents";
+import { useMapStore } from "../map/map-store";
+import { incidentTitle } from "../incidents/IncidentSheet";
+import { POI_TYPES } from "../map/poi-types";
 import { debugLog } from "../debug/debug-log";
 
 /** A location the caller can view or navigate to. */
@@ -83,6 +88,11 @@ const FORMAT_LABEL: Record<ParsedCoordinate["format"], string> = {
   geo: "LINK",
 };
 
+/** Glyph + label for a POI type, falling back to the generic "Other" entry. */
+function poiMeta(type?: string) {
+  return POI_TYPES.find((t) => t.id === type) ?? POI_TYPES[POI_TYPES.length - 1];
+}
+
 function distanceKmBetween(latA: number, lngA: number, latB: number, lngB: number): number {
   const toRad = (v: number) => (v * Math.PI) / 180;
   const dLat = toRad(latB - latA);
@@ -108,6 +118,7 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
   const requestSeq = useRef(0);
 
   const role = useSessionStore((s) => s.role);
+  const myId = useSessionStore((s) => s.userId);
   const canSearchRunners = role === "medic" || role === "paramedic" || role === "coordinator";
   const myFix = useLocationStatus((s) => s.lastFix);
   const placesSearch = usePlacesStore((s) => s.search);
@@ -115,8 +126,56 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
 
   // Ensure the offline pack is loaded whenever search opens.
   useEffect(() => {
-    if (visible) void usePlacesStore.getState().ensureLoaded();
+    if (visible) {
+      void usePlacesStore.getState().ensureLoaded();
+      void useSearchRecents.getState().hydrate();
+    }
   }, [visible]);
+
+  // ── What's already on the map ──
+  // An empty search box used to be a paragraph of help text. Everything a medic
+  // is most likely to be looking for is already in memory — the open incidents,
+  // the team, the event's own points — so it becomes a jump list instead. All of
+  // it works offline; none of it costs a request.
+  const markers = useMapStore((s) => s.markers);
+  const recents = useSearchRecents((s) => s.recents);
+  const clearRecents = useSearchRecents((s) => s.clear);
+
+  const nearestFirst = <T extends { lat: number; lng: number }>(list: T[]): T[] => {
+    if (!myFix) return list;
+    return [...list].sort(
+      (a, b) =>
+        distanceKmBetween(myFix.lat, myFix.lng, a.lat, a.lng) -
+        distanceKmBetween(myFix.lat, myFix.lng, b.lat, b.lng),
+    );
+  };
+
+  const openIncidents = useMemo(
+    () =>
+      nearestFirst(
+        markers.filter(
+          (m) =>
+            m.type === "incident" &&
+            m.status !== "resolved" &&
+            m.status !== "closed" &&
+            m.status !== "archived",
+        ),
+      ).slice(0, 6),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [markers, myFix],
+  );
+
+  const teamMarkers = useMemo(
+    () => nearestFirst(markers.filter((m) => m.type === "paramedic" && m.id !== myId)).slice(0, 6),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [markers, myFix, myId],
+  );
+
+  const poiMarkers = useMemo(
+    () => nearestFirst(markers.filter((m) => m.type === "infrastructure" && !m.poiArchived)).slice(0, 8),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [markers, myFix],
+  );
 
   useEffect(() => {
     if (visible) {
@@ -192,11 +251,13 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
   const view = (target: SearchTarget) => {
     Keyboard.dismiss();
     void Haptics.selectionAsync();
+    useSearchRecents.getState().remember(target);
     onView(target);
   };
   const navigate = (target: SearchTarget) => {
     Keyboard.dismiss();
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    useSearchRecents.getState().remember(target);
     onNavigate(target);
   };
 
@@ -379,24 +440,161 @@ export function SearchOverlay({ visible, onClose, onView, onNavigate }: Props) {
             </>
           ) : null}
 
-          {/* ── States ── */}
+          {/* ── Empty box: a jump list of what's already on the map ── */}
           {showEmptyState ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🧭</Text>
-              <Text style={styles.emptyTitle}>Find anything on the map</Text>
-              <Text style={styles.emptyBody}>
-                Towns, villages, peaks, rivers, localities — or paste coordinates in any format
-                (42.6977, 23.3219 · 42°41'52"N · UTM), even buried inside a longer message.
-              </Text>
-              {packCount > 0 ? (
-                <View style={styles.packBadge}>
-                  <Feather name="download-cloud" size={12} color="#34d399" />
-                  <Text style={styles.packBadgeText}>
-                    {packCount} places along the course available offline
-                  </Text>
-                </View>
+            <>
+              {recents.length > 0 ? (
+                <>
+                  <View style={styles.kickerRow}>
+                    <Text style={styles.sectionKicker}>RECENT</Text>
+                    <Pressable onPress={clearRecents} hitSlop={8}>
+                      <Text style={styles.clearLink}>Clear</Text>
+                    </Pressable>
+                  </View>
+                  {recents.map((recent) => {
+                    const dist = distanceLabel(recent.lat, recent.lng);
+                    const target = {
+                      lat: recent.lat,
+                      lng: recent.lng,
+                      label: recent.label,
+                      icon: recent.icon,
+                    };
+                    return (
+                      <Pressable
+                        key={`${recent.label}-${recent.at}`}
+                        style={styles.row}
+                        onPress={() => view(target)}
+                      >
+                        <View style={styles.rowIcon}>
+                          {recent.icon ? (
+                            <Text style={styles.rowIconEmoji} allowFontScaling={false}>{recent.icon}</Text>
+                          ) : (
+                            <Feather name="clock" size={15} color="#7e93ac" />
+                          )}
+                        </View>
+                        <View style={styles.rowText}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{recent.label}</Text>
+                          <Text style={styles.rowMeta}>{dist ? `${dist} away` : "Recently viewed"}</Text>
+                        </View>
+                        <Pressable style={styles.navBtn} hitSlop={4} onPress={() => navigate(target)}>
+                          <Feather name="navigation" size={15} color="#04121f" />
+                        </Pressable>
+                      </Pressable>
+                    );
+                  })}
+                </>
               ) : null}
-            </View>
+
+              {openIncidents.length > 0 ? (
+                <>
+                  <Text style={styles.sectionKicker}>OPEN INCIDENTS  ·  {openIncidents.length}</Text>
+                  {openIncidents.map((incident) => {
+                    const dist = distanceLabel(incident.lat, incident.lng);
+                    const target = {
+                      lat: incident.lat,
+                      lng: incident.lng,
+                      label: incidentTitle(incident),
+                      icon: "🚨",
+                    };
+                    return (
+                      <Pressable key={incident.id} style={[styles.row, styles.incidentRow]} onPress={() => view(target)}>
+                        <View style={[styles.rowIcon, styles.incidentIcon]}>
+                          <Text style={styles.rowIconEmoji} allowFontScaling={false}>🚨</Text>
+                        </View>
+                        <View style={styles.rowText}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{incidentTitle(incident)}</Text>
+                          <Text style={styles.rowMeta} numberOfLines={1}>
+                            {(incident.status ?? "open").replace(/_/g, " ")}
+                            {dist ? `  ·  ${dist} away` : ""}
+                          </Text>
+                        </View>
+                        <Pressable style={styles.navBtn} hitSlop={4} onPress={() => navigate(target)}>
+                          <Feather name="navigation" size={15} color="#04121f" />
+                        </Pressable>
+                      </Pressable>
+                    );
+                  })}
+                </>
+              ) : null}
+
+              {teamMarkers.length > 0 ? (
+                <>
+                  <Text style={styles.sectionKicker}>TEAM</Text>
+                  {teamMarkers.map((medic) => {
+                    const dist = distanceLabel(medic.lat, medic.lng);
+                    const vehicle = medic.vehicleType ? VEHICLE_TYPE_META[medic.vehicleType] : null;
+                    const label = medic.name ?? medic.label;
+                    const target = { lat: medic.lat, lng: medic.lng, label, icon: vehicle?.icon ?? "🚑" };
+                    return (
+                      <Pressable key={medic.id} style={styles.row} onPress={() => view(target)}>
+                        <View style={[styles.rowIcon, styles.medicIcon]}>
+                          <Text style={styles.rowIconEmoji} allowFontScaling={false}>
+                            {vehicle?.icon ?? "🚑"}
+                          </Text>
+                        </View>
+                        <View style={styles.rowText}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{label}</Text>
+                          <Text style={styles.rowMeta} numberOfLines={1}>
+                            {[vehicle?.label, (medic.status ?? "available").replace(/_/g, " "), dist ? `${dist} away` : null]
+                              .filter(Boolean)
+                              .join("  ·  ")}
+                          </Text>
+                        </View>
+                        <Feather name="map-pin" size={16} color="#64748b" />
+                      </Pressable>
+                    );
+                  })}
+                </>
+              ) : null}
+
+              {poiMarkers.length > 0 ? (
+                <>
+                  <Text style={styles.sectionKicker}>EVENT POINTS</Text>
+                  {poiMarkers.map((poi) => {
+                    const meta = poiMeta(poi.poiType);
+                    const dist = distanceLabel(poi.lat, poi.lng);
+                    const label = poi.name ?? poi.label;
+                    const target = { lat: poi.lat, lng: poi.lng, label, icon: meta.icon };
+                    return (
+                      <Pressable key={poi.id} style={styles.row} onPress={() => view(target)}>
+                        <View style={styles.rowIcon}>
+                          <Text style={styles.rowIconEmoji} allowFontScaling={false}>{meta.icon}</Text>
+                        </View>
+                        <View style={styles.rowText}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{label}</Text>
+                          <Text style={styles.rowMeta} numberOfLines={1}>
+                            {meta.label}
+                            {dist ? `  ·  ${dist} away` : ""}
+                          </Text>
+                        </View>
+                        <Pressable style={styles.navBtn} hitSlop={4} onPress={() => navigate(target)}>
+                          <Feather name="navigation" size={15} color="#04121f" />
+                        </Pressable>
+                      </Pressable>
+                    );
+                  })}
+                </>
+              ) : null}
+
+              {/* The old help card, kept but demoted to a footer — it matters
+                  once, when you don't know coordinates can be pasted. */}
+              <View style={styles.hintCard}>
+                <Text style={styles.hintTitle}>Search anything</Text>
+                <Text style={styles.hintBody}>
+                  Towns, peaks, rivers and localities — or paste coordinates in any format
+                  (42.6977, 23.3219 · 42°41'52"N · UTM), even buried in a longer message.
+                  {canSearchRunners ? " A bare number finds a participant by bib." : ""}
+                </Text>
+                {packCount > 0 ? (
+                  <View style={styles.packBadge}>
+                    <Feather name="download-cloud" size={12} color="#34d399" />
+                    <Text style={styles.packBadgeText}>
+                      {packCount} course places available offline
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            </>
           ) : null}
           {nothingFound ? (
             <View style={styles.emptyState}>
@@ -514,6 +712,29 @@ const styles = StyleSheet.create({
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14 },
   loadingText: { color: "#64748b", fontSize: 12.5, fontWeight: "600" },
 
+  kickerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  clearLink: { color: "#5b6b80", fontSize: 11.5, fontWeight: "800" },
+  incidentRow: { borderColor: "rgba(248,113,113,0.22)", borderWidth: 1 },
+  incidentIcon: { backgroundColor: "rgba(248,113,113,0.14)" },
+  medicIcon: { backgroundColor: "rgba(52,211,153,0.12)" },
+  hintCard: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.1)",
+    alignItems: "center",
+  },
+  hintTitle: { color: "#8da3bd", fontSize: 13, fontWeight: "900" },
+  hintBody: {
+    color: "#5b6b80",
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 17,
+  },
   emptyState: { alignItems: "center", paddingTop: 60, paddingHorizontal: 30 },
   emptyEmoji: { fontSize: 40 },
   emptyTitle: { color: "#cbd5e1", fontSize: 17, fontWeight: "900", marginTop: 14 },
