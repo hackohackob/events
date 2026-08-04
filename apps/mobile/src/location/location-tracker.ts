@@ -41,6 +41,30 @@ const NAV_MODE_INTERVAL_MS = 5_000;
 const IOS_IDLE_DISTANCE_FILTER_M = 35;
 
 /**
+ * The accuracy tier the OS should be running at right now.
+ *
+ * `Balanced` is the one setting that genuinely powers the GPS down on Android:
+ * it maps to PRIORITY_BALANCED_POWER_ACCURACY, which is served from wifi and
+ * cell towers instead of the satellite radio (on iOS, kCLLocationAccuracy-
+ * HundredMeters). It costs a fraction of `High` and gives roughly 100 m.
+ *
+ * That is the right trade for a medic holding a post and only the wrong one for
+ * a medic on the move — which is why it is tied to the declared status rather
+ * than guessed. The two ways a stationary medic starts moving both clear it on
+ * their own: being dispatched sets the status to `going_to`, and starting
+ * navigation sets navModeActive. Both restart tracking with a sharper tier.
+ */
+function effectiveAccuracy(): ExpoLocation.LocationAccuracy {
+  if (navModeActive) return ExpoLocation.Accuracy.BestForNavigation;
+  return useSettingsStore.getState().stationaryMode
+    ? ExpoLocation.Accuracy.Balanced
+    : ExpoLocation.Accuracy.High;
+}
+
+/** Speed that is unambiguously travel rather than GPS noise (≈7 km/h). */
+const MOVING_SPEED_MPS = 2;
+
+/**
  * Re-send the last known position on this cadence when the GPS has legitimately
  * gone quiet (iOS stationary + distance filter). Nothing is measured — it is the
  * cached fix with its original timestamp — so it costs a request and no radio
@@ -220,6 +244,19 @@ async function sendLocation(
       at: Date.now(),
     });
     return;
+  }
+
+  // A medic who declared "holding a post" and is now clearly travelling is
+  // being tracked coarse (Balanced) and slow (the stationary floor). Being
+  // dispatched or starting navigation both clear the status on their own, so
+  // this only catches someone who simply forgot — log it, because the symptom
+  // (a lagging, ~100 m dot) is otherwise very hard to explain after the fact.
+  const speed = location.coords.speed ?? 0;
+  if (!navModeActive && speed > MOVING_SPEED_MPS && useSettingsStore.getState().stationaryMode) {
+    debugLog("location", "warn", "moving while status is 'stationary' — tracking is coarse and slow", {
+      speedMps: Math.round(speed * 10) / 10,
+      hint: "switch status off 'On post' for full accuracy",
+    });
   }
 
   // Count the attempt, not the success: if the network is down every fix would
@@ -420,7 +457,7 @@ function stopHeartbeat(): void {
 
 let directWatchSub: ExpoLocation.LocationSubscription | null = null;
 
-async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<void> {
+async function startDirectWatch(intervalMs: number): Promise<void> {
   directWatchSub?.remove();
   directWatchSub = null;
   try {
@@ -430,8 +467,9 @@ async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<v
         // bucket as BestForNavigation on Android — so this costs Android
         // nothing and takes iOS off its most expensive setting. Ten metres is
         // far finer than anyone needs to find a colleague on a map; the extra
-        // power went to the last few metres nobody reads.
-        accuracy: ExpoLocation.Accuracy.High,
+        // power went to the last few metres nobody reads. Drops to Balanced
+        // while holding a post — see effectiveAccuracy.
+        accuracy: effectiveAccuracy(),
         timeInterval: intervalMs,
         // Android paces itself by time, so a distance gate there would only
         // silence a stationary medic. iOS has nothing BUT this gate.
@@ -640,12 +678,10 @@ export async function startLocationLoop(): Promise<boolean> {
       try {
         const ios = Platform.OS === "ios";
         await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-          // Navigation still asks for the best fix money can buy; idle tracking
-          // does not need it on either platform (see startDirectWatch).
-          accuracy:
-            navModeActive && isMedic
-              ? ExpoLocation.Accuracy.BestForNavigation
-              : ExpoLocation.Accuracy.High,
+          // Navigation asks for the best fix money can buy, holding a post asks
+          // for the cheapest that still finds someone, everything else sits in
+          // between. See effectiveAccuracy.
+          accuracy: effectiveAccuracy(),
           timeInterval: intervalMs,
           // iOS has no time gate, so this is the only one it gets. Android keeps
           // 0 — its interval already paces it and a distance gate there would
@@ -714,7 +750,7 @@ export async function startLocationLoop(): Promise<boolean> {
       directWatchSub = null;
       debugLog("location", "info", "direct watch skipped — nav watcher owns foreground delivery");
     } else {
-      await startDirectWatch(isMedic, intervalMs);
+      await startDirectWatch(intervalMs);
     }
   } catch (err) {
     debugLog("location", "error", "background location updates failed to start", String(err));
@@ -751,7 +787,7 @@ export async function setNavModeTracking(active: boolean): Promise<void> {
       // No background task (e.g. the known Android NPE) — just restore the
       // direct watch when navigation ends; nothing else to restart.
       if (!active && useSessionStore.getState().token) {
-        await startDirectWatch(isMedicSession(), effectiveLocationIntervalMs());
+        await startDirectWatch(effectiveLocationIntervalMs());
       }
       return;
     }
@@ -822,7 +858,7 @@ export async function ensureTrackingAlive(): Promise<void> {
     // the 2-minute watchdog cooldown, and keep the direct watch alive meanwhile.
     if (Date.now() < bgTaskRetryAfter) {
       if (!directWatchSub && !navModeActive) {
-        await startDirectWatch(isMedicSession(), effectiveLocationIntervalMs());
+        await startDirectWatch(effectiveLocationIntervalMs());
       }
       return;
     }

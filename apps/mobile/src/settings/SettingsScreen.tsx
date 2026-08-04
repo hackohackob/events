@@ -6,7 +6,6 @@ import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPE_META, VEHICLE_TYPES, type VehicleTyp
 import {
   KM_MARKER_INTERVAL_OPTIONS,
   LOCATION_INTERVAL_OPTIONS,
-  STATIONARY_INTERVAL_MS,
   useSettingsStore,
 } from "./settings-store";
 import { startLocationLoop } from "../location/location-tracker";
@@ -36,10 +35,10 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
   const setKmMarkerIntervalKm = useSettingsStore((s) => s.setKmMarkerIntervalKm);
   const showArchived = useSettingsStore((s) => s.showArchived);
   const setShowArchived = useSettingsStore((s) => s.setShowArchived);
+  // A stationary medic is throttled to the stationary floor AND measured coarse —
+  // say so, otherwise the picker looks broken ("I chose 1 min and it sends every
+  // 7") and their own dot drifting 100 m looks like a bug.
   const stationaryMode = useSettingsStore((s) => s.stationaryMode);
-  // A stationary medic is throttled to the stationary floor — say so, otherwise
-  // the picker looks broken ("I chose 1 min and it sends every 7").
-  const stationaryOverridden = stationaryMode && locationIntervalMs < STATIONARY_INTERVAL_MS;
 
   const pickInterval = (ms: number) => {
     if (ms === locationIntervalMs) return;
@@ -292,9 +291,12 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
               })}
             </View>
           ) : null}
+          {/* The stationary trade-off is deliberately spelled out: it costs
+              accuracy as well as cadence, and a medic seeing their own dot drift
+              ~100 m should be able to find out why without asking. */}
           <Text style={styles.note}>
-            {stationaryOverridden
-              ? "You are Stationary — updates are throttled to every 7 min until you go back to Available."
+            {stationaryMode
+              ? "You are On post — location is sent every 7 min and measured to about 100 m, using far less battery. Switch back to Available for full accuracy; being dispatched or starting navigation does it automatically."
               : "Lower frequencies save battery. A persistent notification keeps tracking alive in the background."}
           </Text>
         </View>
