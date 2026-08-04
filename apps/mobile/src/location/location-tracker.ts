@@ -20,6 +20,35 @@ export const LOCATION_TASK_NAME = "background-location-task";
  *  but the dashboard still needs a near-live position + ETA. */
 const NAV_MODE_INTERVAL_MS = 5_000;
 
+// ─── iOS power shaping ───────────────────────────────────────────────────────
+//
+// iOS has no time-based location interval. CLLocationManager is driven by
+// `desiredAccuracy` + `distanceFilter` alone — expo-location's iOS providers
+// read exactly those two and never look at `timeInterval` (see
+// ios/Providers/BaseLocationProvider.swift and ios/LocationOptions.swift).
+//
+// So "every 3 minutes" was never a power setting on iPhone: asking for
+// BestForNavigation with distanceFilter 0 pins the GPS radio on at its highest
+// power state permanently, and the JS send-gate below simply discarded the
+// fixes it did not need. That throttled the network and the server, not the
+// battery. These constants make the OS itself do the throttling.
+//
+// Android is unaffected: its interval genuinely works (LocationRequest sets
+// both interval and minUpdateInterval), so it keeps reporting on time and keeps
+// distanceInterval 0 so a stationary medic is never suppressed.
+
+/** Metres of movement before iOS delivers another fix during normal tracking. */
+const IOS_IDLE_DISTANCE_FILTER_M = 35;
+
+/**
+ * Re-send the last known position on this cadence when the GPS has legitimately
+ * gone quiet (iOS stationary + distance filter). Nothing is measured — it is the
+ * cached fix with its original timestamp — so it costs a request and no radio
+ * time, and it stops a medic holding a post from decaying to "offline" on
+ * everyone else's map.
+ */
+const HEARTBEAT_CHECK_MS = 60_000;
+
 const locationQueue = new OfflineQueue<Record<string, unknown>>();
 let openedBackgroundLocationSettings = false;
 let promptedBatteryExemption = false;
@@ -159,7 +188,7 @@ async function readBatteryCharging(): Promise<boolean | undefined> {
  */
 async function sendLocation(
   location: ExpoLocation.LocationObject,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; heartbeat?: boolean } = {},
 ): Promise<void> {
   const session = useSessionStore.getState();
   const isMedic = session.role === "medic" || session.role === "paramedic";
@@ -168,7 +197,10 @@ async function sendLocation(
   // together (the AppState listener and startLocationLoop's own), both "forced"
   // past the throttle, and both resolve to the same cached position — that is
   // the burst of three sends in one second seen in the log.
-  if (location.timestamp === lastReportedFixTimestamp) return;
+  //
+  // The heartbeat is the deliberate exception: resending the SAME fix is the
+  // whole point of it, so that a medic who has not moved still reads as present.
+  if (!opts.heartbeat && location.timestamp === lastReportedFixTimestamp) return;
 
   // Pace the reports. Nav has its own cadence (sendNavLocationFix throttles to
   // NAV_FOREGROUND_SEND_INTERVAL_MS) and one-shots are explicit user/app intent,
@@ -329,6 +361,61 @@ const STALE_FIX_MAX_AGE_MS = 30_000;
 let lastDeliveredFixTimestamp = 0;
 let lastDeliveredAt = 0;
 
+// ─── Heartbeat ───────────────────────────────────────────────────────────────
+
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Re-send the last known position when the GPS has been legitimately quiet for
+ * longer than the reporting interval.
+ *
+ * Letting iOS park the radio while a medic stands still is most of the battery
+ * win, but it has a cost: a medic holding a post produces no fixes, so their
+ * marker ages out and the rest of the team reads them as offline. This resends
+ * what we already have — no measurement, no radio — carrying the ORIGINAL fix
+ * timestamp, so the server records an honest "position from 6 minutes ago, medic
+ * still with us" rather than pretending it is fresh.
+ */
+function startHeartbeat(): void {
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(() => {
+    // Navigation reports continuously; nothing to prop up.
+    if (navModeActive) return;
+    const session = useSessionStore.getState();
+    if (!session.eventId) return;
+    const fix = useLocationStatus.getState().lastFix;
+    if (!fix) return;
+
+    const quietFor = Date.now() - lastSendAt;
+    if (quietFor < effectiveLocationIntervalMs() + SEND_SLACK_MS) return;
+    if (!isOnline()) return;
+
+    noteEnergyEvent("heartbeat");
+    void sendLocation(
+      {
+        coords: {
+          latitude: fix.lat,
+          longitude: fix.lng,
+          accuracy: fix.accuracy ?? null,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        // The real age of the position, not now — the server and every
+        // freshness dot downstream depend on this being truthful.
+        timestamp: fix.at,
+      } as ExpoLocation.LocationObject,
+      { force: true, heartbeat: true },
+    );
+  }, HEARTBEAT_CHECK_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
 // ─── Direct watch (primary background delivery) ──────────────────────────────
 
 let directWatchSub: ExpoLocation.LocationSubscription | null = null;
@@ -339,9 +426,16 @@ async function startDirectWatch(isMedic: boolean, intervalMs: number): Promise<v
   try {
     directWatchSub = await ExpoLocation.watchPositionAsync(
       {
-        accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
+        // High is nearestTenMeters on iOS and the same PRIORITY_HIGH_ACCURACY
+        // bucket as BestForNavigation on Android — so this costs Android
+        // nothing and takes iOS off its most expensive setting. Ten metres is
+        // far finer than anyone needs to find a colleague on a map; the extra
+        // power went to the last few metres nobody reads.
+        accuracy: ExpoLocation.Accuracy.High,
         timeInterval: intervalMs,
-        distanceInterval: 0,
+        // Android paces itself by time, so a distance gate there would only
+        // silence a stationary medic. iOS has nothing BUT this gate.
+        distanceInterval: Platform.OS === "ios" ? IOS_IDLE_DISTANCE_FILTER_M : 0,
       },
       (location) => {
         noteEnergyEvent("gpsFix");
@@ -544,12 +638,31 @@ export async function startLocationLoop(): Promise<boolean> {
       });
     } else {
       try {
+        const ios = Platform.OS === "ios";
         await ExpoLocation.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-          accuracy: isMedic ? ExpoLocation.Accuracy.BestForNavigation : ExpoLocation.Accuracy.High,
+          // Navigation still asks for the best fix money can buy; idle tracking
+          // does not need it on either platform (see startDirectWatch).
+          accuracy:
+            navModeActive && isMedic
+              ? ExpoLocation.Accuracy.BestForNavigation
+              : ExpoLocation.Accuracy.High,
           timeInterval: intervalMs,
-          distanceInterval: 0,
-          deferredUpdatesInterval: 0,
+          // iOS has no time gate, so this is the only one it gets. Android keeps
+          // 0 — its interval already paces it and a distance gate there would
+          // only silence a medic holding a post.
+          distanceInterval: ios && !navModeActive ? IOS_IDLE_DISTANCE_FILTER_M : 0,
+          // iOS honours these two in the task consumer (EXLocationTaskConsumer)
+          // and they are what batches delivery to our configured cadence instead
+          // of waking the JS runtime for every fix the GPS produces. Android
+          // keeps 0 — its own interval already paces it and deferring would just
+          // add latency.
+          deferredUpdatesInterval: ios && !navModeActive ? intervalMs : 0,
           deferredUpdatesDistance: 0,
+          // Tells iOS what kind of movement to expect so it can shut the radio
+          // down sensibly between fixes. Only the task path reads it.
+          activityType: navModeActive
+            ? ExpoLocation.ActivityType.OtherNavigation
+            : ExpoLocation.ActivityType.Fitness,
           mayShowUserSettingsDialog: true,
           foregroundService: {
             notificationTitle: "Extreme Medics — live tracking",
@@ -560,6 +673,17 @@ export async function startLocationLoop(): Promise<boolean> {
             killServiceOnDestroy: false,
           },
           showsBackgroundLocationIndicator: true,
+          // Deliberately left OFF, even though it is the single biggest iOS
+          // battery lever available.
+          //
+          // When iOS pauses updates it does not resume on its own: expo-location
+          // does not implement locationManagerDidPauseLocationUpdates, so the
+          // only wake-up is significant-change monitoring, which needs roughly a
+          // cell-tower's worth of movement. A medic who walks 150 m from their
+          // post would keep reporting the post — and the heartbeat would keep
+          // insisting they are online there. A silently wrong position is far
+          // worse than a flat battery, so this stays false until we can drive
+          // the resume ourselves.
           pausesUpdatesAutomatically: false,
         });
 
@@ -597,7 +721,12 @@ export async function startLocationLoop(): Promise<boolean> {
     return false;
   }
 
-  // 5. Fire an immediate one-shot send so the map shows a position right away.
+  // 5. Keep a medic who is standing still on everyone's map. Only matters once
+  //    the OS is allowed to stop producing fixes, but it is harmless otherwise —
+  //    it only fires after a full interval of silence.
+  startHeartbeat();
+
+  // 6. Fire an immediate one-shot send so the map shows a position right away.
   void sendCurrentLocationNow();
   return true;
 }
@@ -708,6 +837,7 @@ export async function ensureTrackingAlive(): Promise<void> {
 }
 
 export async function stopLocationLoop(): Promise<void> {
+  stopHeartbeat();
   directWatchSub?.remove();
   directWatchSub = null;
   const running = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
