@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { AppState } from "react-native";
+import { useState } from "react";
+import { useForegroundInterval } from "../ui/useForegroundInterval";
 
 /**
  * Shared "ant-march" ticker for animated dashed route lines.
@@ -16,27 +16,13 @@ const DASH_TICK_MS = 400;
 export function useMarchingDash(sequenceLength: number): number {
   const [dashIndex, setDashIndex] = useState(0);
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (timer == null) timer = setInterval(() => setDashIndex((i) => (i + 1) % sequenceLength), DASH_TICK_MS);
-    };
-    const stop = () => {
-      if (timer != null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-    if (AppState.currentState === "active") start();
-    const sub = AppState.addEventListener("change", (next) => {
-      if (next === "active") start();
-      else stop();
-    });
-    return () => {
-      stop();
-      sub.remove();
-    };
-  }, [sequenceLength]);
+  // leading: false — an immediate tick on every foreground would jump the dash
+  // pattern rather than continue it, and nothing here is stale enough to care.
+  useForegroundInterval(
+    () => setDashIndex((i) => (i + 1) % sequenceLength),
+    DASH_TICK_MS,
+    { leading: false },
+  );
 
   return dashIndex;
 }

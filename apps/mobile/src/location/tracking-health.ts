@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { AppState } from "react-native";
+import { useEffect, useRef, useState } from "react";
 import * as ExpoLocation from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { LOCATION_TASK_NAME } from "./location-tracker";
 import { isBatteryOptimizationIgnored } from "./battery-optimization";
+import { useForegroundInterval } from "../ui/useForegroundInterval";
 
 export interface TrackingHealth {
   ok: boolean;
@@ -30,27 +30,30 @@ async function readTrackingHealth(): Promise<TrackingHealth> {
 
 /**
  * Poll the tracking-health signals (permissions, background task, battery
- * restriction) so the UI can flag a problem on the locate button. Re-checks on
- * a slow interval and whenever the app returns to the foreground (the user may
- * have just toggled a setting).
+ * restriction) so the UI can flag a problem on the locate button.
+ *
+ * Foreground-only, and deliberately so: every pass is four native round trips,
+ * and it exists purely to colour an icon. Behind a locked screen it was 180
+ * probes an hour that nothing could act on — the user cannot grant a permission
+ * they are not looking at. Returning to the app re-checks immediately (the
+ * leading tick), which is exactly when a setting may have just been toggled.
  */
 export function useTrackingHealth(): TrackingHealth {
   const [health, setHealth] = useState<TrackingHealth>({ ok: true, issues: [] });
+  const alive = useRef(true);
 
   useEffect(() => {
-    let active = true;
-    const check = () => void readTrackingHealth().then((h) => active && setHealth(h));
-    check();
-    const interval = setInterval(check, 20_000);
-    const sub = AppState.addEventListener("change", (next) => {
-      if (next === "active") check();
-    });
+    alive.current = true;
     return () => {
-      active = false;
-      clearInterval(interval);
-      sub.remove();
+      alive.current = false;
     };
   }, []);
+
+  useForegroundInterval(() => {
+    void readTrackingHealth().then((h) => {
+      if (alive.current) setHealth(h);
+    });
+  }, 20_000);
 
   return health;
 }

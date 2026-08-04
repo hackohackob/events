@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useForegroundInterval } from "../ui/useForegroundInterval";
 import { Feather } from "@expo/vector-icons";
 
 interface Props {
@@ -35,11 +36,14 @@ export const IMPRECISE_ACCURACY_M = 200;
 export function MedicDot({ initials, dotColor, isGrey, isResponding, isStationary, isSweeper, isGoingToPoint, isImprecise = false, dimmed = false, selected = false }: Props) {
   const [flashBlue, setFlashBlue] = useState(false);
 
-  useEffect(() => {
-    if (!isResponding || isGrey) return;
-    const timer = setInterval(() => setFlashBlue((v) => !v), FLASH_MS);
-    return () => clearInterval(timer);
-  }, [isResponding, isGrey]);
+  // Foreground-only: one 460ms timer PER responding medic, and the map stays
+  // mounted behind a locked screen. Flashing lights nobody can see are the
+  // clearest possible waste.
+  useForegroundInterval(
+    () => setFlashBlue((v) => !v),
+    isResponding && !isGrey ? FLASH_MS : null,
+    { leading: false },
+  );
 
   const responding = isResponding && !isGrey;
   const background = responding ? (flashBlue ? "#2563eb" : "#ef4444") : dotColor;

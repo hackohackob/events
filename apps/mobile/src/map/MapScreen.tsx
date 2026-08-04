@@ -76,6 +76,7 @@ import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
 import { archivePoi, assignDestination, moveIncidentLocation, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
+import { useForegroundInterval } from "../ui/useForegroundInterval";
 import { OfflineControlButton } from "./OfflineControlButton";
 import type { EventZone, VehicleType } from "@events/contracts";
 import { useZonesStore } from "./zones/zones-store";
@@ -2710,41 +2711,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Freshness-colour refresh. Paused while backgrounded — the foreground
   // service keeps JS alive with the screen off, and re-rendering this whole
   // screen every 10s for an invisible map was pure battery burn.
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (timer == null) timer = setInterval(() => setTick((value) => value + 1), 10_000);
-    };
-    const stop = () => {
-      if (timer != null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-    if (AppState.currentState === "active") start();
-    const sub = AppState.addEventListener("change", (next) => {
-      if (next === "active") {
-        setTick((value) => value + 1); // refresh immediately on return
-        start();
-      } else {
-        stop();
-      }
-    });
-    return () => {
-      stop();
-      sub.remove();
-    };
-  }, []);
+  useForegroundInterval(() => setTick((value) => value + 1), 10_000);
 
-  useEffect(() => {
-    const check = () => {
-      const count = incidentQueue.listReady().length;
-      setOfflineQueueCount(count);
-    };
-    check();
-    const timer = setInterval(check, 3_000);
-    return () => clearInterval(timer);
-  }, []);
+  // Offline-queue badge. Was a bare 3s setInterval with no foreground guard —
+  // 1200 wake-ups an hour to recount a queue behind a locked screen.
+  useForegroundInterval(() => setOfflineQueueCount(incidentQueue.listReady().length), 3_000);
 
   useEffect(() => {
     if (offlineQueueCount === 0) return;

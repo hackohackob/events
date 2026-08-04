@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
+import { useForegroundInterval } from "../ui/useForegroundInterval";
 
 const FLASH_MS = 460; // matches MedicDot's emergency-light cadence
 
@@ -23,11 +24,9 @@ export function NavPuck({ rotation, responding = false }: { rotation: number; re
     return () => loop.stop();
   }, [pulse]);
 
-  useEffect(() => {
-    if (!responding) return;
-    const timer = setInterval(() => setFlashBlue((v) => !v), FLASH_MS);
-    return () => clearInterval(timer);
-  }, [responding]);
+  useForegroundInterval(() => setFlashBlue((v) => !v), responding ? FLASH_MS : null, {
+    leading: false,
+  });
 
   const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
   const haloOpacity = pulse.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.45, 0] });
