@@ -16,6 +16,7 @@ import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
 import { useSettingsStore } from "./settings/settings-store";
 import { useIncidentReadsStore } from "./incidents/incident-reads-store";
+import { useBuildInfo } from "./debug/build-info";
 
 function GlobalToast() {
   const toastMessage = useIncidentStore((s) => s.toastMessage);
@@ -73,6 +74,10 @@ export default function App() {
     void hydrate();
     void useSettingsStore.getState().hydrate();
     void useIncidentReadsStore.getState().hydrate();
+    // Stamp when this JS bundle first ran on this device — done at launch, not
+    // when the debug screen is opened, or "when the OTA arrived" would just say
+    // "when you went looking for it".
+    void useBuildInfo.getState().hydrate();
   }, [hydrate]);
 
   useEffect(() => {

@@ -24,11 +24,30 @@ import {
 import { freshnessLabel } from "../map/freshness";
 import { useSessionStore } from "../security/session-store";
 import { isOnline } from "../offline/connectivity";
+import * as Updates from "expo-updates";
+import { APP_VERSION, NATIVE_BUILD, useBuildInfo } from "./build-info";
 
 const API_BASE_URL = resolveLocalhostUrl(
   process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
 );
 const ANDROID_PACKAGE = Constants.expoConfig?.android?.package ?? "com.a.atanasov.paramediceventapp";
+
+/** "4 Aug, 21:14" plus a relative age — the age is what you actually scan for. */
+function stamp(date: Date | null | undefined): string {
+  if (!date) return "—";
+  const ms = Date.now() - date.getTime();
+  if (!Number.isFinite(ms)) return "—";
+  const mins = Math.floor(ms / 60_000);
+  const rel =
+    mins < 1 ? "just now" : mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.floor(mins / 60)}h ago` : `${Math.floor(mins / 1440)}d ago`;
+  const when = date.toLocaleString([], {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${when}  ·  ${rel}`;
+}
 
 function Row({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" | "bad" }) {
   const color = tone === "ok" ? "#22ff88" : tone === "warn" ? "#f5c518" : tone === "bad" ? "#ff6b6b" : "#cdd9e8";
@@ -74,6 +93,7 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
   const energyEvents = useBatteryDiagnostics((s) => s.events);
   const batterySamples = useBatteryDiagnostics((s) => s.batterySamples);
   const locationQueueSize = useBatteryDiagnostics((s) => s.locationQueueSize);
+  const buildInfo = useBuildInfo();
 
   const [fgPerm, setFgPerm] = useState<string>("?");
   const [bgPerm, setBgPerm] = useState<string>("?");
@@ -225,6 +245,34 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
         >
           <Text style={styles.btnText}>Restart tracking</Text>
         </Pressable>
+      </Section>
+
+      {/* Which build, and which OTA on top of it. The whole point is to answer
+          "has my update actually landed on this phone yet?" without guessing —
+          the update id matches the group id printed by `eas update`, and
+          "Update published" is when that bundle was built, not when it was
+          downloaded. An embedded launch means no OTA has been applied at all. */}
+      <Section title="BUILD & UPDATE">
+        <Row label="App version" value={APP_VERSION} />
+        <Row label="Build number" value={NATIVE_BUILD} />
+        <Row label="Runtime version" value={Updates.runtimeVersion ?? "—"} />
+        <Row label="Channel" value={Updates.channel ?? "—"} />
+        <Row
+          label="Running"
+          value={Updates.isEmbeddedLaunch ? "embedded bundle (no OTA yet)" : "OTA update"}
+          tone={Updates.isEmbeddedLaunch ? "warn" : "ok"}
+        />
+        <Row label="Update ID" value={Updates.updateId ?? "—"} />
+        <Row label="Update published" value={stamp(Updates.createdAt)} />
+        <Row
+          label="Update arrived here"
+          value={buildInfo.updateAppliedAt ? stamp(new Date(buildInfo.updateAppliedAt)) : "—"}
+          tone="ok"
+        />
+        <Row
+          label="App first opened"
+          value={buildInfo.firstLaunchAt ? stamp(new Date(buildInfo.firstLaunchAt)) : "—"}
+        />
       </Section>
 
       <Section title="SERVER">
