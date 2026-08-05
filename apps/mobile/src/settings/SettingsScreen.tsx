@@ -6,6 +6,7 @@ import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPE_META, VEHICLE_TYPES, type VehicleTyp
 import {
   KM_MARKER_INTERVAL_OPTIONS,
   LOCATION_INTERVAL_OPTIONS,
+  STATIONARY_INTERVAL_MS,
   useSettingsStore,
 } from "./settings-store";
 import { startLocationLoop } from "../location/location-tracker";
@@ -39,6 +40,10 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
   // say so, otherwise the picker looks broken ("I chose 1 min and it sends every
   // 7") and their own dot drifting 100 m looks like a bug.
   const stationaryMode = useSettingsStore((s) => s.stationaryMode);
+  // What tracking is actually running at, which is what the picker must show.
+  const effectiveIntervalMs = stationaryMode
+    ? Math.max(locationIntervalMs, STATIONARY_INTERVAL_MS)
+    : locationIntervalMs;
 
   const pickInterval = (ms: number) => {
     if (ms === locationIntervalMs) return;
@@ -94,6 +99,78 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* ── Location tracking ───────────────────────────────── */}
+        <Text style={styles.sectionLabel}>LOCATION TRACKING</Text>
+        <View style={styles.card}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Update frequency</Text>
+            <Text style={styles.rowSub}>How often your location is sent to the command centre.</Text>
+          </View>
+          {/* Compact dropdown instead of a long row of pills. */}
+          <Pressable
+            style={styles.dropdownButton}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setIntervalOpen((o) => !o);
+            }}
+          >
+            {/* Shows what tracking is ACTUALLY doing, not what was picked. While
+                On post the floor overrides the choice, and leaving the button on
+                "3 min" while the app reported every 7 read as a broken setting. */}
+            <Text style={styles.dropdownValue}>
+              {LOCATION_INTERVAL_OPTIONS.find((o) => o.ms === effectiveIntervalMs)?.label ?? "—"}
+            </Text>
+            {stationaryMode ? (
+              <View style={styles.forcedChip}>
+                <Feather name="anchor" size={9} color="#04121f" />
+                <Text style={styles.forcedChipText} allowFontScaling={false}>ON POST</Text>
+              </View>
+            ) : null}
+            <Feather name={intervalOpen ? "chevron-up" : "chevron-down"} size={18} color="#7e90a8" />
+          </Pressable>
+          {intervalOpen ? (
+            <View style={styles.dropdownMenu}>
+              {LOCATION_INTERVAL_OPTIONS.map((opt) => {
+                const active = opt.ms === effectiveIntervalMs;
+                // Anything under the floor cannot take effect while On post, so
+                // it is shown as unavailable rather than tappable-but-ignored.
+                const blocked = stationaryMode && opt.ms < STATIONARY_INTERVAL_MS;
+                return (
+                  <Pressable
+                    key={opt.ms}
+                    disabled={blocked}
+                    onPress={() => {
+                      pickInterval(opt.ms);
+                      setIntervalOpen(false);
+                    }}
+                    style={[styles.dropdownItem, active && styles.dropdownItemActive]}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownItemText,
+                        active && styles.dropdownItemTextActive,
+                        blocked && styles.dropdownItemTextBlocked,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    {active ? <Feather name="check" size={15} color="#34d399" /> : null}
+                    {blocked ? <Feather name="lock" size={12} color="#475569" /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+          {/* The stationary trade-off is deliberately spelled out: it costs
+              accuracy as well as cadence, and a medic seeing their own dot drift
+              ~100 m should be able to find out why without asking. */}
+          <Text style={styles.note}>
+            {stationaryMode
+              ? "You are On post — location is held to 7 min and measured to about 100 m, which uses far less battery. Faster options unlock when you leave On post; being dispatched or starting navigation does that automatically."
+              : "Lower frequencies save battery. A persistent notification keeps tracking alive in the background."}
+          </Text>
+        </View>
+
         {/* ── Push-to-talk bridges ────────────────────────────── */}
         {isCoordinator ? (
           <>
@@ -251,56 +328,6 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
           ) : null}
         </View>
 
-        {/* ── Location tracking ───────────────────────────────── */}
-        <Text style={styles.sectionLabel}>LOCATION TRACKING</Text>
-        <View style={styles.card}>
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>Update frequency</Text>
-            <Text style={styles.rowSub}>How often your location is sent to the command centre.</Text>
-          </View>
-          {/* Compact dropdown instead of a long row of pills. */}
-          <Pressable
-            style={styles.dropdownButton}
-            onPress={() => {
-              void Haptics.selectionAsync();
-              setIntervalOpen((o) => !o);
-            }}
-          >
-            <Text style={styles.dropdownValue}>
-              {LOCATION_INTERVAL_OPTIONS.find((o) => o.ms === locationIntervalMs)?.label ?? "—"}
-            </Text>
-            <Feather name={intervalOpen ? "chevron-up" : "chevron-down"} size={18} color="#7e90a8" />
-          </Pressable>
-          {intervalOpen ? (
-            <View style={styles.dropdownMenu}>
-              {LOCATION_INTERVAL_OPTIONS.map((opt) => {
-                const active = opt.ms === locationIntervalMs;
-                return (
-                  <Pressable
-                    key={opt.ms}
-                    onPress={() => {
-                      pickInterval(opt.ms);
-                      setIntervalOpen(false);
-                    }}
-                    style={[styles.dropdownItem, active && styles.dropdownItemActive]}
-                  >
-                    <Text style={[styles.dropdownItemText, active && styles.dropdownItemTextActive]}>{opt.label}</Text>
-                    {active ? <Feather name="check" size={15} color="#34d399" /> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-          {/* The stationary trade-off is deliberately spelled out: it costs
-              accuracy as well as cadence, and a medic seeing their own dot drift
-              ~100 m should be able to find out why without asking. */}
-          <Text style={styles.note}>
-            {stationaryMode
-              ? "You are On post — location is sent every 7 min and measured to about 100 m, using far less battery. Switch back to Available for full accuracy; being dispatched or starting navigation does it automatically."
-              : "Lower frequencies save battery. A persistent notification keeps tracking alive in the background."}
-          </Text>
-        </View>
-
         {/* ── Alerts ──────────────────────────────────────────── */}
         {Platform.OS === "android" ? (
           <>
@@ -409,7 +436,18 @@ const styles = StyleSheet.create({
     borderColor: "rgba(148,163,184,0.18)",
     backgroundColor: "rgba(255,255,255,0.04)",
   },
-  dropdownValue: { color: "#e7eef8", fontSize: 14.5, fontWeight: "800" },
+  dropdownValue: { color: "#e7eef8", fontSize: 14.5, fontWeight: "800", flex: 1 },
+  forcedChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#34d399",
+    borderRadius: 999,
+    paddingVertical: 2.5,
+    paddingHorizontal: 8,
+    marginRight: 8,
+  },
+  forcedChipText: { color: "#04121f", fontSize: 9.5, fontWeight: "900", letterSpacing: 0.4 },
   dropdownMenu: {
     marginTop: 6,
     borderRadius: 13,
@@ -428,6 +466,7 @@ const styles = StyleSheet.create({
   dropdownItemActive: { backgroundColor: "rgba(52,211,153,0.1)" },
   dropdownItemText: { color: "#cbd5e1", fontSize: 14, fontWeight: "700" },
   dropdownItemTextActive: { color: "#34d399" },
+  dropdownItemTextBlocked: { color: "#475569" },
   note: { color: "#475569", fontSize: 11.5, fontWeight: "500", lineHeight: 16, marginTop: 12 },
   grantBtn: {
     paddingVertical: 9,

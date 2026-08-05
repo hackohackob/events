@@ -166,8 +166,30 @@ let navModeActive = false;
 // builds that ship it — this throttle keeps the cadence honest regardless of
 // what the OS decides to deliver, including on already-installed binaries.
 let lastSendAt = 0;
-/** GPS delivery jitter — a fix landing a hair early must not cost a full cycle. */
-const SEND_SLACK_MS = 2_000;
+/**
+ * How early a fix may land and still be accepted.
+ *
+ * This has to scale with the interval, because the thing it absorbs scales too.
+ * `lastSendAt` is stamped when JS *processes* a fix, not when the OS produced
+ * it, and that delay varies by seconds — waking from Doze, crossing the bridge,
+ * queueing. So the measured gap is `interval + (delay_now − delay_previous)`,
+ * which lands under the interval whenever the previous fix was handled slowly
+ * and the current one quickly.
+ *
+ * A flat 2 s made that a coin toss on long intervals: it is 3.3% of a minute
+ * but 0.5% of seven, so at 7 min almost every cycle was rejected — and a
+ * rejection costs a WHOLE interval, because the next delivery is that far off.
+ * Measured in the field: 3 min behaved like 5, 5 like 8, 7 like 14-16.
+ *
+ * 15% is comfortably above normal wake jitter at every offered cadence while
+ * still keeping the reports paced. The floor keeps short intervals sane.
+ */
+const SEND_SLACK_FRACTION = 0.15;
+const SEND_SLACK_FLOOR_MS = 2_000;
+
+function sendSlackMs(intervalMs: number): number {
+  return Math.max(SEND_SLACK_FLOOR_MS, Math.round(intervalMs * SEND_SLACK_FRACTION));
+}
 /** Last battery reading, reused on throttled fixes so we don't re-poll at 2 Hz. */
 let lastBatteryLevel: number | undefined;
 /** Fix timestamp of the last report, so converging paths can't send it twice. */
@@ -233,7 +255,7 @@ async function sendLocation(
   // rate rather than ours.
   const sinceLastSend = Date.now() - lastSendAt;
   const minGapMs = effectiveLocationIntervalMs();
-  if (!opts.force && !navModeActive && sinceLastSend < minGapMs - SEND_SLACK_MS) {
+  if (!opts.force && !navModeActive && sinceLastSend < minGapMs - sendSlackMs(minGapMs)) {
     // Keep the local position live even when we're not reporting it — the
     // locate button, nav progress and the debug screen all read this.
     useLocationStatus.getState().setFix({
@@ -424,7 +446,8 @@ function startHeartbeat(): void {
     if (!fix) return;
 
     const quietFor = Date.now() - lastSendAt;
-    if (quietFor < effectiveLocationIntervalMs() + SEND_SLACK_MS) return;
+    const interval = effectiveLocationIntervalMs();
+    if (quietFor < interval + sendSlackMs(interval)) return;
     if (!isOnline()) return;
 
     noteEnergyEvent("heartbeat");
