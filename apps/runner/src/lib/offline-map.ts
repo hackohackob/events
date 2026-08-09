@@ -24,16 +24,22 @@ const META_KEY = "pe_offline_pack_v1";
 export interface OfflineQuality {
   key: string;
   label: string;
-  sublabel: string;
   minZoom: number;
   maxZoom: number;
 }
 
+/** Ordered low → high resolution; the index IS the quality rank. */
 export const QUALITIES: OfflineQuality[] = [
-  { key: "fast", label: "Fast", sublabel: "Overview · streets & area", minZoom: 9, maxZoom: 13 },
-  { key: "balanced", label: "Balanced", sublabel: "Recommended · most detail", minZoom: 9, maxZoom: 15 },
-  { key: "detailed", label: "Detailed", sublabel: "Full zoom · large & slow", minZoom: 12, maxZoom: 16 },
+  { key: "fast", label: "Fast", minZoom: 9, maxZoom: 13 },
+  { key: "balanced", label: "Balanced", minZoom: 9, maxZoom: 15 },
+  { key: "detailed", label: "Detailed", minZoom: 12, maxZoom: 16 },
 ];
+
+/** Rank of a saved quality, or -1 when nothing is saved. */
+export function qualityRank(key: string | null | undefined): number {
+  if (!key) return -1;
+  return QUALITIES.findIndex((q) => q.key === key);
+}
 
 export type Bounds = [number, number, number, number]; // [west, south, east, north]
 
@@ -44,6 +50,8 @@ export interface PackMeta {
   tileCount: number;
   tilesUrl: string;
   savedAt: number;
+  /** Resolution on disk — drives the green row and which upgrades are offered. */
+  qualityKey?: string;
 }
 
 // ─── Tile math ───────────────────────────────────────────────────────────────
@@ -192,6 +200,7 @@ export async function downloadPack(opts: {
   bounds: Bounds;
   minZoom: number;
   maxZoom: number;
+  qualityKey?: string;
   tilesUrl?: string;
   concurrency?: number;
   signal?: AbortSignal;
@@ -236,6 +245,7 @@ export async function downloadPack(opts: {
     tileCount: total - failed,
     tilesUrl: template,
     savedAt: Date.now(),
+    qualityKey: opts.qualityKey,
   };
   savePackMeta(meta);
   return meta;

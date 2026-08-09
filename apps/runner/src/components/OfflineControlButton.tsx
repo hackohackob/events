@@ -10,14 +10,27 @@ import {
 
 type Phase = "idle" | "downloading" | "ready" | "error";
 
+/** Quality on disk right now, or null. Older packs predate the stored key. */
+function savedQuality(): string | null {
+  const meta = getPackMeta();
+  if (!meta) return null;
+  return meta.qualityKey ?? "balanced";
+}
+
 /**
  * Square control-stack button (sibling of the satellite/recenter/compass
  * buttons) that downloads the current event area for offline use. Shows a live
- * % ring while caching and a green check when a pack is saved; tapping a saved
- * pack removes it, tapping mid-download cancels.
+ * % ring while caching and a green check when a pack is saved; tapping mid-
+ * download cancels.
+ *
+ * Tapping a *saved* pack opens the sheet rather than deleting it — as in the
+ * native app. Wiping the offline map with one stray tap on a map control, and
+ * watching the button go blue as if it had never downloaded, was far too easy
+ * to do by accident.
  */
 export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | null }) {
-  const [phase, setPhase] = useState<Phase>(() => (getPackMeta() ? "ready" : "idle"));
+  const [saved, setSaved] = useState<string | null>(() => savedQuality());
+  const [phase, setPhase] = useState<Phase>(() => (savedQuality() ? "ready" : "idle"));
   const [pct, setPct] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -29,7 +42,10 @@ export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | 
   // from the background. Re-sync idle→ready whenever a pack exists.
   useEffect(() => {
     const sync = () => {
-      if (getPackMeta()) setPhase((prev) => (prev === "idle" ? "ready" : prev));
+      const key = savedQuality();
+      if (!key) return;
+      setSaved(key);
+      setPhase((prev) => (prev === "idle" ? "ready" : prev));
     };
     sync();
     window.addEventListener("visibilitychange", sync);
@@ -43,17 +59,19 @@ export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | 
   const press = () => {
     if (phase === "downloading") {
       abortRef.current?.abort();
-      setPhase("idle");
-      setPct(0);
-      return;
-    }
-    if (phase === "ready") {
-      void removePack();
-      setPhase("idle");
+      setPhase(saved ? "ready" : "idle");
       setPct(0);
       return;
     }
     setModalOpen(true);
+  };
+
+  const remove = () => {
+    setModalOpen(false);
+    void removePack();
+    setSaved(null);
+    setPhase("idle");
+    setPct(0);
   };
 
   const start = async (quality: OfflineQuality) => {
@@ -61,9 +79,14 @@ export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | 
     const bounds = getBounds();
     if (!bounds) {
       setPhase("error");
-      setTimeout(() => setPhase(getPackMeta() ? "ready" : "idle"), 2500);
+      setTimeout(() => setPhase(savedQuality() ? "ready" : "idle"), 2500);
       return;
     }
+    // Upgrading replaces the pack, so widen the range to cover what the old one
+    // had: "Detailed" starts at z12, and without this an upgrade from
+    // "Balanced" would silently drop the z9–11 overview tiles.
+    const previous = getPackMeta();
+    const minZoom = previous ? Math.min(quality.minZoom, previous.minZoom) : quality.minZoom;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setPhase("downloading");
@@ -71,17 +94,19 @@ export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | 
     try {
       await downloadPack({
         bounds,
-        minZoom: quality.minZoom,
+        minZoom,
         maxZoom: quality.maxZoom,
+        qualityKey: quality.key,
         signal: ctrl.signal,
         onProgress: (p) => setPct(p.total ? Math.round((p.done / p.total) * 100) : 0),
       });
+      setSaved(quality.key);
       setPhase("ready");
       setPct(100);
     } catch (err) {
       if ((err as Error)?.name === "AbortError") return;
       setPhase("error");
-      setTimeout(() => setPhase(getPackMeta() ? "ready" : "idle"), 2500);
+      setTimeout(() => setPhase(savedQuality() ? "ready" : "idle"), 2500);
     }
   };
 
@@ -136,7 +161,14 @@ export function OfflineControlButton({ getBounds }: { getBounds: () => Bounds | 
         )}
       </button>
 
-      <OfflineMapModal open={modalOpen} bounds={getBounds()} onClose={() => setModalOpen(false)} onConfirm={start} />
+      <OfflineMapModal
+        open={modalOpen}
+        bounds={getBounds()}
+        savedQualityKey={saved}
+        onClose={() => setModalOpen(false)}
+        onConfirm={start}
+        onRemove={remove}
+      />
     </>
   );
 }

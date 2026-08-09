@@ -12,7 +12,7 @@ import { IncidentsService } from "../incidents/incidents.service";
 import { GraphHopperClient, type GraphHopperPath } from "./graphhopper.client";
 import { buildSegments, classifyPoints } from "./surface-classification";
 import { distanceBetween } from "./geo";
-import { VEHICLE_DIRECT_SPEED_MS, VEHICLE_PROFILES } from "./vehicle-profiles";
+import { effectiveDurationFactor, VEHICLE_DIRECT_SPEED_MS, VEHICLE_PROFILES } from "./vehicle-profiles";
 import type { LngLat } from "./routing.types";
 
 /**
@@ -121,7 +121,9 @@ export class ClosestMedicsService {
           details: true,
           restrict: option.restrict ?? null,
         });
-        return path ? { option, path, durationMs: Math.round(path.time * option.durationFactor) } : null;
+        if (!path) return null;
+        const factor = effectiveDurationFactor(option, path.time, path.distance);
+        return { option, path, durationMs: Math.round(path.time * factor) };
       }),
     );
 

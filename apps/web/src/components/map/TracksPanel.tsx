@@ -1,9 +1,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Area, AreaChart, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ChevronDown, Eye, EyeOff, Mountain, X } from 'lucide-react'
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { ChevronDown, Eye, EyeOff, Mountain, Siren, X } from 'lucide-react'
 import { POI_CONFIGS } from '@/lib/constants'
+import { PoiIcon } from '@/lib/poi-icons'
 
 export interface PanelTrack {
   id: string
@@ -21,6 +22,15 @@ export interface PanelPoi {
   /** `[lng, lat]` */
   coordinates: [number, number]
   type: string
+  name?: string
+  /** Per-point custom glyph key (custom POIs only). */
+  icon?: string | null
+}
+
+export interface PanelIncident {
+  /** `[lng, lat]` */
+  coordinates: [number, number]
+  type?: string
   name?: string
 }
 
@@ -50,12 +60,25 @@ function metersBetween(a: [number, number], b: [number, number]): number {
  */
 const POI_SNAP_MAX_M = 400
 
+/** One POI or incident, placed on the profile. */
+interface ProfileMark {
+  kind: 'poi' | 'incident'
+  km: number
+  elevation: number
+  color: string
+  label: string
+  /** POI type / custom glyph, used to pick the icon. */
+  type?: string
+  icon?: string | null
+}
+
 /**
- * Project each POI onto the track and return where it lands on the elevation
- * profile: nearest track vertex → cumulative distance → elevation at that
- * distance. POIs further than {@link POI_SNAP_MAX_M} from the track are dropped.
+ * Project each POI and incident onto the track and return where it lands on the
+ * elevation profile: nearest track vertex → cumulative distance → elevation at
+ * that distance. Points further than {@link POI_SNAP_MAX_M} from the track are
+ * dropped — they have no meaningful place on it.
  */
-function projectPois(track: PanelTrack, pois: PanelPoi[]) {
+function projectMarks(track: PanelTrack, pois: PanelPoi[], incidents: PanelIncident[]): ProfileMark[] {
   if (track.coordinates.length < 2 || track.elevationProfile.length < 2) return []
 
   // Cumulative distance (km) per track vertex.
@@ -78,27 +101,51 @@ function projectPois(track: PanelTrack, pois: PanelPoi[]) {
     return p[p.length - 1].elevation
   }
 
-  return pois
-    .map(poi => {
-      let bestIdx = 0
-      let bestDist = Infinity
-      for (let i = 0; i < track.coordinates.length; i++) {
-        const d = metersBetween(track.coordinates[i], poi.coordinates)
-        if (d < bestDist) {
-          bestDist = d
-          bestIdx = i
-        }
+  /** Nearest track vertex, or null when the point is nowhere near the line. */
+  const snap = (coordinates: [number, number]): number | null => {
+    let bestIdx = 0
+    let bestDist = Infinity
+    for (let i = 0; i < track.coordinates.length; i++) {
+      const d = metersBetween(track.coordinates[i], coordinates)
+      if (d < bestDist) {
+        bestDist = d
+        bestIdx = i
       }
-      if (bestDist > POI_SNAP_MAX_M) return null
-      const km = cum[bestIdx]
-      return {
-        km,
-        elevation: elevationAt(km),
-        color: POI_CONFIGS.find(c => c.type === poi.type)?.color ?? '#94a3b8',
-        label: poi.name || POI_CONFIGS.find(c => c.type === poi.type)?.label || 'Point',
-      }
+    }
+    return bestDist > POI_SNAP_MAX_M ? null : bestIdx
+  }
+
+  const marks: ProfileMark[] = []
+
+  for (const poi of pois) {
+    const idx = snap(poi.coordinates)
+    if (idx === null) continue
+    const config = POI_CONFIGS.find(c => c.type === poi.type)
+    marks.push({
+      kind: 'poi',
+      km: cum[idx],
+      elevation: elevationAt(cum[idx]),
+      color: config?.color ?? '#94a3b8',
+      label: poi.name || config?.label || 'Point',
+      type: poi.type,
+      icon: poi.icon,
     })
-    .filter((p): p is NonNullable<typeof p> => p !== null)
+  }
+
+  for (const incident of incidents) {
+    const idx = snap(incident.coordinates)
+    if (idx === null) continue
+    marks.push({
+      kind: 'incident',
+      km: cum[idx],
+      elevation: elevationAt(cum[idx]),
+      color: '#ef4444',
+      label: incident.name || incident.type || 'Incident',
+    })
+  }
+
+  // Incidents last so they sit above the POIs where the two collide.
+  return marks.sort((a, b) => (a.kind === b.kind ? a.km - b.km : a.kind === 'incident' ? 1 : -1))
 }
 
 /** Total ascent (m) of a profile — the number riders actually care about. */
@@ -194,38 +241,61 @@ export default function TracksPanel({
   )
 }
 
+/** Chart margins — shared by the SVG and the HTML marker layer sitting on it. */
+const CHART_MARGIN = { top: 16, right: 10, bottom: 0, left: 0 }
+const CHART_HEIGHT = 120
+
 /**
- * The elevation profile itself, as a strip across the bottom of the map —
+ * The elevation profile itself, as a strip across the full width of the map —
  * mirroring the chart under the map in the event editor, with the event's
- * points of interest marked along it. Hovering reports the coordinate back so
- * the caller can drop a dot on the map at that point on the track.
+ * points of interest and open incidents marked along it. Hovering reports the
+ * coordinate back so the caller can drop a dot on the map at that point on the
+ * track.
  */
 export function TrackElevationOverlay({
   track,
   pois,
+  incidents = [],
   onHoverCoord,
   onClose,
 }: {
   track: PanelTrack
   pois: PanelPoi[]
+  incidents?: PanelIncident[]
   onHoverCoord: (coord: [number, number] | null) => void
   onClose: () => void
 }) {
   // Scrubbing the chart re-renders this component on every mouse move, and the
-  // caller rebuilds `track`/`pois` each time — so key the (O(pois × vertices))
+  // caller rebuilds `track`/`pois` each time — so key the (O(points × vertices))
   // projection on the data itself, not on object identity.
   const poisKey = pois.map(p => `${p.coordinates[0]},${p.coordinates[1]}`).join('|')
-  const profilePois = useMemo(
-    () => projectPois(track, pois),
+  const incidentsKey = incidents.map(p => `${p.coordinates[0]},${p.coordinates[1]}`).join('|')
+  const marks = useMemo(
+    () => projectMarks(track, pois, incidents),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [track.id, track.coordinates, poisKey],
+    [track.id, track.coordinates, poisKey, incidentsKey],
   )
+  const [hovered, setHovered] = useState<number | null>(null)
+
+  // The y-domain is pinned rather than left on 'auto' so the marker layer can
+  // place each icon on the line itself — recharts will not tell us where it put
+  // the curve, so both have to agree on the scale up front.
+  const elevations = track.elevationProfile.map(p => p.elevation)
+  const rawMin = Math.min(...elevations)
+  const rawMax = Math.max(...elevations)
+  // A dead-flat track would collapse the domain to a single value, which
+  // recharts cannot scale — give it a metre of room either side.
+  const eleMin = rawMax > rawMin ? rawMin : rawMin - 1
+  const eleMax = rawMax > rawMin ? rawMax : rawMax + 1
+  const kmMin = track.elevationProfile[0]?.distance ?? 0
+  const kmMax = track.elevationProfile[track.elevationProfile.length - 1]?.distance ?? 0
+
   if (track.elevationProfile.length < 2) return null
 
   // The profile is smoothed and strided, so re-deriving gain/distance from it
   // undershoots the event's published figures — use those when we have them.
   const gainM = track.ascentMeters ?? totalAscent(track.elevationProfile)
-  const lastKm = track.distanceKm ?? track.elevationProfile[track.elevationProfile.length - 1].distance
+  const lastKm = track.distanceKm ?? kmMax
 
   /** Profile sample index → the track coordinate it came from. */
   const coordAt = (index: number): [number, number] | null => {
@@ -234,14 +304,17 @@ export function TrackElevationOverlay({
     return track.coordinates[Math.round(ratio * (track.coordinates.length - 1))] ?? null
   }
 
+  const xPct = (km: number) => (kmMax > kmMin ? ((km - kmMin) / (kmMax - kmMin)) * 100 : 0)
+  const yPct = (ele: number) => (eleMax > eleMin ? (1 - (ele - eleMin) / (eleMax - eleMin)) * 100 : 50)
+
   return (
     <div
-      className="absolute bottom-4 left-4 right-4 lg:right-[248px] rounded-2xl p-3"
+      className="absolute bottom-0 left-0 right-0 px-3 pt-2 pb-3"
       style={{
         zIndex: 10,
         background: 'rgba(10,18,34,0.95)',
         backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(148,163,184,0.18)',
+        borderTop: '1px solid rgba(148,163,184,0.18)',
       }}
       onMouseLeave={() => onHoverCoord(null)}
     >
@@ -262,11 +335,11 @@ export function TrackElevationOverlay({
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
-      <div style={{ height: 120 }}>
+      <div style={{ height: CHART_HEIGHT, position: 'relative' }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={track.elevationProfile}
-            margin={{ top: 12, right: 8, bottom: 0, left: 0 }}
+            margin={CHART_MARGIN}
             onMouseMove={(state: { activeTooltipIndex?: number }) => {
               if (state?.activeTooltipIndex !== undefined) onHoverCoord(coordAt(state.activeTooltipIndex))
             }}
@@ -278,8 +351,8 @@ export function TrackElevationOverlay({
                 <stop offset="95%" stopColor={track.color} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <XAxis dataKey="distance" type="number" domain={['dataMin', 'dataMax']} hide />
-            <YAxis hide domain={['auto', 'auto']} />
+            <XAxis dataKey="distance" type="number" domain={[kmMin, kmMax]} hide />
+            <YAxis hide domain={[eleMin, eleMax]} />
             <Tooltip
               contentStyle={{
                 background: 'rgba(10,20,36,0.95)',
@@ -301,22 +374,72 @@ export function TrackElevationOverlay({
               isAnimationActive={false}
               activeDot={{ r: 4, fill: track.color, stroke: 'white', strokeWidth: 2 }}
             />
-            {/* Points of interest, snapped onto the profile. */}
-            {profilePois.map((p, i) => (
-              <ReferenceDot
-                key={`${p.label}-${i}`}
-                x={p.km}
-                y={p.elevation}
-                r={4}
-                fill={p.color}
-                stroke="#04121f"
-                strokeWidth={1.5}
-                isFront
-                label={{ value: p.label, position: 'top', fontSize: 9, fill: p.color }}
-              />
-            ))}
           </AreaChart>
         </ResponsiveContainer>
+
+        {/* Points of interest and incidents, snapped onto the profile. Rendered
+            over the chart rather than as recharts ReferenceDots so each one can
+            carry its own icon and only name itself on hover — a full label per
+            point turned a busy course into an unreadable wall of text. */}
+        <div
+          className="absolute"
+          style={{
+            top: CHART_MARGIN.top,
+            left: CHART_MARGIN.left,
+            right: CHART_MARGIN.right,
+            bottom: CHART_MARGIN.bottom,
+            pointerEvents: 'none',
+          }}
+        >
+          {marks.map((mark, i) => (
+            <div
+              key={`${mark.kind}-${mark.label}-${i}`}
+              className="absolute flex flex-col items-center"
+              style={{
+                left: `${xPct(mark.km)}%`,
+                top: `${yPct(mark.elevation)}%`,
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'auto',
+                zIndex: hovered === i ? 2 : 1,
+              }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(h => (h === i ? null : h))}
+            >
+              {hovered === i && (
+                <span
+                  className="absolute whitespace-nowrap text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
+                  style={{
+                    bottom: '100%',
+                    marginBottom: 4,
+                    background: 'rgba(4,12,24,0.95)',
+                    border: `1px solid ${mark.color}66`,
+                    color: mark.color,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {mark.label}
+                </span>
+              )}
+              <span
+                className="flex items-center justify-center rounded-full"
+                style={{
+                  width: 18,
+                  height: 18,
+                  background: 'rgba(4,12,24,0.92)',
+                  border: `1.5px solid ${mark.color}`,
+                  color: mark.color,
+                  boxShadow: hovered === i ? `0 0 0 3px ${mark.color}33` : 'none',
+                }}
+              >
+                {mark.kind === 'incident' ? (
+                  <Siren className="w-2.5 h-2.5" />
+                ) : (
+                  <PoiIcon type={mark.type} icon={mark.icon} size={11} color={mark.color} />
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

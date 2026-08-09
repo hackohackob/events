@@ -4,7 +4,16 @@ import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { closestMedicColor, VEHICLE_TYPE_META, type ClosestMedic, type MedicStatus } from "@events/contracts";
-import { freshnessBucket, freshnessLabel } from "../map/freshness";
+import { freshnessLabel } from "../map/freshness";
+
+/**
+ * Past this age the dot on the map is a memory, not a position — the medic
+ * could be anywhere within a good few minutes' travel of it, so the ETA below
+ * is only as good as the fix it was routed from. Deliberately a minute wider
+ * than the map's 20-minute freshness edge: a fix that has only just tipped over
+ * is not yet worth shouting about on every card.
+ */
+const LAST_KNOWN_AFTER_MS = 21 * 60_000;
 
 /** Status glyph + tone, matched to the medic sheet so a medic reads the same everywhere. */
 const STATUS_META: Record<string, { label: string; color: string; icon: keyof typeof Feather.glyphMap }> = {
@@ -112,7 +121,7 @@ export function ClosestMedicsPanel({
           const selected = selectedId === medic.medicId;
           const resting = medic.status === "rest";
           const ageMs = medic.lastSeenAt ? Date.now() - new Date(medic.lastSeenAt).getTime() : undefined;
-          const staleFix = ageMs !== undefined && freshnessBucket(ageMs) !== "fresh";
+          const staleFix = ageMs !== undefined && ageMs >= LAST_KNOWN_AFTER_MS;
           // "+4 min" against the leader makes the trade-off explicit when the
           // fastest medic is the one you'd rather not pull off a post.
           const behindMs = fastest != null ? medic.durationMs - fastest : 0;
@@ -170,7 +179,9 @@ export function ClosestMedicsPanel({
                 {staleFix ? (
                   <View style={styles.warnRow}>
                     <Feather name="wifi-off" size={10.5} color="#94a3b8" />
-                    <Text style={styles.warnText}>Position {freshnessLabel(ageMs!)}</Text>
+                    <Text style={[styles.warnText, { color: "#94a3b8" }]}>
+                      Last known position · {freshnessLabel(ageMs!)}
+                    </Text>
                   </View>
                 ) : null}
               </View>

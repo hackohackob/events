@@ -1,15 +1,70 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { formatDistance } from "../navigation/geo";
+import { formatDistance, snapToPolyline } from "../navigation/geo";
 import { maneuverGlyph, maneuverLabel } from "../navigation/surface";
+import { useMapStore, type MapMarker } from "../map/map-store";
+import { PoiIcon } from "../map/poi-icons";
+import { POI_TYPES } from "../map/poi-types";
 import { useTrackNavStore } from "./track-nav-store";
+import type { PreparedTrack } from "./turn-detection";
 
 /** Reference distance over which the maneuver progress bar fills (metres). */
 const MANEUVER_BAR_REFERENCE_M = 400;
 const ELEVATION_BARS = 44;
 const LOOP_TOAST_MS = 4_500;
+
+/** A POI or incident further than this from the line is not "on" the track. */
+const MARK_SNAP_MAX_M = 150;
+/** How far ahead a mark starts naming itself, and how far past it stops. */
+const MARK_POPOVER_AHEAD_M = 300;
+const MARK_POPOVER_BEHIND_M = 80;
+/** Width of the popover chip — fixed so it can be clamped without measuring. */
+const POPOVER_W = 168;
+
+interface TrackMark {
+  id: string;
+  kind: "poi" | "incident";
+  label: string;
+  color: string;
+  /** Distance along the track, metres. */
+  alongMeters: number;
+  poiType?: string;
+  poiIcon?: string | null;
+}
+
+/**
+ * POIs and incidents that sit on this track, placed by distance along it.
+ *
+ * Everything the medic passes is worth knowing about — a water point is a place
+ * to stop, an incident ahead is a reason to slow down — but only if it is
+ * actually on the line, so anything further out than {@link MARK_SNAP_MAX_M}
+ * is dropped rather than pinned to the nearest bit of course.
+ */
+function buildTrackMarks(markers: MapMarker[], prepared: PreparedTrack | null): TrackMark[] {
+  if (!prepared || prepared.geometry.length < 2) return [];
+  const marks: TrackMark[] = [];
+  for (const marker of markers) {
+    if (marker.type !== "infrastructure" && marker.type !== "incident") continue;
+    if (marker.poiArchived) continue;
+    const snap = snapToPolyline({ lat: marker.lat, lng: marker.lng }, prepared.geometry);
+    if (!snap || snap.distanceMeters > MARK_SNAP_MAX_M) continue;
+    const incident = marker.type === "incident";
+    marks.push({
+      id: marker.id,
+      kind: incident ? "incident" : "poi",
+      label: marker.label || marker.name || (incident ? "Incident" : "Point"),
+      color: incident
+        ? "#ef4444"
+        : (POI_TYPES.find((p) => p.id === marker.poiType)?.color ?? "#94a3b8"),
+      alongMeters: snap.alongMeters,
+      poiType: marker.poiType,
+      poiIcon: marker.poiIcon,
+    });
+  }
+  return marks.sort((a, b) => a.alongMeters - b.alongMeters);
+}
 
 /**
  * Track-following HUD — the same visual language as point-to-point navigation
@@ -33,6 +88,9 @@ export function TrackNavOverlay() {
   const toggleMuted = useTrackNavStore((s) => s.toggleMuted);
   const dismissLoopSkip = useTrackNavStore((s) => s.dismissLoopSkip);
   const dismissLegSwitch = useTrackNavStore((s) => s.dismissLegSwitch);
+  const markers = useMapStore((s) => s.markers);
+  /** Width of the elevation strip, so marks can be placed along it in pixels. */
+  const [stripWidth, setStripWidth] = useState(0);
 
   // Animated whole-track progress fill.
   const fillAnim = useRef(new Animated.Value(0)).current;
@@ -59,6 +117,20 @@ export function TrackNavOverlay() {
   }, [legSwitch, dismissLegSwitch]);
 
   const elevationBars = useMemo(() => buildElevationBars(elevations), [elevations]);
+  const marks = useMemo(() => buildTrackMarks(markers, prepared), [markers, prepared]);
+
+  // The one mark worth naming right now: the nearest one the medic is closing
+  // on (or has only just passed). Naming all of them would bury the strip.
+  const alongMeters = progress?.alongMeters ?? 0;
+  const nearestMark = useMemo(() => {
+    let best: { mark: TrackMark; delta: number } | null = null;
+    for (const mark of marks) {
+      const delta = mark.alongMeters - alongMeters;
+      if (delta > MARK_POPOVER_AHEAD_M || delta < -MARK_POPOVER_BEHIND_M) continue;
+      if (!best || Math.abs(delta) < Math.abs(best.delta)) best = { mark, delta };
+    }
+    return best;
+  }, [marks, alongMeters]);
 
   if (phase === "idle" || !prepared || !track) return null;
 
@@ -152,21 +224,93 @@ export function TrackNavOverlay() {
 
         {/* ── Dock ── */}
         <View style={styles.dock}>
-          {/* Elevation strip, painted up to the current position. */}
-          {elevationBars ? (
-            <View style={styles.elevationRow}>
-              {elevationBars.map((h, i) => (
+          {/* Popover band: a fixed-height lane above the strip so naming the
+              point that is coming up never resizes the dock mid-ride. The chip
+              is placed under its own dot, clamped to the strip. */}
+          {elevationBars && marks.length > 0 ? (
+            <View style={styles.markBand} pointerEvents="none">
+              {nearestMark && stripWidth > 0 ? (
                 <View
-                  key={i}
                   style={[
-                    styles.elevationBar,
+                    styles.markPopover,
                     {
-                      height: 3 + h * 20,
-                      backgroundColor: i <= positionIndex ? accent : "rgba(148,163,184,0.24)",
+                      borderColor: `${nearestMark.mark.color}88`,
+                      left: clamp(
+                        markX(nearestMark.mark, prepared.totalMeters, stripWidth) - POPOVER_W / 2,
+                        0,
+                        Math.max(0, stripWidth - POPOVER_W),
+                      ),
                     },
                   ]}
-                />
-              ))}
+                >
+                  {nearestMark.mark.kind === "incident" ? (
+                    <Feather name="alert-triangle" size={12} color={nearestMark.mark.color} />
+                  ) : (
+                    <PoiIcon
+                      type={nearestMark.mark.poiType}
+                      icon={nearestMark.mark.poiIcon}
+                      size={13}
+                      color={nearestMark.mark.color}
+                    />
+                  )}
+                  <Text style={styles.markPopoverText} numberOfLines={1}>
+                    {nearestMark.mark.label}
+                  </Text>
+                  <Text style={[styles.markPopoverDistance, { color: nearestMark.mark.color }]}>
+                    {nearestMark.delta > 0 ? formatDistance(nearestMark.delta) : "here"}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Elevation strip, painted up to the current position, with the
+              POIs and incidents on this track dotted along it. */}
+          {elevationBars ? (
+            <View style={styles.elevationWrap}>
+              <View
+                style={styles.elevationRow}
+                onLayout={(e) => setStripWidth(e.nativeEvent.layout.width)}
+              >
+                {elevationBars.map((h, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.elevationBar,
+                      {
+                        height: 3 + h * 20,
+                        backgroundColor: i <= positionIndex ? accent : "rgba(148,163,184,0.24)",
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+
+              {/* Marks are laid over the bars, so they never push the strip
+                  around as the medic moves. */}
+              {stripWidth > 0
+                ? marks.map((mark) => {
+                    const active = nearestMark?.mark.id === mark.id;
+                    const size = active ? 10 : 7;
+                    return (
+                      <View
+                        key={mark.id}
+                        pointerEvents="none"
+                        style={[
+                          styles.markDot,
+                          {
+                            left: markX(mark, prepared.totalMeters, stripWidth) - size / 2,
+                            width: size,
+                            height: size,
+                            borderRadius: size / 2,
+                            backgroundColor: mark.color,
+                            borderColor: active ? "#ffffff" : "rgba(7,12,22,0.9)",
+                          },
+                        ]}
+                      />
+                    );
+                  })
+                : null}
             </View>
           ) : null}
 
@@ -279,6 +423,15 @@ function JumpToast({ icon, text }: { icon: keyof typeof Feather.glyphMap; text: 
       <Text style={styles.loopToastText}>{text}</Text>
     </Animated.View>
   );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/** Horizontal offset of a mark within a strip of `width` pixels. */
+function markX(mark: TrackMark, totalMeters: number, width: number): number {
+  return clamp(mark.alongMeters / Math.max(1, totalMeters), 0, 1) * width;
 }
 
 /** Normalize the GPX elevations into N bar heights (0–1). Null without <ele>. */
@@ -476,15 +629,32 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 18,
   },
+  markBand: { height: 24, paddingHorizontal: 14, paddingTop: 6 },
+  markPopover: {
+    position: "absolute",
+    top: 0,
+    width: POPOVER_W,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
+    borderRadius: 9,
+    borderWidth: 1,
+    backgroundColor: "rgba(13, 21, 36, 0.98)",
+  },
+  markPopoverText: { flex: 1, color: "#e9f1fa", fontSize: 11, fontWeight: "800" },
+  markPopoverDistance: { fontSize: 10.5, fontWeight: "900" },
+
+  elevationWrap: { paddingHorizontal: 14, paddingTop: 8 },
   elevationRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 2,
-    height: 26,
-    paddingHorizontal: 14,
-    paddingTop: 8,
+    height: 18,
   },
   elevationBar: { flex: 1, borderRadius: 1.5 },
+  markDot: { position: "absolute", top: 0, borderWidth: 1.5 },
   routeTrack: { height: 3.5, backgroundColor: "rgba(148,163,184,0.14)", marginTop: 7 },
   routeFill: { height: 3.5 },
   dockRow: {

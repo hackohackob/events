@@ -72,14 +72,12 @@
   "weather.cond.snowShowers": "Снеговалеж",
   "weather.cond.thunder": "Гръмотевична буря",
   "offline.title": "Изтегли офлайн карта",
+  "offline.titleSaved": "Офлайн картата е запазена",
   "offline.subtitle": "Използва се автоматично при липса на сигнал",
   "offline.quality": "КАЧЕСТВО",
   "offline.q.fast": "Бързо",
-  "offline.q.fast.sub": "Преглед · улици и район",
   "offline.q.balanced": "Балансирано",
-  "offline.q.balanced.sub": "Препоръчано · добра детайлност",
   "offline.q.detailed": "Детайлно",
-  "offline.q.detailed.sub": "Пълен мащаб · голямо и бавно",
   "offline.tiles": "{n} плочки",
   "offline.large": "Голямо изтегляне — пробвай „Бързо“ за по-бързо изтегляне.",
   "offline.area": "Район на събитието — ~{w} × {h} км около трасето, медиците и точките",
@@ -246,5 +244,10 @@
   "sent.backToMap": "Назад към картата",
   "offline.areaLabel": "ПЛОЩ",
   "offline.sizeLabel": "РАЗМЕР",
-  "report.moreSub": "Топлинен удар, алергия, гърч и още"
+  "report.moreSub": "Топлинен удар, алергия, гърч и още",
+  "offline.saved": "Запазена на устройството",
+  "offline.covered": "Вече включена",
+  "offline.allSaved": "Най-високата резолюция вече е запазена — няма какво да се сваля.",
+  "offline.upgrade": "Подобри",
+  "offline.remove": "Изтрий"
 }

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import type { VehicleType } from "@events/contracts";
 import { EventsService } from "../events/events.service";
 import { buildCorridorModel, type CorridorModel } from "./race-corridor";
-import { optionForProfile, type VehicleProfileOption } from "./vehicle-profiles";
+import { effectiveDurationFactor, optionForProfile, type VehicleProfileOption } from "./vehicle-profiles";
 import { GraphHopperClient, type GraphHopperPath } from "./graphhopper.client";
 import { buildSegments, classifyPoints } from "./surface-classification";
 import type {
@@ -213,7 +213,7 @@ export class RoutingService {
     // A restricting custom model cannot raise the profile's speeds, so the
     // vehicle's own pace is applied here — to the whole route AND to every leg,
     // otherwise the turn-by-turn countdown and the total disagree.
-    const factor = vehicle?.durationFactor ?? 1;
+    const factor = effectiveDurationFactor(vehicle, path.time, path.distance);
     const instructions: RouteInstruction[] = (path.instructions ?? []).map((raw) => {
       const at = geometry[raw.interval?.[0] ?? 0];
       return {

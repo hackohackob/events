@@ -4,7 +4,7 @@ import { use, useState, useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
-  ChevronRight, Calendar, MapPin, Users, Activity,
+  ChevronRight, ChevronLeft, Calendar, MapPin, Users, Activity,
   Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
   Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, MessageCircle, ChevronDown, Clock
 } from 'lucide-react'
@@ -390,6 +390,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
   const [showBroadcast, setShowBroadcast] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false) // mobile: side panel overlay
+  // Desktop: fold the sidebar away to give the map the whole window. Mobile
+  // already has the overlay drawer for this, so the toggle is lg-only.
+  const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null)
   const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
   // "Move incident" mode: the next map click repositions this incident's pin.
@@ -724,7 +727,10 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
         )}
         {/* Left panel — overlay drawer on mobile, fixed sidebar on desktop */}
         <div
-          className={`absolute lg:relative inset-y-0 left-0 z-30 w-[88vw] max-w-[380px] lg:max-w-none lg:w-[400px] flex-shrink-0 flex flex-col h-full transition-transform duration-300 ${panelOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}
+          // Collapsing slides the sidebar out on a negative margin rather than
+          // shrinking it: at width 0 every label inside would rewrap mid-
+          // animation. The flex row above clips whatever hangs off the edge.
+          className={`absolute lg:relative inset-y-0 left-0 z-30 w-[88vw] max-w-[380px] lg:max-w-none lg:w-[400px] flex-shrink-0 flex flex-col h-full transition-transform duration-300 lg:transition-[margin-left] lg:duration-300 ${panelOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 ${panelCollapsed ? 'lg:-ml-[400px]' : 'lg:ml-0'}`}
           style={{ borderRight: '1px solid rgba(148,163,184,0.08)', background: 'rgba(8,15,28,0.98)' }}
         >
           {/* Mobile close button */}
@@ -1138,6 +1144,23 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
         {/* Map */}
         <div className="flex-1 relative min-w-0">
+          {/* Desktop: fold the sidebar away. Sits on the seam between the two,
+              so it reads as the panel's own handle. */}
+          <button
+            onClick={() => setPanelCollapsed(c => !c)}
+            className="hidden lg:flex absolute left-0 top-1/2 -translate-y-1/2 items-center justify-center h-14 w-[18px] rounded-r-lg transition-colors hover:brightness-150"
+            style={{
+              zIndex: 20,
+              background: 'rgba(10,18,34,0.95)',
+              border: '1px solid rgba(148,163,184,0.18)',
+              borderLeft: 'none',
+              color: '#94a3b8',
+            }}
+            title={panelCollapsed ? 'Show panel' : 'Hide panel'}
+            aria-label={panelCollapsed ? 'Show panel' : 'Hide panel'}
+          >
+            {panelCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+          </button>
           {/* Mobile: open the info/medics/incidents panel */}
           <button
             onClick={() => setPanelOpen(true)}
@@ -1216,12 +1239,17 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             kmMarkIntervalKm={kmMarkInterval}
           />
 
-          {/* Elevation profile of the selected track — a strip across the
-              bottom of the map, like the chart under the map in the editor. */}
+          {/* Elevation profile of the selected track — a strip across the full
+              width of the map, like the chart under the map in the editor. */}
           {profileTrack && (
             <TrackElevationOverlay
               track={profileTrack}
-              pois={mapPois.map(p => ({ coordinates: p.coordinates, type: p.type as string, name: p.name }))}
+              pois={mapPois.map(p => ({ coordinates: p.coordinates, type: p.type as string, name: p.name, icon: p.icon }))}
+              // Only what is still open: a resolved incident is history, and
+              // marking it on the course reads as something to respond to.
+              incidents={liveIncidents
+                .filter(i => i.status === 'open' || i.status === 'assigned' || i.status === 'in_progress')
+                .map(i => ({ coordinates: [i.lng, i.lat] as [number, number], type: i.type, name: i.name ?? undefined }))}
               onHoverCoord={setElevHoverCoord}
               onClose={() => { setElevHoverCoord(null); setProfileTrackId(null) }}
             />

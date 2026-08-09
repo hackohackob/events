@@ -34,6 +34,15 @@ export interface VehicleProfileOption {
   profile: RouteProfile;
   /** Multiplier on the profile's own travel time. `1` = the profile is right. */
   durationFactor: number;
+  /**
+   * Floor on the route's *implied average speed*, m/s. The `mtb` profile is
+   * elevation-aware and collapses to a crawl on a climb — correct for legs, but
+   * it is a rider's pace, and a motor does not slow down for a gradient. A
+   * vehicle that says so here never comes out slower than this over the whole
+   * route, however steep the ground is. Leave unset for anything whose profile
+   * speed is already its own.
+   */
+  minSpeedMs?: number;
   /** Inline custom model narrowing the base profile to this vehicle. */
   restrict?: Record<string, unknown>;
   /** Shown in logs when this option wins, so an odd ETA can be traced. */
@@ -135,8 +144,12 @@ export const VEHICLE_PROFILES: Record<VehicleType, VehicleProfileOption[]> = {
 
   bike: [{ profile: "mtb", durationFactor: 1, label: "mtb" }],
 
-  // Motor assistance mostly pays off on climbs and flat fire roads.
-  "e-bike": [{ profile: "mtb", durationFactor: 0.75, restrict: EBIKE_WAYS, label: "mtb/e-assist" }],
+  // Motor assistance mostly pays off on climbs and flat fire roads. The speed
+  // floor is what makes that true: without it a 600 m climb came back as six
+  // minutes, because the mtb profile was pricing a rider's legs.
+  "e-bike": [
+    { profile: "mtb", durationFactor: 0.75, minSpeedMs: 3.3, restrict: EBIKE_WAYS, label: "mtb/e-assist" },
+  ],
 
   // The most capable vehicle on the list for reaching a casualty off-road: it
   // goes everywhere a mountain bike goes, foot paths included, at motorbike
@@ -172,6 +185,27 @@ export const VEHICLE_PROFILES: Record<VehicleType, VehicleProfileOption[]> = {
     { profile: "car", durationFactor: 1.1, restrict: ROAD_AMBULANCE_WAYS, label: "road" },
   ],
 };
+
+/**
+ * How much of the profile's own travel time this vehicle actually spends —
+ * {@link VehicleProfileOption.durationFactor}, lowered further when the routed
+ * time implies a speed below the vehicle's floor.
+ *
+ * Returned as a *factor* rather than a duration on purpose: the caller applies
+ * the same number to the total and to every leg, so a turn-by-turn countdown
+ * always adds up to the ETA above it.
+ */
+export function effectiveDurationFactor(
+  option: VehicleProfileOption | null,
+  timeMs: number,
+  distanceMeters: number,
+): number {
+  const factor = option?.durationFactor ?? 1;
+  const floor = option?.minSpeedMs;
+  if (!floor || !(timeMs > 0) || !(distanceMeters > 0)) return factor;
+  const fastestMs = (distanceMeters / floor) * 1000;
+  return Math.min(factor, fastestMs / timeMs);
+}
 
 /** The profile a vehicle should default to for turn-by-turn navigation. */
 export function primaryProfile(vehicle: VehicleType): RouteProfile {

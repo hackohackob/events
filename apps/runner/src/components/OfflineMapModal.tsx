@@ -5,41 +5,65 @@ import {
   boundsSpanKm,
   estimateMb,
   fmtMb,
+  qualityRank,
   tileCountForBounds,
   type Bounds,
   type OfflineQuality,
 } from "../lib/offline-map";
 
 const ACCENT = "var(--live-gps)";
+const SAVED = "#34d399";
 
 interface Props {
   open: boolean;
   bounds: Bounds | null;
+  /** Resolution already on disk, or null when nothing is saved. */
+  savedQualityKey: string | null;
   onClose: () => void;
   onConfirm: (quality: OfflineQuality) => void;
+  /** Delete the saved pack. */
+  onRemove: () => void;
 }
 
 /**
  * Offline-map download sheet. Shows the area + estimated size and lets the runner
  * pick a resolution — Fast (overview), Balanced (recommended) or Detailed (full
  * zoom). The estimate follows the chosen resolution so there are no surprises.
+ *
+ * Mirrors the native app's sheet (apps/mobile/src/map/OfflineDownloadModal.tsx):
+ * once a pack is saved, its row goes green and everything below it greys out as
+ * "already covered", so the only thing left to choose is an upgrade — and
+ * removing the pack is a deliberate button, never a stray tap on the map
+ * control.
  */
-export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
+export function OfflineMapModal({ open, bounds, savedQualityKey, onClose, onConfirm, onRemove }: Props) {
   const { t } = useT();
-  // Default to "Balanced" — good detail without a huge download.
-  const [qualityKey, setQualityKey] = useState("balanced");
-  const quality = QUALITIES.find((q) => q.key === qualityKey) ?? QUALITIES[1];
+  const savedRank = qualityRank(savedQualityKey);
+  // Only higher resolutions are worth downloading — the saved one and anything
+  // below it is already covered by what's on disk.
+  const upgrades = useMemo(() => QUALITIES.filter((_, i) => i > savedRank), [savedRank]);
+  const [qualityKey, setQualityKey] = useState(() => upgrades[0]?.key ?? "balanced");
 
-  // Reset to the recommended resolution each time the sheet is reopened.
+  // Re-seat the selection each time the sheet opens: the saved quality may have
+  // changed since last time, and a covered row must never stay selected.
   useEffect(() => {
-    if (open) setQualityKey("balanced");
-  }, [open]);
+    if (!open) return;
+    const preferred = upgrades.find((q) => q.key === "balanced") ?? upgrades[0];
+    setQualityKey(preferred?.key ?? "");
+  }, [open, upgrades]);
+
+  const quality = QUALITIES.find((q) => q.key === qualityKey) ?? null;
 
   const span = useMemo(() => (bounds ? boundsSpanKm(bounds) : null), [bounds]);
-  const sizeMb = useMemo(
-    () => (bounds ? estimateMb(tileCountForBounds(bounds, quality.minZoom, quality.maxZoom)) : null),
-    [bounds, quality],
-  );
+  const estimates = useMemo(() => {
+    const out: Record<string, number> = {};
+    if (!bounds) return out;
+    for (const q of QUALITIES) out[q.key] = estimateMb(tileCountForBounds(bounds, q.minZoom, q.maxZoom));
+    return out;
+  }, [bounds]);
+
+  const sizeMb = quality ? estimates[quality.key] : undefined;
+  const nothingLeft = upgrades.length === 0;
 
   if (!open) return null;
 
@@ -81,11 +105,11 @@ export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
             height: 56,
             borderRadius: 18,
             margin: "0 auto",
-            background: "rgba(46,155,255,0.14)",
-            border: "1px solid rgba(46,155,255,0.3)",
+            background: savedQualityKey ? "rgba(52,211,153,0.14)" : "rgba(46,155,255,0.14)",
+            border: `1px solid ${savedQualityKey ? "rgba(52,211,153,0.3)" : "rgba(46,155,255,0.3)"}`,
             display: "grid",
             placeItems: "center",
-            color: ACCENT,
+            color: savedQualityKey ? SAVED : ACCENT,
           }}
         >
           <DownloadCloud size={26} />
@@ -93,7 +117,7 @@ export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
 
         <div>
           <div className="archivo" style={{ fontWeight: 800, fontSize: 19, color: "var(--text-primary)" }}>
-            {t("offline.title")}
+            {t(savedQualityKey ? "offline.titleSaved" : "offline.title")}
           </div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
             {t("offline.subtitle")}
@@ -119,36 +143,72 @@ export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
           <Stat label={t("offline.sizeLabel")} value={sizeMb != null ? fmtMb(sizeMb) : "—"} accent />
         </div>
 
-        {/* Resolution picker — Fast / Balanced / Detailed. */}
+        {/* Resolution picker — Fast / Balanced / Detailed. What is already on
+            disk is green and unselectable; anything below it is implied by that
+            pack, so it greys out too. */}
         <div style={{ textAlign: "left" }}>
           <div className="section-label" style={{ marginBottom: 8 }}>
             {t("offline.quality")}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {QUALITIES.map((q) => {
-              const selected = q.key === qualityKey;
+            {QUALITIES.map((q, i) => {
+              const isSaved = q.key === savedQualityKey;
+              const superseded = i < savedRank;
+              const covered = isSaved || superseded;
+              const selected = !covered && q.key === qualityKey;
+              const mb = estimates[q.key];
+              const labelColor = isSaved
+                ? SAVED
+                : superseded
+                  ? "var(--text-muted)"
+                  : selected
+                    ? ACCENT
+                    : "var(--text-primary)";
               return (
                 <button
                   key={q.key}
-                  onClick={() => setQualityKey(q.key)}
+                  onClick={() => !covered && setQualityKey(q.key)}
+                  disabled={covered}
                   style={{
                     flex: 1,
                     textAlign: "left",
                     padding: "10px 12px",
                     borderRadius: 14,
-                    background: selected ? "rgba(46,155,255,0.14)" : "rgba(255,255,255,0.04)",
-                    border: `1px solid ${selected ? ACCENT : "rgba(148,163,184,0.18)"}`,
+                    opacity: superseded ? 0.55 : 1,
+                    background: isSaved
+                      ? "rgba(52,211,153,0.12)"
+                      : selected
+                        ? "rgba(46,155,255,0.14)"
+                        : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${
+                      isSaved ? "rgba(52,211,153,0.45)" : selected ? ACCENT : "rgba(148,163,184,0.18)"
+                    }`,
                     transition: "background 0.15s, border-color 0.15s",
                   }}
                 >
                   <div
                     className="archivo"
-                    style={{ fontWeight: 800, fontSize: 13.5, color: selected ? ACCENT : "var(--text-primary)" }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontWeight: 800,
+                      fontSize: 13.5,
+                      color: labelColor,
+                    }}
                   >
+                    {covered && <Check size={12} color={isSaved ? SAVED : "var(--text-muted)"} />}
                     {t(`offline.q.${q.key}`)}
                   </div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.3 }}>
-                    {t(`offline.q.${q.key}.sub`)}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: covered ? "var(--text-label)" : selected ? ACCENT : "var(--text-muted)",
+                      marginTop: 3,
+                    }}
+                  >
+                    {covered ? t(isSaved ? "offline.saved" : "offline.covered") : mb != null ? fmtMb(mb) : "—"}
                   </div>
                 </button>
               );
@@ -156,9 +216,42 @@ export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
           </div>
         </div>
 
+        {nothingLeft ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              textAlign: "left",
+              background: "rgba(52,211,153,0.1)",
+              borderRadius: 12,
+              padding: "10px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              color: "#6ee7b7",
+            }}
+          >
+            <Check size={14} color="#6ee7b7" /> {t("offline.allSaved")}
+          </div>
+        ) : sizeMb != null && sizeMb > 250 ? (
+          <div
+            style={{
+              textAlign: "left",
+              background: "rgba(245,158,11,0.1)",
+              borderRadius: 12,
+              padding: "10px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              color: "#fcd34d",
+            }}
+          >
+            {t("offline.large")}
+          </div>
+        ) : null}
+
         <button
-          onClick={() => bounds && onConfirm(quality)}
-          disabled={!bounds}
+          onClick={() => bounds && quality && onConfirm(quality)}
+          disabled={!bounds || !quality}
           style={{
             display: "flex",
             alignItems: "center",
@@ -170,12 +263,29 @@ export function OfflineMapModal({ open, bounds, onClose, onConfirm }: Props) {
             color: "#04121f",
             fontWeight: 800,
             fontSize: 15,
-            opacity: bounds ? 1 : 0.5,
+            opacity: bounds && quality ? 1 : 0.5,
             boxShadow: "0 8px 22px rgba(46,155,255,0.35)",
           }}
         >
-          <DownloadCloud size={18} color="#04121f" /> {t("offline.download")}
+          <DownloadCloud size={18} color="#04121f" />{" "}
+          {t(savedQualityKey ? "offline.upgrade" : "offline.download")}
         </button>
+        {savedQualityKey ? (
+          <button
+            onClick={onRemove}
+            style={{
+              padding: "12px",
+              borderRadius: 16,
+              background: "rgba(239,68,68,0.12)",
+              border: "1px solid rgba(239,68,68,0.3)",
+              color: "#fca5a5",
+              fontWeight: 800,
+              fontSize: 14,
+            }}
+          >
+            {t("offline.remove")}
+          </button>
+        ) : null}
         <button onClick={onClose} style={{ color: "var(--text-muted)", fontWeight: 700, fontSize: 14, padding: 4 }}>
           {t("common.cancel")}
         </button>
@@ -194,6 +304,14 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
         {label}
       </div>
     </div>
+  );
+}
+
+function Check({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
   );
 }
 
