@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import Sidebar from '@/components/layout/Sidebar'
+import AppShell from '@/components/layout/AppShell'
 import Providers from './providers'
 
 export const metadata: Metadata = {
@@ -15,10 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Providers>
           <div className="flex min-h-screen" style={{ background: '#070e1b' }}>
-            <Sidebar />
-            <main className="flex-1 ml-0 lg:ml-[200px] min-h-screen flex flex-col min-w-0">
-              {children}
-            </main>
+            <AppShell>{children}</AppShell>
           </div>
         </Providers>
       </body>

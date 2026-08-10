@@ -142,11 +142,15 @@ const EBIKE_WAYS = {
 export const VEHICLE_PROFILES: Record<VehicleType, VehicleProfileOption[]> = {
   foot: [{ profile: "foot", durationFactor: 1, label: "foot" }],
 
-  bike: [{ profile: "mtb", durationFactor: 1, label: "mtb" }],
+  // Every vehicle riding the `mtb` network carries a speed floor. The profile
+  // is elevation-aware and collapses to walking pace on a sustained climb,
+  // which is honest about a rider's legs over one steep segment but wrong as a
+  // whole-leg average — it was answering "600 m" with "6 minutes". The floors
+  // are ordered so the vehicles stay ordered: a rider is slower than a motor.
+  bike: [{ profile: "mtb", durationFactor: 1, minSpeedMs: 2.5, label: "mtb" }],
 
-  // Motor assistance mostly pays off on climbs and flat fire roads. The speed
-  // floor is what makes that true: without it a 600 m climb came back as six
-  // minutes, because the mtb profile was pricing a rider's legs.
+  // Motor assistance mostly pays off on climbs and flat fire roads, which is
+  // exactly where the unassisted profile is most pessimistic.
   "e-bike": [
     { profile: "mtb", durationFactor: 0.75, minSpeedMs: 3.3, restrict: EBIKE_WAYS, label: "mtb/e-assist" },
   ],
@@ -155,19 +159,19 @@ export const VEHICLE_PROFILES: Record<VehicleType, VehicleProfileOption[]> = {
   // goes everywhere a mountain bike goes, foot paths included, at motorbike
   // speed. Limited on open road, where the 4×4 network is quicker.
   "e-motorcycle": [
-    { profile: "mtb", durationFactor: 0.55, restrict: E_MOTORCYCLE_WAYS, label: "trail/path" },
+    { profile: "mtb", durationFactor: 0.55, minSpeedMs: 5, restrict: E_MOTORCYCLE_WAYS, label: "trail/path" },
     { profile: "rescue_4x4", durationFactor: 0.95, label: "road/track" },
   ],
 
   motorcycle: [
-    { profile: "mtb", durationFactor: 0.5, restrict: MOTORCYCLE_WAYS, label: "trail" },
+    { profile: "mtb", durationFactor: 0.5, minSpeedMs: 5.5, restrict: MOTORCYCLE_WAYS, label: "trail" },
     { profile: "rescue_4x4", durationFactor: 0.8, label: "road/track" },
   ],
 
   atv: [
     { profile: "rescue_4x4", durationFactor: 1, label: "track" },
     // A quad also takes wide paths and bridleways the 4×4 model refuses.
-    { profile: "mtb", durationFactor: 0.7, restrict: ATV_WAYS, label: "path" },
+    { profile: "mtb", durationFactor: 0.7, minSpeedMs: 4.5, restrict: ATV_WAYS, label: "path" },
   ],
 
   car: [{ profile: "car", durationFactor: 1, label: "road" }],

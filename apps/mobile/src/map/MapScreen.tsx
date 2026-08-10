@@ -76,6 +76,7 @@ import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
 import { archivePoi, assignDestination, moveIncidentLocation, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
+import { POI_TYPES } from "./poi-types";
 import { useForegroundInterval } from "../ui/useForegroundInterval";
 import { OfflineControlButton } from "./OfflineControlButton";
 import type { EventZone, VehicleType } from "@events/contracts";
@@ -386,6 +387,21 @@ interface TrackProfileData {
   totalDistanceMeters: number;
   minElevationMeters: number;
   maxElevationMeters: number;
+}
+
+/** A POI or incident placed on the track-studio elevation chart. */
+interface TrackProfileMark {
+  id: string;
+  kind: "poi" | "incident";
+  label: string;
+  color: string;
+  /** 0–1 along the track — the chart's x. */
+  progress: number;
+  distanceMeters: number;
+  /** Chart y, already in the same percentage space as the cursors. */
+  topPercent: number;
+  poiType?: string;
+  poiIcon?: string | null;
 }
 
 type TrackElevationSection = NonNullable<EventTrackResponse["elevationProfile"]>["sections"][number];
@@ -1302,6 +1318,12 @@ const TRACK_ELEVATION_CHART_MIN_POINTS = 120;
 const TRACK_ELEVATION_CHART_MAX_POINTS = 260;
 const TRACK_PROFILE_MIN_BUCKETS = 28;
 const TRACK_PROFILE_MAX_BUCKETS = 140;
+/** A POI or incident further than this from the line is not "on" the track. */
+const TRACK_MARK_SNAP_MAX_M = 150;
+/** How close the cursor has to get to a mark before the chart names it. */
+const TRACK_MARK_NEAR_M = 400;
+/** Fixed so the callout can be clamped inside the chart without measuring it. */
+const TRACK_MARK_CALLOUT_W = 158;
 const FUTURE_MENU_PAGES = [
   {
     id: "event-dashboard",
@@ -2556,6 +2578,64 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     );
   }, [focusedTrackProfile, focusedTrackSample]);
 
+  // `markers` gets a new identity every time a medic moves — several times a
+  // second on a busy event — so the placeable ones are pinned to a key first.
+  // Without this the O(points × marks) projection below would re-run on every
+  // location packet, for a set of points that almost never changes.
+  const trackMarkSourceKey = useMemo(
+    () =>
+      markers
+        .filter((m) => m.type === "infrastructure" || m.type === "incident")
+        .map((m) => `${m.id}:${m.lat.toFixed(5)},${m.lng.toFixed(5)}:${m.label}:${m.poiArchived ? 1 : 0}`)
+        .join("|"),
+    [markers],
+  );
+  const trackMarkSources = useMemo(
+    () => markers.filter((m) => m.type === "infrastructure" || m.type === "incident"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trackMarkSourceKey],
+  );
+
+  // POIs and incidents that sit on the focused track, placed on the profile by
+  // how far along they are. Only what is genuinely on the line — a car park a
+  // kilometre away has no place on the chart — so anything beyond
+  // TRACK_MARK_SNAP_MAX_M is dropped rather than pinned to the nearest vertex.
+  const focusedTrackMarks = useMemo<TrackProfileMark[]>(() => {
+    if (!focusedTrackProfile || focusedTrackProfile.points.length < 2) return [];
+    const out: TrackProfileMark[] = [];
+    for (const marker of trackMarkSources) {
+      if (marker.poiArchived) continue;
+      let bestIndex = 0;
+      let bestKm = Infinity;
+      focusedTrackProfile.points.forEach((point, index) => {
+        const d = distanceKm(marker.lat, marker.lng, point.lat, point.lng);
+        if (d < bestKm) {
+          bestKm = d;
+          bestIndex = index;
+        }
+      });
+      if (bestKm * 1000 > TRACK_MARK_SNAP_MAX_M) continue;
+      const here = focusedTrackProfile.points[bestIndex];
+      const incident = marker.type === "incident";
+      out.push({
+        id: marker.id,
+        kind: incident ? "incident" : "poi",
+        label: marker.label || marker.name || (incident ? "Incident" : "Point"),
+        color: incident ? "#f87171" : (POI_TYPES.find((p) => p.id === marker.poiType)?.color ?? "#94a3b8"),
+        progress: here.progress,
+        distanceMeters: here.distanceMeters,
+        topPercent: elevationToChartTopPercent(
+          here.elevationMeters,
+          focusedTrackProfile.minElevationMeters,
+          focusedTrackProfile.maxElevationMeters,
+        ),
+        poiType: marker.poiType,
+        poiIcon: marker.poiIcon,
+      });
+    }
+    return out.sort((a, b) => a.progress - b.progress);
+  }, [focusedTrackProfile, trackMarkSources]);
+
   // The chart's ~500 segment views are static per track — memoised so scrub
   // re-renders (which only move the cursor) don't re-create them all.
   const elevationChartSegments = useMemo(() => {
@@ -2651,6 +2731,27 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       focusedTrackProfile.maxElevationMeters,
     );
   }, [focusedTrackProfile, myTrackPosition]);
+
+  // Whichever mark the reader is closest to: the scrub cursor while they are
+  // scrubbing, otherwise their own position on the track. Only that one gets
+  // named — labelling every point would bury a busy course.
+  const activeTrackMark = useMemo(() => {
+    if (focusedTrackMarks.length === 0) return null;
+    const referenceMeters = trackScrubbed
+      ? (focusedTrackSample?.distanceMeters ?? null)
+      : (myTrackPosition?.distanceMeters ?? null);
+    if (referenceMeters === null) return null;
+    let best: TrackProfileMark | null = null;
+    let bestDelta = Infinity;
+    for (const mark of focusedTrackMarks) {
+      const delta = Math.abs(mark.distanceMeters - referenceMeters);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = mark;
+      }
+    }
+    return best && bestDelta <= TRACK_MARK_NEAR_M ? { mark: best, deltaMeters: bestDelta } : null;
+  }, [focusedTrackMarks, trackScrubbed, focusedTrackSample, myTrackPosition]);
   const focusedTrackScrubSegmentFeature = useMemo(() => {
     if (!focusedTrack || focusedTrack.points.length < 2) {
       return null;
@@ -4629,6 +4730,28 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     },
                   ]}
                 />
+                {/* POIs and incidents on this track, sitting on the line where
+                    they fall. The one nearest the cursor is enlarged and named
+                    below; the rest stay as quiet dots. */}
+                {focusedTrackMarks.map((mark) => {
+                  const active = activeTrackMark?.mark.id === mark.id;
+                  return (
+                    <View
+                      key={mark.id}
+                      pointerEvents="none"
+                      style={[
+                        styles.profileMarkDot,
+                        active ? styles.profileMarkDotActive : null,
+                        {
+                          left: `${mark.progress * 100}%`,
+                          top: `${mark.topPercent}%`,
+                          backgroundColor: mark.color,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+
                 {/* The user's own position projected onto the track */}
                 {myTrackPosition ? (
                   <>
@@ -4641,6 +4764,45 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                     />
                   </>
                 ) : null}
+                {/* Name whatever the cursor is on top of. Pinned to the top of
+                    the chart so it never sits over the mark it is naming, and
+                    clamped in pixels because the chart clips its overflow. */}
+                {activeTrackMark && trackProfileWidth > 0 ? (
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      styles.profileMarkCallout,
+                      {
+                        borderColor: `${activeTrackMark.mark.color}99`,
+                        left: Math.max(
+                          4,
+                          Math.min(
+                            trackProfileWidth - TRACK_MARK_CALLOUT_W - 4,
+                            activeTrackMark.mark.progress * trackProfileWidth - TRACK_MARK_CALLOUT_W / 2,
+                          ),
+                        ),
+                      },
+                    ]}
+                  >
+                    {activeTrackMark.mark.kind === "incident" ? (
+                      <Feather name="alert-triangle" size={11} color={activeTrackMark.mark.color} />
+                    ) : (
+                      <PoiIcon
+                        type={activeTrackMark.mark.poiType}
+                        icon={activeTrackMark.mark.poiIcon}
+                        size={12}
+                        color={activeTrackMark.mark.color}
+                      />
+                    )}
+                    <Text style={styles.profileMarkCalloutText} numberOfLines={1}>
+                      {activeTrackMark.mark.label}
+                    </Text>
+                    <Text style={[styles.profileMarkCalloutMeta, { color: activeTrackMark.mark.color }]}>
+                      {(activeTrackMark.mark.distanceMeters / 1000).toFixed(1)} km
+                    </Text>
+                  </View>
+                ) : null}
+
                 {/* Transparent scrub surface on top so it always wins the
                     responder and reports locationX relative to the chart. */}
                 <View
@@ -6779,6 +6941,42 @@ const styles = StyleSheet.create({
     borderColor: "#fff6de",
     zIndex: 25,
   },
+  profileMarkDot: {
+    position: "absolute",
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: -4,
+    marginTop: -4,
+    borderWidth: 1.5,
+    borderColor: "rgba(2, 16, 24, 0.9)",
+    zIndex: 15,
+  },
+  profileMarkDotActive: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginLeft: -6,
+    marginTop: -6,
+    borderColor: "#ffffff",
+    zIndex: 18,
+  },
+  profileMarkCallout: {
+    position: "absolute",
+    top: 4,
+    width: TRACK_MARK_CALLOUT_W,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
+    borderRadius: 9,
+    borderWidth: 1,
+    backgroundColor: "rgba(6, 17, 31, 0.97)",
+    zIndex: 19,
+  },
+  profileMarkCalloutText: { flex: 1, color: "#e9f1fa", fontSize: 11, fontWeight: "800" },
+  profileMarkCalloutMeta: { fontSize: 10.5, fontWeight: "900" },
   profileEmpty: {
     borderWidth: 1,
     borderColor: "rgba(167, 190, 216, 0.2)",

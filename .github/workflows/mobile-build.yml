@@ -113,11 +113,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # A second, stable-named copy of the same APK. The versioned name is what
+      # people download by hand, but /download-apk needs a URL it can hard-code:
+      # https://github.com/<repo>/releases/latest/download/extrememedics-latest.apk
+      # only resolves if an asset is called exactly that on every release.
+      - name: Duplicate APK under a stable name
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        run: cp "$GITHUB_WORKSPACE"/extrememedics-v*.apk "$GITHUB_WORKSPACE/extrememedics-latest.apk"
+
       - name: Attach APK to GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/mobile-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ github.workspace }}/extrememedics-*.apk
+          files: |
+            ${{ github.workspace }}/extrememedics-v*.apk
+            ${{ github.workspace }}/extrememedics-latest.apk
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
