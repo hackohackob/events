@@ -16,6 +16,9 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkgPath = join(root, "apps", "mobile", "package.json");
+// The native android/ dir is committed, so EAS skips prebuild and reads
+// versionName straight out of build.gradle — keep it in step with package.json.
+const gradlePath = join(root, "apps", "mobile", "android", "app", "build.gradle");
 
 const run = (cmd) => execSync(cmd, { stdio: "pipe" }).toString().trim();
 const exec = (cmd) => execSync(cmd, { stdio: "inherit" });
@@ -57,7 +60,12 @@ console.log(`\nReleasing mobile  ${cur} → ${next}   (tag ${tag}, branch ${bran
 // ── Bump (preserve file formatting), commit, tag, push ──────────────────────
 writeFileSync(pkgPath, raw.replace(/("version":\s*")[^"]+(")/, `$1${next}$2`));
 
-exec(`git add ${JSON.stringify(pkgPath)}`);
+const gradleRaw = readFileSync(gradlePath, "utf8");
+const gradleNext = gradleRaw.replace(/(versionName\s+")[^"]+(")/, `$1${next}$2`);
+if (gradleNext === gradleRaw) fail(`Could not find a versionName string literal in ${gradlePath}.`);
+writeFileSync(gradlePath, gradleNext);
+
+exec(`git add ${JSON.stringify(pkgPath)} ${JSON.stringify(gradlePath)}`);
 exec(`git commit -m "release(mobile): v${next}"`);
 exec(`git tag -a ${tag} -m "Mobile ${next}"`);
 exec(`git push origin ${branch}`);

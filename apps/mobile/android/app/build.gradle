@@ -101,11 +101,11 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        // Same single source of truth as app.config.ts: apps/mobile/package.json.
-        // The native android/ dir is committed, so EAS skips prebuild and reads
-        // versionName from here — hardcoding it silently ships a stale version
-        // name to Play. (versionCode is overridden by EAS remote versioning.)
-        versionName new groovy.json.JsonSlurper().parseText(file("../../package.json").text).version
+        // Kept in sync with apps/mobile/package.json by scripts/release-mobile.mjs.
+        // The native android/ dir is committed, so EAS skips prebuild and takes
+        // versionName from here rather than app.config.ts. It must stay a plain
+        // string literal: EAS reads it with a regex, not by evaluating Gradle.
+        versionName "4.6.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
