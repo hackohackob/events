@@ -101,6 +101,7 @@ import {
   slopeColor,
 } from "./slope-shading";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
+import { clearChatNotifications } from "../notifications/chat-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
 import { useIncidentReadsStore, incidentHasUnread } from "../incidents/incident-reads-store";
@@ -3084,6 +3085,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   useEffect(() => {
     if (activeTab === "chat") {
       useEventChatStore.getState().reset();
+      // Reading the thread also retires the running tray notification, so the
+      // next burst starts counting from one again.
+      void clearChatNotifications();
       return;
     }
     const socket = getSocket();
@@ -3097,12 +3101,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     };
   }, [activeTab, sessionUserId]);
 
-  // Chat tray notifications are raised by the BACKEND as a remote push and
-  // rendered by the OS, not from this socket handler. The socket only delivers
-  // while the JS process is alive, which is exactly when notifications were
-  // missing — Android freezes the connection soon after the app is
-  // backgrounded, and a killed app has no connection at all.
-  // See event-chat.service.ts → pushChatNotification.
+  // Chat tray notifications come from the backend as a data-only push and are
+  // rendered by the background task (notifications/background-push.ts), not
+  // from this socket handler. The socket only delivers while the JS process is
+  // alive, which is exactly when notifications were missing — Android freezes
+  // the connection soon after the app is backgrounded, and a killed app has no
+  // connection at all. See event-chat.service.ts → pushChatNotification.
 
   // Broadcast my active navigation path to the whole team when navigation starts,
   // and clear it when it ends — so everyone + the dashboard sees the route + ETA.

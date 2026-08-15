@@ -164,7 +164,12 @@ export async function showBroadcastNotification(
       // Stable id per incident: the socket path and the data-only push path can
       // both fire for the same incident — the second display replaces the
       // first instead of stacking a duplicate.
-      id: data?.incidentId ? `incident-${data.incidentId}` : undefined,
+      //
+      // Spread, never `id: undefined`. notifee validates with
+      // `objectHasProperty`, so a present-but-undefined `id` is NOT the same as
+      // an absent one: it throws and nothing is displayed. That is why dashboard
+      // broadcasts (which carry no incidentId) never appeared.
+      ...(data?.incidentId ? { id: `incident-${data.incidentId}` } : {}),
       title,
       body,
       data,
