@@ -46,13 +46,37 @@ const MAX_MIRROR_TARGETS = 3;
 const FIX_FRESHNESS_MS = 20 * 60 * 1000;
 
 /**
- * Chat pushes carry no channel id: the app renders them itself and picks
- * between its two chat channels by time of day (during working hours the chime
- * rides the ALARM stream so it is heard through a phone left on silent). That
- * decision belongs on the device — it is the device's ringer state and the
- * medic's local hour that matter, not the server's.
+ * Android channel for chat pushes. Two of them, because a channel's sound and
+ * audio stream are frozen at creation time and we need both behaviours:
  *
- * Tray preview. Photos, voice notes and pins carry no text of their own — a
+ *  - during the day, chat rides the ALARM stream so it is still heard through a
+ *    phone left on silent or vibrate in a jacket pocket;
+ *  - outside those hours it is an ordinary notification that respects whatever
+ *    the user has set.
+ *
+ * The app creates both channels (notifications/chat-notification.ts); the
+ * server only has to name the right one. Hours are the event's local time —
+ * everything in this system runs on Europe/Sofia.
+ */
+const CHAT_CHANNEL_ID = "team-chat-v2";
+const CHAT_AUDIBLE_CHANNEL_ID = "team-chat-audible-v2";
+const AUDIBLE_START_HOUR = 8;
+const AUDIBLE_END_HOUR = 20;
+
+const SOFIA_HOUR = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Sofia",
+  hour: "2-digit",
+  hour12: false,
+});
+
+function chatPushChannelId(now: Date = new Date()): string {
+  const hour = Number(SOFIA_HOUR.format(now));
+  return hour >= AUDIBLE_START_HOUR && hour < AUDIBLE_END_HOUR
+    ? CHAT_AUDIBLE_CHANNEL_ID
+    : CHAT_CHANNEL_ID;
+}
+
+/** Tray preview. Photos, voice notes and pins carry no text of their own — a
  *  bare "New message" for all three told the reader nothing. */
 function chatPushPreview(message: EventMessage): string {
   if (message.kind === "voice") {
@@ -315,13 +339,13 @@ export class EventChatService implements OnModuleInit {
    * System/feed cards are excluded: incidents already raise their own alarm,
    * and "POI added" is not worth waking a phone for.
    *
-   * Sent DATA-ONLY so the app renders it with notifee: Expo's push API can't
-   * set an Android notification tag or group, so OS-rendered chat pushes piled
-   * up one tray entry per message. The app folds them into a single running
-   * notification instead, which it can only do if it owns the rendering.
-   * Author and preview travel as their own fields rather than title/body —
-   * a data-only push packs title/body into `data`, where a message that happens
-   * to start with "{" would be mistaken for the payload envelope.
+   * Sent as a normal notification payload so the OS renders it. A data-only
+   * variant was tried so the app could fold a burst into one growing tray entry
+   * (Expo's push API can't set an Android tag or group, so only app-side
+   * rendering can group them) — but the background task that would render it
+   * does not reliably run on real devices, and chat notifications stopped
+   * arriving entirely. Incident alarms had already been moved off data-only for
+   * the same reason. Reliable delivery beats tidy grouping.
    */
   private async pushChatNotification(message: EventMessage): Promise<void> {
     if (message.kind === "system" || message.feedType) return;
@@ -329,14 +353,8 @@ export class EventChatService implements OnModuleInit {
       message.eventId,
       `💬 ${message.authorName || "Team chat"}`,
       chatPushPreview(message),
-      {
-        eventId: message.eventId,
-        kind: "chat_message",
-        messageId: message.id,
-        chatAuthor: message.authorName || "Team",
-        chatPreview: chatPushPreview(message),
-      },
-      { dataOnly: true, excludeUserId: message.authorId ?? undefined },
+      { eventId: message.eventId, kind: "chat_message", messageId: message.id },
+      { channelId: chatPushChannelId(), excludeUserId: message.authorId ?? undefined },
     );
   }
 

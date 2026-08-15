@@ -20,8 +20,20 @@ const ALERT_CHANNEL_ID = "alerts";
  * the field may carry a mangled config) + the alarm-stream volume is forced up
  * right before ringing (see ensureAlarmStreamVolume), because no channel
  * config can ring through an alarm stream the user has slid to zero.
+ *
+ * v7: another fresh id, after a report of the alarm being inaudible with the
+ * phone merely on vibrate and DND off. The v6 config in this repo is correct
+ * and always has been, which leaves the channel STATE on the device as the
+ * suspect: a channel's sound and importance can also be changed by the user in
+ * system settings (or knocked down by an OEM "silence notifications" gesture),
+ * and once that happens the app cannot put it back — `setNotificationChannel`
+ * is ignored for a channel that already exists. A new id is the only reset.
+ * `logIncidentChannelState` reports what Android actually ended up with.
  */
-export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v6";
+export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v7";
+/** Superseded ids, removed so the app doesn't show three alarm channels in
+ *  system settings (and so a stale one can't be re-targeted by an old push). */
+const LEGACY_ALARM_CHANNEL_IDS = ["alerts-critical", "incident-alarm", "incident-alarm-v5", "incident-alarm-v6"];
 
 /**
  * An alarm on the ALARM stream is still silent if the user dragged that volume
@@ -83,6 +95,39 @@ export async function ensureIncidentAlarmChannel(): Promise<void> {
     vibrationPattern: [300, 600, 300, 600, 300, 600],
     enableLights: true,
   });
+  for (const id of LEGACY_ALARM_CHANNEL_IDS) {
+    await Notifications.deleteNotificationChannelAsync(id).catch(() => undefined);
+  }
+}
+
+/**
+ * Report what Android ACTUALLY stored for the alarm channel.
+ *
+ * The app can only ask; once a channel exists the system owns its sound,
+ * importance and DND bypass, and silently ignores every later change. When an
+ * alarm doesn't ring there is no way to tell from the source whether the
+ * request was refused, so read the truth back and put it in the debug console.
+ */
+export async function logIncidentChannelState(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  try {
+    await ensureIncidentAlarmChannel();
+    const channel = await Notifications.getNotificationChannelAsync(INCIDENT_ALARM_CHANNEL_ID);
+    if (!channel) {
+      debugLog("app", "error", "incident alarm channel missing", INCIDENT_ALARM_CHANNEL_ID);
+      return;
+    }
+    debugLog("app", "info", "incident alarm channel state", {
+      id: channel.id,
+      importance: channel.importance,
+      sound: channel.sound,
+      audioUsage: (channel as { audioAttributes?: { usage?: unknown } }).audioAttributes?.usage,
+      bypassDnd: channel.bypassDnd,
+      vibrate: channel.enableVibrate,
+    });
+  } catch (err) {
+    debugLog("app", "warn", "incident alarm channel probe failed", String(err));
+  }
 }
 
 /**

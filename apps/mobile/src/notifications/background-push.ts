@@ -3,7 +3,6 @@ import * as Notifications from "expo-notifications";
 import { showBroadcastNotification } from "./broadcast-notification";
 import { incidentNotificationBody } from "./incident-notification";
 import { shouldRaiseIncidentAlarm } from "./incident-alarm-guard";
-import { pushChatMessageNotification } from "./chat-notification";
 
 export const BACKGROUND_PUSH_TASK = "background-push-task";
 
@@ -30,7 +29,7 @@ function extractPushData(raw: unknown): Record<string, string> | null {
 }
 
 /**
- * Handles DATA-ONLY pushes (incident alarms, chat) — the backend deliberately sends
+ * Handles DATA-ONLY pushes (incident alarms) — the backend deliberately sends
  * these without title/body so the OS shows nothing, and we raise a full notifee
  * alarm instead: looping sound, strong vibration, DND bypass, full-screen.
  * Works with the app backgrounded or killed (headless JS).
@@ -42,17 +41,9 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
   const payload = extractPushData(data);
   if (!payload) return;
 
-  // Team chat: folded into a single running notification rather than one tray
-  // entry per message. Rendered here (not by the OS) because Expo's push API
-  // has no way to group or replace an Android notification — only notifee does.
-  if (payload.kind === "chat_message") {
-    await pushChatMessageNotification({
-      messageId: payload.messageId ? String(payload.messageId) : undefined,
-      authorName: payload.chatAuthor ? String(payload.chatAuthor) : undefined,
-      preview: payload.chatPreview ? String(payload.chatPreview) : undefined,
-    });
-    return;
-  }
+  // Chat is delivered as a normal notification payload and rendered by the OS —
+  // it must never reach the incident-alarm path below.
+  if (payload.kind === "chat_message") return;
 
   // Compose the user-facing text from the structured fields the backend sends
   // (incidentName/incidentType/lat/lng). We deliberately do NOT fall back to

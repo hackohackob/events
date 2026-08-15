@@ -13,6 +13,7 @@ import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermiss
 import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
 import { ensureChatNotificationChannels } from "./notifications/chat-notification";
+import { logIncidentChannelState } from "./notifications/broadcast-notification";
 import { hydrateAlarmGuard } from "./notifications/incident-alarm-guard";
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
@@ -105,6 +106,9 @@ export default function App() {
     void registerPushToken();
     // The chat channels must exist before the first remote chat push names them.
     void ensureChatNotificationChannels();
+    // Read back what Android actually stored for the alarm channel — the only
+    // way to tell a refused config from a correct one when an alarm is silent.
+    void logIncidentChannelState();
     // Tapping a remote push (incident alarm) focuses the incident on the map.
     const unregisterPushTap = registerPushTapHandler();
     // If the app was launched by tapping an incident notification, focus it.

@@ -579,7 +579,7 @@ export class IncidentsService implements OnModuleInit {
       // can't be woken (data-only proved unreliable on Samsung when killed).
       // The v3 channel carries the bundled siren sound + strong vibration.
       // Skip the reporter — they shouldn't be alarmed by their own report.
-      { channelId: "incident-alarm-v6", excludeUserId: userId },
+      { channelId: "incident-alarm-v7", excludeUserId: userId },
     );
 
     return { ...incident, nearbyParamedics: [] };
@@ -928,7 +928,7 @@ export class IncidentsService implements OnModuleInit {
         lat: incident.lat,
         lng: incident.lng,
       },
-      { channelId: "incident-alarm-v6" },
+      { channelId: "incident-alarm-v7" },
     );
 
     void this.resolveReporterName(eventId, paramedicId).then((medicName) => {
