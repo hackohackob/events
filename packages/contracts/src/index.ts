@@ -383,8 +383,19 @@ export interface EventZone {
   color: string;
   /** Polygon ring, `[lng, lat]`; the closing point is implicit. */
   polygon: [number, number][];
-  /** Zones start hidden; the team toggles them on when relevant. */
+  /**
+   * The zone's DEFAULT visibility for a device that has never toggled it.
+   * Zones start hidden; each device then decides for itself (the mobile app
+   * keeps a local per-zone override), so this is a starting point, not a
+   * team-wide switch.
+   */
   visible: boolean;
+  /**
+   * When a coordinator last pushed this zone onto everyone's map. Devices that
+   * have not yet applied this timestamp drop their local override and show the
+   * zone; hiding it again afterwards is theirs to keep.
+   */
+  visibleBroadcastAt?: string | null;
   /** Medic devices raise an alert when entering this zone. */
   alarm: boolean;
   createdAt: string;

@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { GeoJSONSource, Layer, Marker } from "@maplibre/maplibre-react-native";
 import type { EventZone } from "@events/contracts";
 import { ringCentroid } from "./zone-geometry";
+import { useZoneVisibilityStore } from "./zone-visibility-store";
 
 /**
  * Renders the visible team zones: tinted fill + outline (dashed when the zone
@@ -14,7 +15,13 @@ import { ringCentroid } from "./zone-geometry";
  * the native MapLibre surface (gray screen).
  */
 export function ZonesLayer({ zones }: { zones: EventZone[] }) {
-  const drawable = useMemo(() => zones.filter((z) => z.visible && z.polygon.length >= 3), [zones]);
+  // Visibility is per-device: a local override if this phone has one, else the
+  // zone's own default (see zone-visibility-store).
+  const overrides = useZoneVisibilityStore((s) => s.overrides);
+  const drawable = useMemo(
+    () => zones.filter((z) => (overrides[z.id] ?? z.visible) && z.polygon.length >= 3),
+    [zones, overrides],
+  );
 
   const collection = useMemo(
     () => ({

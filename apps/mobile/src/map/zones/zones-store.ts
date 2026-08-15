@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { EventZone } from "@events/contracts";
 import { fetchZones } from "./zone-api";
+import { useZoneVisibilityStore } from "./zone-visibility-store";
 import { debugLog } from "../../debug/debug-log";
 
 interface ZonesState {
@@ -18,7 +19,11 @@ export const useZonesStore = create<ZonesState>((set, get) => ({
   load: async () => {
     try {
       const zones = await fetchZones();
-      set({ zones: Array.isArray(zones) ? zones : [] });
+      const list = Array.isArray(zones) ? zones : [];
+      // A coordinator may have pushed a zone to the team while this device was
+      // offline — pick that up before the layer renders.
+      useZoneVisibilityStore.getState().applyBroadcasts(list);
+      set({ zones: list });
     } catch (err) {
       // Runners get a 403 by design; anything else is worth a debug line.
       debugLog("api", "warn", "zones fetch failed", String(err));
@@ -26,6 +31,7 @@ export const useZonesStore = create<ZonesState>((set, get) => ({
   },
 
   upsert: (zone) => {
+    useZoneVisibilityStore.getState().applyBroadcasts([zone]);
     const zones = get().zones;
     const index = zones.findIndex((z) => z.id === zone.id);
     set({

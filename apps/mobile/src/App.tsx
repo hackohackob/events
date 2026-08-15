@@ -12,10 +12,12 @@ import { useIncidentStore } from "./incidents/incident-store";
 import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive, flushLocationQueue, resetTransientTrackingBackoff } from "./location/location-tracker";
 import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
+import { ensureChatNotificationChannels } from "./notifications/chat-notification";
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
 import { useSettingsStore } from "./settings/settings-store";
 import { useIncidentReadsStore } from "./incidents/incident-reads-store";
+import { useZoneVisibilityStore } from "./map/zones/zone-visibility-store";
 import { useBuildInfo } from "./debug/build-info";
 
 function GlobalToast() {
@@ -74,6 +76,7 @@ export default function App() {
     void hydrate();
     void useSettingsStore.getState().hydrate();
     void useIncidentReadsStore.getState().hydrate();
+    void useZoneVisibilityStore.getState().hydrate();
     // Stamp when this JS bundle first ran on this device — done at launch, not
     // when the debug screen is opened, or "when the OTA arrived" would just say
     // "when you went looking for it".
@@ -96,6 +99,8 @@ export default function App() {
     })();
     // Register for push so the backend can alert this device when the app is closed.
     void registerPushToken();
+    // The chat channels must exist before the first remote chat push names them.
+    void ensureChatNotificationChannels();
     // Tapping a remote push (incident alarm) focuses the incident on the map.
     const unregisterPushTap = registerPushTapHandler();
     // If the app was launched by tapping an incident notification, focus it.

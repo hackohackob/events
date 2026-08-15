@@ -17,6 +17,7 @@ import * as Haptics from "expo-haptics";
 import type { MapRef } from "@maplibre/maplibre-react-native";
 import { useZoneDrawStore } from "./zone-draw-store";
 import { useZonesStore } from "./zones-store";
+import { useZoneVisibilityStore } from "./zone-visibility-store";
 import { createZone } from "./zone-api";
 import { debugLog } from "../../debug/debug-log";
 
@@ -150,6 +151,11 @@ export function ZoneDrawOverlay({ mapRef }: { mapRef: React.RefObject<MapRef | n
         polygon: pending,
       });
       upsertZone(zone);
+      // Whoever just drew it gets to see it — being dropped back onto a map with
+      // no trace of the zone you spent ten seconds sketching read as a failure.
+      // Still local-only: the rest of the team keeps the hidden default until a
+      // coordinator broadcasts it.
+      useZoneVisibilityStore.getState().showLocally(zone.id);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setName("");
       setAlarm(false);

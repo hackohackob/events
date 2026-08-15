@@ -4,7 +4,6 @@ import { useApp } from "../state/AppContext";
 import { useT } from "../i18n";
 import { ALL_CATEGORIES } from "../lib/types";
 import { RunnerMap } from "../map/RunnerMap";
-import { AttachmentEditor } from "../components/AttachmentEditor";
 import { LOW_ACCURACY_METERS } from "../hooks/useGeolocation";
 
 export function Confirm() {
@@ -99,17 +98,13 @@ export function Confirm() {
         )}
       </div>
 
-      {/* Add details — note only at this stage (photo & voice come after send) */}
-      <div style={{ display: "flex", justifyContent: "space-between", margin: "20px 0 10px" }}>
-        <span className="section-label">{t("sent.addDetails")}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)" }}>{t("confirm.helpsMedics")}</span>
-      </div>
-      <AttachmentEditor
-        note={draft.description}
-        onNoteChange={(v) => patchDraft({ description: v })}
-        notePlaceholder={t("confirm.description")}
-      />
-      <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -2 }}>{t("confirm.photoAfter")}</p>
+      {/* No note field here on purpose. Typing a description is the slowest
+          thing a runner can be asked to do at the moment they need help, and it
+          delayed the alert reaching the team. Notes, photos and voice all stay
+          available on the next screen, once the alert is already out. */}
+      <p style={{ fontSize: 11.5, color: "var(--text-muted)", margin: "20px 0 0", lineHeight: 1.4 }}>
+        {t("confirm.detailsAfter")}
+      </p>
 
       <div style={{ flex: 1 }} />
 

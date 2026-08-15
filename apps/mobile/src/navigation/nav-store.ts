@@ -116,7 +116,23 @@ const OFF_ROUTE_THRESHOLD_M = 30;
 const REROUTE_AFTER_MS = 12_000;
 const REROUTE_COOLDOWN_MS = 15_000;
 
+// Arrival: close enough to the scene that turn guidance has nothing left to say.
+// Both the remaining route length AND the straight-line distance to the
+// destination must be inside this — a route can end a few metres short of the
+// pin (the last snapped road node), and conversely a route that loops past the
+// destination can pass within metres of it long before the end.
+const ARRIVAL_RADIUS_M = 35;
+// Don't call it an arrival the instant navigation starts (e.g. re-routing while
+// already standing next to the incident) — some ground must have been covered.
+const ARRIVAL_MIN_TRAVELLED_M = 40;
+// Let the "you have arrived" announcement finish before the session is torn
+// down — cancel() stops speech.
+const ARRIVAL_STOP_DELAY_MS = 3_000;
+
 const KEEP_AWAKE_TAG = "point-navigation";
+
+/** One-shot latch so the arrival teardown is only scheduled once per session. */
+let arrivalStopScheduled = false;
 
 // Voice turn announcements for point-to-point navigation — same engine as
 // track-following (tracknav starts cancel this store and vice versa, so the
@@ -302,6 +318,7 @@ export const useNavStore = create<NavState>((set, get) => ({
       route?.distanceMeters ?? 0,
       "Navigating to",
     );
+    arrivalStopScheduled = false;
     set({
       phase: "active",
       pendingInsertIndex: null,
@@ -433,6 +450,28 @@ export const useNavStore = create<NavState>((set, get) => ({
     ) {
       set({ lastRerouteAt: now });
       void get().reroute(here);
+    }
+
+    // Arrived at the scene → end navigation on its own. Waiting for the medic
+    // to press "stop" left a stale route broadcasting to the dashboard (and the
+    // camera locked in follow mode) for the whole time they were treating.
+    if (
+      state.phase === "active" &&
+      !arrivalStopScheduled &&
+      state.destination &&
+      snap.alongMeters >= ARRIVAL_MIN_TRAVELLED_M &&
+      remainingMeters <= ARRIVAL_RADIUS_M &&
+      distanceMeters(here, { lat: state.destination.lat, lng: state.destination.lng }) <= ARRIVAL_RADIUS_M
+    ) {
+      arrivalStopScheduled = true;
+      debugLog("app", "info", "navigation arrived — stopping", {
+        remainingMeters: Math.round(remainingMeters),
+      });
+      setTimeout(() => {
+        // Still the same session? (A reroute or manual stop may have intervened.)
+        if (useNavStore.getState().phase === "active") useNavStore.getState().cancel();
+        arrivalStopScheduled = false;
+      }, ARRIVAL_STOP_DELAY_MS);
     }
 
     void instruction; // (kept for future re-route triggers)

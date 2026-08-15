@@ -35,6 +35,7 @@ import { getSocket } from "../realtime/socket-client";
 import { apiFetch, resolveMediaUrl } from "../ui/api-client";
 import { getMapyTilesTemplateUrl } from "./mapy-config";
 import { useMapStore, type MedicMarkerRoute } from "./map-store";
+import { assignUniqueInitials, baseInitials } from "./initials";
 import { hydrateMapCacheIfEmpty, startMapCachePersistence } from "./map-cache";
 import { useSessionStore } from "../security/session-store";
 import { useRosterStore } from "../security/roster-store";
@@ -88,7 +89,8 @@ import { ZonesLayer } from "./zones/ZonesLayer";
 import { ZoneSketchLayer } from "./zones/ZoneSketchLayer";
 import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
 import { useZoneEntryAlarm } from "./zones/zone-alarm";
-import { deleteZone, updateZone } from "./zones/zone-api";
+import { broadcastZone, deleteZone, updateZone } from "./zones/zone-api";
+import { useZoneVisibilityStore } from "./zones/zone-visibility-store";
 import { useSharedValue } from "react-native-reanimated";
 import { isMapGestureActive, noteMapGesture } from "./map-gesture";
 import {
@@ -99,7 +101,6 @@ import {
   slopeColor,
 } from "./slope-shading";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
-import { showChatNotification } from "../notifications/chat-notification";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
 import { useIncidentReadsStore, incidentHasUnread } from "../incidents/incident-reads-store";
@@ -135,6 +136,19 @@ const SCREEN_HEIGHT = Dimensions.get("window").height;
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const SHEET_TOP_MARGIN_EXPANDED = 88;
 const BOTTOM_BAR_HEIGHT = 60;
+// Top-header geometry. The Menu and Layers popups hang directly off the header
+// row, so their `top` is derived from it rather than hand-tuned — the two used
+// to drift a couple of dozen pixels below the buttons that open them.
+const HEADER_TOP = 15;
+/** Tallest thing in the header row (the round action buttons). */
+const HEADER_ROW_HEIGHT = 46;
+const HEADER_POPUP_GAP = 8;
+const HEADER_POPUP_TOP = HEADER_TOP + HEADER_ROW_HEIGHT + HEADER_POPUP_GAP;
+/** Popups may grow until they'd reach the bottom bar, then they scroll. */
+const HEADER_POPUP_MAX_HEIGHT = Math.max(
+  240,
+  SCREEN_HEIGHT - HEADER_POPUP_TOP - BOTTOM_BAR_HEIGHT - 24,
+);
 const SHEET_PEEK_HEIGHT = 320;
 const SHEET_HEIGHT = Math.max(320, SCREEN_HEIGHT - SHEET_TOP_MARGIN_EXPANDED - BOTTOM_BAR_HEIGHT);
 const SHEET_EXPANDED_Y = 0;
@@ -926,21 +940,6 @@ const MARKER_RENDER_PRIORITY: Record<"runner" | "incident" | "paramedic" | "infr
   paramedic: 2,
 };
 
-function markerInitials(label: string): string {
-  const words = (label ?? "")
-    .split(/\s+/)
-    .map((word) => word.replace(/[^A-Za-z0-9]/g, ""))
-    .filter(Boolean);
-
-  if (words.length >= 2) {
-    return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
-  }
-  if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
-  }
-  return "PM";
-}
-
 function distanceKm(latA: number, lngA: number, latB: number, lngB: number): number {
   const toRadians = (value: number) => (value * Math.PI) / 180;
   const earthRadiusKm = 6371;
@@ -1586,6 +1585,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const sessionRole = useSessionStore((state) => state.role);
   const isTeamRole = sessionRole !== "runner" && sessionRole !== "spectator";
   const zones = useZonesStore((state) => state.zones);
+  // Per-device zone visibility (the layers switch writes here, not to the server).
+  const zoneOverrides = useZoneVisibilityStore((state) => state.overrides);
   const zoneDrawPhase = useZoneDrawStore((state) => state.phase);
   useZoneEntryAlarm(isTeamRole);
 
@@ -2430,6 +2431,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     [visibleMarkers],
   );
 
+  // Medic dot badges, resolved across the whole team so two people with the
+  // same natural initials ("Ivan Ivanov" / "Iliya Iotov" → both "II") don't end
+  // up as indistinguishable dots. Keyed off every medic marker, not just the
+  // visible ones, so a badge doesn't change as people pan in and out of view.
+  const medicInitials = useMemo(
+    () =>
+      assignUniqueInitials(
+        markers
+          .filter((marker) => marker.type === "paramedic")
+          .map((marker) => ({ id: marker.id, label: marker.label })),
+      ),
+    [markers],
+  );
+
   // Am I currently responding to an open incident? (Mirrors the
   // AssignedIncidentBanner visibility — used to swap the status button out.)
   const assignedToIncident = useMemo(
@@ -3080,22 +3095,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     };
   }, [activeTab, sessionUserId]);
 
-  // Group-chat tray notification: only for real chat (text/voice) from someone
-  // else, and only while the app isn't foregrounded (in-app the badge covers
-  // it). System/feed cards (added POI, incident echoes) never notify.
-  useEffect(() => {
-    const socket = getSocket();
-    const onChatNotify = (msg: EventMessageDto) => {
-      if (msg.authorId && msg.authorId === sessionUserId) return;
-      if (msg.kind === "system" || msg.feedType) return;
-      if (AppState.currentState === "active") return;
-      void showChatNotification(msg);
-    };
-    socket.on("event.message", onChatNotify);
-    return () => {
-      socket.off("event.message", onChatNotify);
-    };
-  }, [sessionUserId, sessionToken]);
+  // Chat tray notifications are raised by the BACKEND as a remote push, not
+  // from this socket handler. The socket only delivers while the JS process is
+  // alive, which is exactly when notifications were missing — Android freezes
+  // the connection soon after the app is backgrounded, and a killed app has no
+  // connection at all. The push also self-suppresses while foregrounded (no
+  // notification handler is installed), where the unread badge above covers it.
+  // See event-chat.service.ts → pushChatNotification.
 
   // Broadcast my active navigation path to the whole team when navigation starts,
   // and clear it when it ends — so everyone + the dashboard sees the route + ETA.
@@ -3887,7 +3893,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 return (
                   <SelectionPulse active={marker.id === selectedMarkerId} size={30} color={isGrey ? "#94a3b8" : dotColor}>
                     <MedicDot
-                      initials={markerInitials(marker.label)}
+                      initials={medicInitials[marker.id] ?? baseInitials(marker.label)}
                       dotColor={dotColor}
                       isGrey={isGrey}
                       isResponding={isResponding}
@@ -4318,7 +4324,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {isTeamRole && zoneDrawPhase !== "idle" ? <ZoneDrawOverlay mapRef={mapRef} /> : null}
 
       {menuOpen ? (
-        <View style={styles.menuPopup}>
+        <ScrollView
+          style={styles.menuPopup}
+          contentContainerStyle={styles.menuPopupContent}
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.menuPopupTitle}>Menu</Text>
           <Pressable
             style={styles.menuPageRow}
@@ -4438,7 +4448,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               <Text style={styles.menuQuitArrow}>→</Text>
             </Pressable>
           ) : null}
-        </View>
+        </ScrollView>
       ) : null}
 
       {layersOpen ? (
@@ -4550,10 +4560,34 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               {zones.length === 0 ? (
                 <Text style={styles.layersEmptyText}>No zones yet — draw the first one below.</Text>
               ) : null}
-              {zones.map((zone) => (
+              {zones.map((zone) => {
+                const zoneVisible = zoneOverrides[zone.id] ?? zone.visible;
+                return (
                 <View key={zone.id} style={styles.zoneRow}>
                   <View style={[styles.trackColorDot, { backgroundColor: zone.color }]} />
                   <Text style={styles.zoneName} numberOfLines={1}>{zone.name}</Text>
+                  {/* Coordinator-only: push this zone onto everyone's map. Each
+                      device can still hide it again afterwards, and that choice
+                      then sticks for them. */}
+                  {isCoordinator ? (
+                    <Pressable
+                      hitSlop={6}
+                      onPress={() => {
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        // Show it here too — broadcasting a zone you can't see
+                        // yourself makes no sense.
+                        useZoneVisibilityStore.getState().showLocally(zone.id);
+                        void broadcastZone(zone.id)
+                          .then((updated) => {
+                            useZonesStore.getState().upsert(updated);
+                            useIncidentStore.getState().showToast(`“${zone.name}” shown to the whole team`);
+                          })
+                          .catch((err) => debugLog("api", "error", "zone broadcast failed", String(err)));
+                      }}
+                    >
+                      <Feather name="cast" size={15} color="#38bdf8" />
+                    </Pressable>
+                  ) : null}
                   <Pressable
                     hitSlop={6}
                     onPress={() => {
@@ -4586,21 +4620,22 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                   >
                     <Feather name="trash-2" size={15} color="#64748b" />
                   </Pressable>
+                  {/* Local only — showing a zone on MY map is my business, not
+                      a team-wide switch. The coordinator's broadcast above is
+                      the one lever that reaches other devices. */}
                   <Pressable
                     onPress={() => {
                       void Haptics.selectionAsync();
-                      useZonesStore.getState().upsert({ ...zone, visible: !zone.visible });
-                      void updateZone(zone.id, { visible: !zone.visible }).catch((err) =>
-                        debugLog("api", "error", "zone visibility toggle failed", String(err)),
-                      );
+                      useZoneVisibilityStore.getState().setVisible(zone.id, !zoneVisible);
                     }}
                   >
-                    <View style={[styles.switchTrack, zone.visible ? styles.switchTrackOn : null]}>
-                      <View style={[styles.switchKnob, zone.visible ? styles.switchKnobOn : null]} />
+                    <View style={[styles.switchTrack, zoneVisible ? styles.switchTrackOn : null]}>
+                      <View style={[styles.switchKnob, zoneVisible ? styles.switchKnobOn : null]} />
                     </View>
                   </Pressable>
                 </View>
-              ))}
+                );
+              })}
               <Pressable
                 style={styles.drawZoneButton}
                 onPress={() => {
@@ -5037,6 +5072,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <MedicSheet
             marker={selectedMarker}
             rosterEntry={rosterMedics.find((m) => m.id === selectedMarker.id)}
+            badge={medicInitials[selectedMarker.id]}
             onClose={closeSelection}
             onClearDestination={() => {
               const medicId = selectedMarker.id;
@@ -5513,7 +5549,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#020b18" },
+  // `overflow: hidden` is load-bearing on Android: RN views don't clip their
+  // children by default, and MapLibre's <Marker> children are absolutely
+  // positioned by pixel offset — a marker sitting near the top/bottom edge of
+  // the map therefore painted OUTSIDE the app, into the SafeAreaView insets
+  // (over the status bar and the gesture/nav bar). Only map markers did it,
+  // because nothing else is positioned past the container's bounds.
+  container: { flex: 1, backgroundColor: "#020b18", overflow: "hidden" },
   map: { flex: 1 },
   offlineButtonWrap: {
     position: "absolute",
@@ -5555,7 +5597,7 @@ const styles = StyleSheet.create({
   },
   topHeader: {
     position: "absolute",
-    top: 15,
+    top: HEADER_TOP,
     left: 12,
     right: 12,
     flexDirection: "row",
@@ -5725,25 +5767,29 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#ecf4ff",
   },
+  // The menu grew past a screenful on short phones, so it scrolls once it would
+  // reach the bottom bar. `flexGrow: 0` keeps a short list hugging its content
+  // instead of stretching a ScrollView to its maxHeight.
   menuPopup: {
     position: "absolute",
-    top: 94,
+    top: HEADER_POPUP_TOP,
     left: 12,
     width: 288,
+    maxHeight: HEADER_POPUP_MAX_HEIGHT,
+    flexGrow: 0,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.28)",
     backgroundColor: "rgba(8, 15, 28, 0.96)",
     zIndex: 44,
-    padding: 12,
-    gap: 10,
   },
+  menuPopupContent: { padding: 12, gap: 10 },
   layersPopup: {
     position: "absolute",
-    top: 84,
+    top: HEADER_POPUP_TOP,
     right: 12,
     width: 266,
-    maxHeight: SCREEN_HEIGHT * 0.66,
+    maxHeight: HEADER_POPUP_MAX_HEIGHT,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(177, 199, 224, 0.28)",

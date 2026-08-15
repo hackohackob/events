@@ -100,6 +100,18 @@ function timeAgo(iso?: string): string | null {
   return new Date(iso).toLocaleDateString();
 }
 
+/** Divider caption for a chat day — same wording as the team chat. */
+function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (sameDay(d, today)) return "Today";
+  if (sameDay(d, yesterday)) return "Yesterday";
+  return d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
 function initials(label: string): string {
   const words = label.split(/\s+/).filter(Boolean);
   if (words.length >= 2) return `${words[0][0]}${words[1][0]}`.toUpperCase();
@@ -1129,7 +1141,32 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
               <Text style={styles.emptyText}>No messages yet. Coordinate with the team.</Text>
             ) : (
               <View style={styles.chatList}>
-                {messages.map((m) => {
+                {messages.map((m, msgIndex) => {
+                  // A day divider whenever the thread crosses midnight. Incident
+                  // threads on a multi-day event otherwise read as one run of
+                  // bare "07:12" stamps with no way to tell which day is which.
+                  const prevMsg = messages[msgIndex - 1];
+                  const daySeparator =
+                    !prevMsg || dayLabel(prevMsg.createdAt) !== dayLabel(m.createdAt)
+                      ? dayLabel(m.createdAt)
+                      : null;
+                  const separator = daySeparator ? (
+                    <View style={styles.daySeparator}>
+                      <View style={styles.logLine} />
+                      <Text style={styles.daySeparatorText}>{daySeparator}</Text>
+                      <View style={styles.logLine} />
+                    </View>
+                  ) : null;
+                  const withSeparator = (body: React.ReactNode) =>
+                    separator ? (
+                      <React.Fragment key={m.id}>
+                        {separator}
+                        {body}
+                      </React.Fragment>
+                    ) : (
+                      body
+                    );
+                  return withSeparator((() => {
                   // Casualty handover — the closing summary, spelled out in the
                   // log rather than hidden behind a one-line "closed by X".
                   if (m.kind === "handover") {
@@ -1280,6 +1317,7 @@ export function IncidentSheet({ incident, distanceKm, markerById, onClose, onOpe
                       </Text>
                     </View>
                   );
+                  })());
                 })}
               </View>
             )}
@@ -1620,6 +1658,10 @@ const styles = StyleSheet.create({
   chatList: { gap: 7, marginBottom: 10, marginHorizontal: -6 },
   logRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 3 },
   logLine: { flex: 1, height: 1, backgroundColor: "rgba(148,163,184,0.14)" },
+  // Day divider — a shade heavier than the log rows so it reads as a break in
+  // the thread rather than another entry in it.
+  daySeparator: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 8 },
+  daySeparatorText: { color: "#5f7088", fontSize: 10.5, fontWeight: "800", letterSpacing: 0.4 },
   logText: { color: "#7d8ea4", fontSize: 11, fontWeight: "700", textAlign: "center", maxWidth: "78%" },
   logTime: { color: "#48586c", fontSize: 10, fontWeight: "700" },
   // Guided-care chips (first-aid answers / CPR from the runner app)

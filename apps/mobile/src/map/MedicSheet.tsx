@@ -32,6 +32,10 @@ export interface MedicSheetMarker {
 interface Props {
   marker: MedicSheetMarker;
   rosterEntry?: RosterMedic;
+  /** The map dot's badge, already de-duplicated against the rest of the team.
+   *  Passed in so the drawer shows the same two letters as the dot it opened
+   *  from — recomputing here would undo the disambiguation. */
+  badge?: string;
   onClose: () => void;
   onClearDestination: () => void;
 }
@@ -64,7 +68,7 @@ function batteryColor(level: number, charging?: boolean): string {
  * Medic detail drawer — hero header with live status, telemetry cards
  * (battery with charging state, GPS, freshness), destination card, and skills.
  */
-export function MedicSheet({ marker, rosterEntry, onClose, onClearDestination }: Props) {
+export function MedicSheet({ marker, rosterEntry, badge, onClose, onClearDestination }: Props) {
   const status = STATUS_META[marker.status ?? "available"] ?? STATUS_META.available;
   const ageMs = marker.lastSeenAt ? Date.now() - new Date(marker.lastSeenAt).getTime() : undefined;
   const freshColor = freshnessColor(ageMs);
@@ -126,7 +130,7 @@ export function MedicSheet({ marker, rosterEntry, onClose, onClearDestination }:
       <View style={styles.header}>
         <View style={[styles.avatar, { backgroundColor: `${status.color}1f`, borderColor: `${status.color}55` }]}>
           <Text style={[styles.avatarText, { color: status.color }]} allowFontScaling={false}>
-            {initials(marker.name ?? marker.label)}
+            {badge ?? initials(marker.name ?? marker.label)}
           </Text>
           {/* Freshness dot anchored to the avatar */}
           <View style={[styles.freshDot, { backgroundColor: freshColor }]} />

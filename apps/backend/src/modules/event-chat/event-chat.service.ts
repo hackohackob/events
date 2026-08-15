@@ -10,6 +10,7 @@ import { DbService } from "../infra/db.service";
 import { PttBusService } from "../infra/ptt-bus.service";
 import { RedisService } from "../infra/redis.service";
 import { IncidentsService } from "../incidents/incidents.service";
+import { NotificationsService } from "../notifications/notifications.service";
 
 /**
  * How close a medic has to be to an incident for what they say in the team chat
@@ -45,6 +46,52 @@ const MAX_MIRROR_TARGETS = 3;
 const FIX_FRESHNESS_MS = 20 * 60 * 1000;
 
 /**
+ * Android channel for chat pushes. Two of them, because a channel's sound and
+ * audio stream are frozen at creation time and we need both behaviours:
+ *
+ *  - during the day, chat rides the ALARM stream so it is still heard through a
+ *    phone left on silent or vibrate in a jacket pocket;
+ *  - outside those hours it is an ordinary notification that respects whatever
+ *    the user has set.
+ *
+ * The app creates both channels (see notifications/chat-notification.ts); the
+ * server only has to name the right one. Hours are the event's local time —
+ * everything in this system runs on Europe/Sofia.
+ */
+const CHAT_CHANNEL_ID = "team-chat";
+const CHAT_AUDIBLE_CHANNEL_ID = "team-chat-audible-v1";
+const AUDIBLE_START_HOUR = 8;
+const AUDIBLE_END_HOUR = 20;
+
+const SOFIA_HOUR = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Sofia",
+  hour: "2-digit",
+  hour12: false,
+});
+
+function chatPushChannelId(now: Date = new Date()): string {
+  const hour = Number(SOFIA_HOUR.format(now));
+  return hour >= AUDIBLE_START_HOUR && hour < AUDIBLE_END_HOUR
+    ? CHAT_AUDIBLE_CHANNEL_ID
+    : CHAT_CHANNEL_ID;
+}
+
+/** Tray preview. Photos, voice notes and pins carry no text of their own — a
+ *  bare "New message" for all three told the reader nothing. */
+function chatPushPreview(message: EventMessage): string {
+  if (message.kind === "voice") {
+    return message.transcript ? `🎤 ${message.transcript}` : "🎤 Voice message";
+  }
+  if (message.kind === "image" || message.imageUrl) {
+    return message.text ? `📷 ${message.text}` : "📷 Photo";
+  }
+  if (message.kind === "location" || message.location) {
+    return `📍 ${message.text || message.location?.address || "Shared location"}`;
+  }
+  return message.text || "New message";
+}
+
+/**
  * Event-wide team chat: a single thread per event that everyone on the response
  * team shares. It doubles as a live activity feed — incidents, responses and new
  * POIs are posted as `system` messages so the team has one timeline of what's
@@ -63,6 +110,7 @@ export class EventChatService implements OnModuleInit {
     private readonly db: DbService,
     private readonly redisService: RedisService,
     private readonly pttBus: PttBusService,
+    private readonly notifications: NotificationsService,
     // forwardRef: IncidentsService posts its feed entries here, so the two
     // services reference each other.
     @Inject(forwardRef(() => IncidentsService)) private readonly incidents: IncidentsService,
@@ -269,6 +317,13 @@ export class EventChatService implements OnModuleInit {
       }
     }
 
+    // Tray notification for devices that aren't running the app. The socket
+    // broadcast above only reaches a live process, so a backgrounded or killed
+    // app previously got nothing at all for chat.
+    void this.pushChatNotification(message).catch((err) =>
+      this.logger.warn(`Chat push skipped: ${(err as Error).message}`),
+    );
+
     // Fire-and-forget: filing a copy on a nearby incident must never slow down
     // or fail the team-chat send it came from.
     void this.mirrorToNearbyIncidents(message).catch((err) =>
@@ -276,6 +331,25 @@ export class EventChatService implements OnModuleInit {
     );
 
     return message;
+  }
+
+  /**
+   * Push a real chat message to everyone on the event except its author.
+   *
+   * System/feed cards are excluded: incidents already raise their own alarm,
+   * and "POI added" is not worth waking a phone for. The channel id points at
+   * the app's chat channel — a soft chime and a short buzz, deliberately not
+   * the incident alarm.
+   */
+  private async pushChatNotification(message: EventMessage): Promise<void> {
+    if (message.kind === "system" || message.feedType) return;
+    await this.notifications.sendToEvent(
+      message.eventId,
+      `💬 ${message.authorName || "Team chat"}`,
+      chatPushPreview(message),
+      { eventId: message.eventId, kind: "chat_message", messageId: message.id },
+      { channelId: chatPushChannelId(), excludeUserId: message.authorId ?? undefined },
+    );
   }
 
   /**

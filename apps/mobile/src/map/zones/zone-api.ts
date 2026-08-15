@@ -18,6 +18,12 @@ export async function updateZone(zoneId: string, patch: UpdateZoneRequest): Prom
   });
 }
 
+/** Coordinator-only: turn this zone on for every team device (see
+ *  zone-visibility-store for how devices apply it). */
+export async function broadcastZone(zoneId: string): Promise<EventZone> {
+  return apiFetch<EventZone>(`/events/zones/${zoneId}/broadcast`, { method: "POST" });
+}
+
 export async function deleteZone(zoneId: string): Promise<void> {
   await apiFetch(`/events/zones/${zoneId}`, { method: "DELETE" });
 }

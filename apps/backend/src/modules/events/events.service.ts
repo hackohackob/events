@@ -59,7 +59,10 @@ export interface StoredZone {
   color: string;
   /** Polygon ring, [lng, lat]; the closing point is implicit. */
   polygon: [number, number][];
+  /** Default visibility for a device that has never toggled this zone. */
   visible: boolean;
+  /** Last coordinator "show this to everyone" push (ISO), if any. */
+  visibleBroadcastAt?: string | null;
   alarm: boolean;
   createdAt: string;
   updatedAt: string;
@@ -633,6 +636,27 @@ export class EventsService implements OnModuleInit {
     if (typeof patch.visible === "boolean") zone.visible = patch.visible;
     if (typeof patch.alarm === "boolean") zone.alarm = patch.alarm;
     zone.updatedAt = new Date().toISOString();
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, { type: "zone.updated", payload: zone });
+    return zone;
+  }
+
+  /**
+   * Coordinator action: put this zone on everyone's map. Flips the default to
+   * visible and stamps a fresh broadcast time — devices apply that stamp once
+   * and clear whatever local override they were holding, so a zone someone had
+   * hidden comes back. Hiding it again after the push is a local decision the
+   * broadcast no longer touches.
+   */
+  async broadcastZoneVisibility(eventId: string, zoneId: string): Promise<StoredZone> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    const zone = event.zones?.find((z) => z.id === zoneId);
+    if (!zone) throw new NotFoundException(`Zone ${zoneId} not found`);
+    const now = new Date().toISOString();
+    zone.visible = true;
+    zone.visibleBroadcastAt = now;
+    zone.updatedAt = now;
     await this.persist();
     await this.redisService.publish(`event:${eventId}:incidents`, { type: "zone.updated", payload: zone });
     return zone;

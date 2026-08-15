@@ -140,6 +140,16 @@ export class EventsController {
     return this.eventsService.updateZone(user.eventId, zoneId, body);
   }
 
+  /** Coordinator-only: push a zone onto every team device's map. */
+  @Post("zones/:zoneId/broadcast")
+  broadcastZone(@CurrentUser() user: RequestUser, @Param("zoneId") zoneId: string) {
+    this.assertZoneAccess(user);
+    if (user.role !== "coordinator") {
+      throw new ForbiddenException("Only a coordinator can show a zone to the whole team");
+    }
+    return this.eventsService.broadcastZoneVisibility(user.eventId, zoneId);
+  }
+
   @Delete("zones/:zoneId")
   removeZone(@CurrentUser() user: RequestUser, @Param("zoneId") zoneId: string) {
     this.assertZoneAccess(user);

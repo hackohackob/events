@@ -83,6 +83,24 @@ export function ElevationChart({
 
   const runnerX = runnerKm != null ? xOf(Math.min(runnerKm, totalKm)) : null;
 
+  // The POI the scrubber is currently over. Names are shown ONLY while a finger
+  // is down: labelling every badge permanently turned the profile into an
+  // unreadable wall of text, and a <title> tooltip never fires on touch — so
+  // there was no way at all to find out what a badge meant. Released finger →
+  // `scrub` is null → the label goes with it.
+  const labelledPoi = (() => {
+    if (!scrub || pois.length === 0) return null;
+    // Within a few pixels of the badge, not a fixed distance in km — the same
+    // gap reads the same way on a 5 km course and a 100 km one.
+    const maxDx = 22;
+    let best: { poi: ElevPoi; dx: number } | null = null;
+    for (const poi of pois) {
+      const dx = Math.abs(xOf(Math.min(poi.km, totalKm)) - scrub.x);
+      if (dx <= maxDx && (!best || dx < best.dx)) best = { poi, dx };
+    }
+    return best?.poi ?? null;
+  })();
+
   return (
     <div ref={wrapRef} style={{ width: "100%", position: "relative", touchAction: "none" }}>
       <svg
@@ -122,7 +140,6 @@ export function ElevationChart({
               <text x={cx} y={cy + 0.5} textAnchor="middle" dominantBaseline="central" fontSize="10">
                 {v.glyph}
               </text>
-              {p.name && <title>{p.name}</title>}
             </g>
           );
         })}
@@ -149,6 +166,46 @@ export function ElevationChart({
             <circle cx={scrub.x} cy={yOf(scrub.ele)} r="5" fill="#fff" />
           </>
         )}
+
+        {/* Name of the POI under the scrubber — a pill anchored to its badge.
+            Sized from the text length since SVG can't measure it, and flipped
+            to the other side of the badge when it would run off an edge. */}
+        {labelledPoi?.name &&
+          (() => {
+            const cx = xOf(Math.min(labelledPoi.km, totalKm));
+            const cy = yOf(eleAtKm(labelledPoi.km));
+            const padX = 7;
+            const boxW = Math.min(w - 8, labelledPoi.name.length * 6.1 + padX * 2);
+            const boxH = 18;
+            const boxX = Math.max(4, Math.min(w - boxW - 4, cx - boxW / 2));
+            // Above the badge by default; below when there's no room up top.
+            const above = cy - 14 - boxH >= 0;
+            const boxY = above ? cy - 14 - boxH : cy + 14;
+            return (
+              <g style={{ pointerEvents: "none" }}>
+                <rect
+                  x={boxX}
+                  y={boxY}
+                  width={boxW}
+                  height={boxH}
+                  rx="6"
+                  fill="#0B1420"
+                  stroke="rgba(255,255,255,0.18)"
+                />
+                <text
+                  x={boxX + boxW / 2}
+                  y={boxY + boxH / 2}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize="10.5"
+                  fontWeight="700"
+                  fill="#F2F6FB"
+                >
+                  {labelledPoi.name}
+                </text>
+              </g>
+            );
+          })()}
       </svg>
 
       {scrub && (

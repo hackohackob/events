@@ -19,6 +19,10 @@ import type { ResolvedTrack } from "../hooks/useTrackGeoJson";
 import type { IncidentRecordLike, PublicMedicState } from "../api/contracts-shim";
 
 const HEADER_INSET = 70; // identity header height reserved at the top
+/** How far off the selected track a POI can sit and still be shown to a runner.
+ *  Generous enough to keep an aid station parked in a lay-by beside the course,
+ *  tight enough to drop another route's markers. */
+const POI_NEAR_TRACK_M = 500;
 
 /**
  * Measures the rendered height of a bottom-docked panel (the safety dock, the
@@ -171,6 +175,20 @@ export function MapShell({
     const snap = snapToRoute(fix, track.coords, cum);
     return { kmAlong: snap.kmAlong, offsetMeters: snap.offsetMeters };
   }, [fix, track]);
+
+  // POIs are event-wide, but a runner only cares about what they will actually
+  // pass: aid stations, water and toilets ON their course. A multi-track event
+  // otherwise dropped every other route's markers onto their map, which read as
+  // "there's water 4 km that way" when there wasn't — for their race.
+  //
+  // No track selected yet → show everything rather than an empty map.
+  const nearbyPois = useMemo(() => {
+    if (!track || track.coords.length < 2) return pois;
+    const cum = cumulativeDistances(track.coords);
+    return pois.filter(
+      (poi) => snapToRoute({ lat: poi.lat, lng: poi.lng }, track.coords, cum).offsetMeters <= POI_NEAR_TRACK_M,
+    );
+  }, [pois, track]);
 
   const showAccuracyWarning = gpsDenied || (fix != null && fix.accuracy > LOW_ACCURACY_METERS);
 
@@ -341,7 +359,7 @@ export function MapShell({
         // Hide the mobile medics in the weather and track-preview views (they
         // clutter the radar / the elevation framing); POIs only hide in weather.
         medics={weatherOpen || active === "tracks" ? [] : medics}
-        pois={weatherOpen ? [] : pois}
+        pois={weatherOpen ? [] : nearbyPois}
         fix={fix}
         baseLayer={baseLayer}
         scrubPoint={scrubPoint}
@@ -489,7 +507,7 @@ export function MapShell({
           offsetMeters: progress.offsetMeters,
           gpsAltitude: fix?.altitude ?? null,
           medics,
-          pois,
+          pois: nearbyPois,
           onScrub,
           onSheetInset: setSheetInset,
         })}
