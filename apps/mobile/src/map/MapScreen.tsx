@@ -101,7 +101,7 @@ import {
   slopeColor,
 } from "./slope-shading";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
-import { clearChatNotifications } from "../notifications/chat-notification";
+import { playIncidentSiren } from "../notifications/incident-siren";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
 import { useIncidentReadsStore, incidentHasUnread } from "../incidents/incident-reads-store";
@@ -2153,6 +2153,16 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       if (payload.createdBy !== myId) {
         void (async () => {
           if (!(await shouldRaiseIncidentAlarm({ incidentId: payload.id, createdAt: payload.createdAt }))) return;
+          // Always sound the siren ourselves: a notification's own sound is
+          // suppressed by the ringer on silent/vibrate no matter how the alarm
+          // channel is configured, but audio we play is not (incident-siren.ts).
+          void playIncidentSiren();
+          // Only DRAW a notification when the OS won't. Backgrounded, Android
+          // has already drawn the push (incidents are sent as a notification
+          // payload) and adding ours on top is what produced the duplicate
+          // alarm. Foregrounded, the system suppresses the push and ours is the
+          // only one there is.
+          if (AppState.currentState !== "active") return;
           const detail = await incidentNotificationBody({ type: payload.type, lat: payload.lat, lng: payload.lng });
           await showBroadcastNotification(`🚨 ${payload.name ?? "New incident"}`, detail, { incidentId: payload.id }, true);
         })();
@@ -2180,9 +2190,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       const wasResponder = (existingMarker?.respondingParamedicIds ?? []).includes(myUserId);
       const isResponder = (merged.respondingParamedicIds ?? []).includes(myUserId);
       if (!wasResponder && isResponder && !isClosedIncidentStatus(merged.status)) {
-        void incidentNotificationBody({ type: merged.incidentType, lat: merged.lat, lng: merged.lng }).then((detail) =>
-          showBroadcastNotification(`🚑 Assigned: ${merged.name ?? merged.label}`, detail, { incidentId: merged.id }, true),
-        );
+        // Same split as incident.created: siren always, notification only when
+        // the OS hasn't already drawn the assignment push.
+        void playIncidentSiren();
+        if (AppState.currentState === "active") {
+          void incidentNotificationBody({ type: merged.incidentType, lat: merged.lat, lng: merged.lng }).then((detail) =>
+            showBroadcastNotification(`🚑 Assigned: ${merged.name ?? merged.label}`, detail, { incidentId: merged.id }, true),
+          );
+        }
       }
       setMarkers([...withoutIncident, merged].slice(-2200));
     };
@@ -3085,9 +3100,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   useEffect(() => {
     if (activeTab === "chat") {
       useEventChatStore.getState().reset();
-      // Reading the thread also retires the running tray notification, so the
-      // next burst starts counting from one again.
-      void clearChatNotifications();
       return;
     }
     const socket = getSocket();

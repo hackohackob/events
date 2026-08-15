@@ -1,8 +1,7 @@
 import * as TaskManager from "expo-task-manager";
 import * as Notifications from "expo-notifications";
-import { ensureAlarmStreamVolume } from "./broadcast-notification";
 import { shouldRaiseIncidentAlarm } from "./incident-alarm-guard";
-import { pushChatMessageNotification } from "./chat-notification";
+import { playIncidentSiren } from "./incident-siren";
 import { debugLog } from "../debug/debug-log";
 
 export const BACKGROUND_PUSH_TASK = "background-push-task";
@@ -35,10 +34,10 @@ function extractPushData(raw: unknown): Record<string, string> | null {
  *
  * Two kinds arrive here and they are handled very differently:
  *
- *  - CHAT is sent data-only, so nothing is on screen until this task draws it.
- *    It renders through notifee so a burst can be folded into one entry.
- *  - INCIDENT alarms are sent as a notification payload and have ALREADY been
- *    drawn by Android before this runs. This task must not draw them again.
+ * Everything the backend sends is a NOTIFICATION payload, so Android has always
+ * already drawn it by the time this runs and the task must never draw anything
+ * itself. What it is still good for is sounding the siren, which a notification
+ * cannot do on a phone set to vibrate.
  *
  * MUST be defined at module load, before the app mounts.
  */
@@ -47,17 +46,10 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
   const payload = extractPushData(data);
   if (!payload) return;
 
-  // Team chat: folded into a single running notification rather than one tray
-  // entry per message. Rendered here (not by the OS) because Expo's push API
-  // has no way to group or replace an Android notification — only notifee does.
-  if (payload.kind === "chat_message") {
-    await pushChatMessageNotification({
-      messageId: payload.messageId ? String(payload.messageId) : undefined,
-      authorName: payload.chatAuthor ? String(payload.chatAuthor) : undefined,
-      preview: payload.chatPreview ? String(payload.chatPreview) : undefined,
-    });
-    return;
-  }
+  // Chat is sent as a notification payload and drawn by the OS, so there is
+  // nothing to do here — drawing it again would duplicate it, and it must not
+  // fall through to the incident path below.
+  if (payload.kind === "chat_message") return;
 
   // Skip incidents reported before the app/process came up — opening the app
   // (which can trigger a queued push delivery) must not ring for old incidents.
@@ -81,13 +73,15 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
   // this task runs. Raising a notifee alert here too is what produced the
   // duplicate alarm: two different renderers, two tray entries, two sounds.
   //
-  // What is still worth doing is forcing the alarm stream up, so the siren the
-  // OS is playing on the alarm channel is actually audible.
+  //
+  // What IS still worth doing is sounding the siren ourselves. A notification's
+  // sound is suppressed by the ringer on silent/vibrate whatever the channel
+  // says; audio the app plays is not (see incident-siren.ts).
   debugLog("app", "info", "incident push received (OS-rendered)", {
     kind: payload.kind,
     incidentId: payload.incidentId,
   });
-  await ensureAlarmStreamVolume();
+  await playIncidentSiren();
 });
 
 /** Register the task with expo-notifications so FCM data messages reach it. */
