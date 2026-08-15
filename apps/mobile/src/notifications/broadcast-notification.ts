@@ -42,7 +42,7 @@ const LEGACY_ALARM_CHANNEL_IDS = ["alerts-critical", "incident-alarm", "incident
  * require keeps OTA-updated binaries built before the dependency from crashing
  * (they just skip the boost).
  */
-async function ensureAlarmStreamVolume(): Promise<void> {
+export async function ensureAlarmStreamVolume(): Promise<void> {
   if (Platform.OS !== "android") return;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires

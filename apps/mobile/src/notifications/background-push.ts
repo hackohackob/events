@@ -1,9 +1,9 @@
 import * as TaskManager from "expo-task-manager";
 import * as Notifications from "expo-notifications";
-import { showBroadcastNotification } from "./broadcast-notification";
-import { incidentNotificationBody } from "./incident-notification";
+import { ensureAlarmStreamVolume } from "./broadcast-notification";
 import { shouldRaiseIncidentAlarm } from "./incident-alarm-guard";
 import { pushChatMessageNotification } from "./chat-notification";
+import { debugLog } from "../debug/debug-log";
 
 export const BACKGROUND_PUSH_TASK = "background-push-task";
 
@@ -30,10 +30,15 @@ function extractPushData(raw: unknown): Record<string, string> | null {
 }
 
 /**
- * Handles DATA-ONLY pushes (incident alarms, chat) — the backend deliberately sends
- * these without title/body so the OS shows nothing, and we raise a full notifee
- * alarm instead: looping sound, strong vibration, DND bypass, full-screen.
- * Works with the app backgrounded or killed (headless JS).
+ * Background handler for remote pushes, running even when the app is killed
+ * (headless JS).
+ *
+ * Two kinds arrive here and they are handled very differently:
+ *
+ *  - CHAT is sent data-only, so nothing is on screen until this task draws it.
+ *    It renders through notifee so a burst can be folded into one entry.
+ *  - INCIDENT alarms are sent as a notification payload and have ALREADY been
+ *    drawn by Android before this runs. This task must not draw them again.
  *
  * MUST be defined at module load, before the app mounts.
  */
@@ -54,10 +59,6 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
     return;
   }
 
-  // Compose the user-facing text from the structured fields the backend sends
-  // (incidentName/incidentType/lat/lng). We deliberately do NOT fall back to
-  // payload.body: on Android that arrives as the raw JSON-stringified data blob,
-  // which is what used to leak into the notification.
   // Skip incidents reported before the app/process came up — opening the app
   // (which can trigger a queued push delivery) must not ring for old incidents.
   // Assignment pushes are always live, so they bypass the age check.
@@ -72,24 +73,21 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
     return;
   }
 
-  const name = payload.incidentName ? String(payload.incidentName) : undefined;
-  const assigned = payload.kind === "incident_assigned";
-  const title = name
-    ? `${assigned ? "🚑 Assigned: " : "🚨 "}${name}`
-    : assigned
-      ? "🚑 Incident assigned"
-      : "🚨 Incident";
-  const body = await incidentNotificationBody({
-    type: payload.incidentType,
-    lat: payload.lat,
-    lng: payload.lng,
+  // ── Why this does NOT display anything ──
+  // Incident and assignment pushes are sent as a NOTIFICATION payload (not
+  // data-only), because data-only delivery proved unreliable on some OEMs when
+  // the app is killed — and an incident alarm is the one thing that must always
+  // arrive. That means Android has already drawn the notification by the time
+  // this task runs. Raising a notifee alert here too is what produced the
+  // duplicate alarm: two different renderers, two tray entries, two sounds.
+  //
+  // What is still worth doing is forcing the alarm stream up, so the siren the
+  // OS is playing on the alarm channel is actually audible.
+  debugLog("app", "info", "incident push received (OS-rendered)", {
+    kind: payload.kind,
+    incidentId: payload.incidentId,
   });
-  await showBroadcastNotification(
-    title,
-    body,
-    payload.incidentId ? { incidentId: String(payload.incidentId) } : undefined,
-    true,
-  );
+  await ensureAlarmStreamVolume();
 });
 
 /** Register the task with expo-notifications so FCM data messages reach it. */

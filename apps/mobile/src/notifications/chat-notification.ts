@@ -38,8 +38,17 @@ const CHAT_AUDIBLE_CHANNEL_ID = "team-chat-audible-v2";
 /** Superseded ids, deleted on launch so they don't linger in system settings. */
 const LEGACY_CHAT_CHANNEL_IDS = ["team-chat", "team-chat-audible-v1"];
 
-/** Short and unobtrusive — a text-message buzz, not the incident siren. */
-const CHAT_VIBRATION_PATTERN = [0, 120, 90, 120];
+/**
+ * Short and unobtrusive — a text-message buzz, not the incident siren.
+ *
+ * CHANNEL patterns follow the Android convention: index 0 is the initial delay
+ * and may be zero. This is only ever set on the channel, never on an individual
+ * notification: from Android 8 the channel owns vibration and a notification's
+ * own pattern is ignored, and notifee additionally rejects any pattern
+ * containing a non-positive value — so setting it per-notification could only
+ * ever be a no-op or a thrown error that costs the user the whole notification.
+ */
+const CHAT_CHANNEL_VIBRATION_PATTERN = [0, 120, 90, 120];
 
 /** One tray entry for the whole conversation; re-displaying this id updates it. */
 const CHAT_NOTIFICATION_ID = "team-chat-thread";
@@ -78,7 +87,7 @@ async function ensureChatChannels(): Promise<void> {
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     sound: "default",
     enableVibrate: true,
-    vibrationPattern: CHAT_VIBRATION_PATTERN,
+    vibrationPattern: CHAT_CHANNEL_VIBRATION_PATTERN,
   });
 
   await Notifications.setNotificationChannelAsync(CHAT_AUDIBLE_CHANNEL_ID, {
@@ -94,7 +103,7 @@ async function ensureChatChannels(): Promise<void> {
       contentType: Notifications.AndroidAudioContentType.SONIFICATION,
     },
     enableVibrate: true,
-    vibrationPattern: CHAT_VIBRATION_PATTERN,
+    vibrationPattern: CHAT_CHANNEL_VIBRATION_PATTERN,
   });
 
   for (const id of LEGACY_CHAT_CHANNEL_IDS) {
@@ -191,7 +200,6 @@ async function displayChat(
     // Each new message still chimes, even though it updates an existing entry —
     // otherwise the second and later messages of a burst would arrive silently.
     onlyAlertOnce: false,
-    vibrationPattern: CHAT_VIBRATION_PATTERN,
   };
 
   try {
@@ -209,14 +217,23 @@ async function displayChat(
       ios: { sound: "default" },
     });
   } catch (err) {
-    debugLog("app", "error", "chat notification failed — retrying unstyled", String(err));
+    debugLog("app", "error", "chat notification failed — retrying minimal", String(err));
     try {
+      // Deliberately the BAREST payload notifee accepts: channel + icon. The
+      // first fallback attempt reused the same `android` object as the styled
+      // call, so whatever it had rejected (a vibration pattern, that time) was
+      // still there and the retry failed identically. A fallback that shares
+      // fields with the thing that just failed is not a fallback.
       await notifee.displayNotification({
         id: CHAT_NOTIFICATION_ID,
         title,
         body,
         data: { chat: "1" },
-        android,
+        android: {
+          channelId: isWithinAudibleHours() ? CHAT_AUDIBLE_CHANNEL_ID : CHAT_CHANNEL_ID,
+          smallIcon: "ic_launcher",
+          pressAction: { id: "default", launchActivity: "default" },
+        },
         ios: { sound: "default" },
       });
     } catch (retryErr) {
