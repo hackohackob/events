@@ -1,5 +1,5 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from "expo-audio";
-import { ensureAlarmStreamVolume } from "./broadcast-notification";
+import { ensureAlertVolume } from "./broadcast-notification";
 import { debugLog } from "../debug/debug-log";
 
 /**
@@ -49,7 +49,7 @@ let capTimer: ReturnType<typeof setTimeout> | null = null;
 export async function playIncidentSiren(): Promise<void> {
   try {
     // Push the alarm slider up first — the file is loud, the slider may not be.
-    await ensureAlarmStreamVolume();
+    await ensureAlertVolume();
 
     if (!audioModeSet) {
       // iOS: play through the mute switch. Android ignores this flag, and gets
@@ -61,6 +61,7 @@ export async function playIncidentSiren(): Promise<void> {
     // One player, reused. A second incident while the first is still sounding
     // restarts it rather than layering two sirens on top of each other.
     if (!player) player = createAudioPlayer(SIREN);
+    player.volume = 1.0;
     player.seekTo(0);
     player.play();
     if (capTimer) clearTimeout(capTimer);

@@ -55,6 +55,10 @@ export async function playChatChime(): Promise<void> {
       audioModeSet = true;
     }
     if (!player) player = createAudioPlayer(CHIME);
+    // Full scale within the media stream, but deliberately NO volume boost:
+    // forcing the slider up is right for an incident and far too much for a
+    // chat message. Chat plays at whatever level the phone is already set to.
+    player.volume = 1.0;
     player.seekTo(0);
     player.play();
   } catch (err) {

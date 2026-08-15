@@ -18,7 +18,7 @@ const ALERT_CHANNEL_ID = "alerts";
  *
  * v6: fresh id (channel settings are immutable once created — v5 installs in
  * the field may carry a mangled config) + the alarm-stream volume is forced up
- * right before ringing (see ensureAlarmStreamVolume), because no channel
+ * right before ringing (see ensureAlertVolume), because no channel
  * config can ring through an alarm stream the user has slid to zero.
  *
  * v7: another fresh id, after a report of the alarm being inaudible with the
@@ -50,22 +50,31 @@ const LEGACY_ALARM_CHANNEL_IDS = [
 ];
 
 /**
- * An alarm on the ALARM stream is still silent if the user dragged that volume
- * to zero — so push it to max right before ringing. Uses
- * react-native-volume-manager, which needs a new dev build; the dynamic
+ * Push the volume up before an alert sounds — no audio config can be heard
+ * through a slider the user has dragged to zero.
+ *
+ * BOTH streams, and "music" is the one that actually matters now: the app plays
+ * its own siren through expo-audio, which goes out on the media stream. Only
+ * the alarm stream was being boosted, which did nothing at all for our
+ * playback — the sound the user actually hears was left at whatever the media
+ * slider happened to be. "alarm" is kept because a notification channel sound,
+ * if one is ever restored, rides that stream instead.
+ *
+ * Uses react-native-volume-manager, which needs a new dev build; the dynamic
  * require keeps OTA-updated binaries built before the dependency from crashing
  * (they just skip the boost).
  */
-export async function ensureAlarmStreamVolume(): Promise<void> {
+export async function ensureAlertVolume(): Promise<void> {
   if (Platform.OS !== "android") return;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { setVolume } = require("react-native-volume-manager") as {
       setVolume: (value: number, config?: { type?: string; showUI?: boolean }) => Promise<void>;
     };
+    await setVolume(1, { type: "music", showUI: false });
     await setVolume(1, { type: "alarm", showUI: false });
   } catch (err) {
-    debugLog("app", "warn", "alarm volume boost unavailable", String(err));
+    debugLog("app", "warn", "alert volume boost unavailable", String(err));
   }
 }
 let alertChannelEnsured = false;
@@ -147,8 +156,9 @@ export async function logIncidentChannelState(): Promise<void> {
  * no push token / FCM setup.
  *
  * `alarm: true` turns it into an incident alarm: alarm channel (DND bypass),
- * looping sound that keeps ringing until the notification is opened or
- * dismissed, and full-screen prominence on the lock screen.
+ * strong vibration and full-screen prominence on the lock screen. The SOUND is
+ * not here — the channel is silent and the app plays the siren itself, so it is
+ * heard whatever the ringer is doing (see incident-siren.ts).
  */
 export async function showBroadcastNotification(
   title: string,
@@ -170,7 +180,7 @@ export async function showBroadcastNotification(
     await ensureChannels();
     // Ring-through guarantee: an alarm-stream siren is inaudible at alarm
     // volume 0 no matter how the channel is configured.
-    if (alarm) await ensureAlarmStreamVolume();
+    if (alarm) await ensureAlertVolume();
     await notifee.displayNotification({
       // Stable id per incident: the socket path and the data-only push path can
       // both fire for the same incident — the second display replaces the
