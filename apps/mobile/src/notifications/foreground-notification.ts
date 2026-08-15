@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import { stopLocationLoop } from "../location/location-tracker";
 import { useIncidentStore } from "../incidents/incident-store";
 import { useNotificationFocus } from "./notification-focus";
+import { markIncidentAlarmed } from "./incident-alarm-guard";
 import { debugLog } from "../debug/debug-log";
 
 // The persistent tracking notification is owned by expo-location's foreground
@@ -37,6 +38,9 @@ async function handleNotifeeEvent({ type, detail }: { type: EventType; detail: a
     const incidentId = detail.notification?.data?.incidentId as string | undefined;
     if (incidentId) {
       debugLog("app", "info", "incident notification pressed", incidentId);
+      // The tap is the acknowledgement — stop any other delivery path from
+      // ringing for this incident again (see incident-alarm-guard).
+      markIncidentAlarmed(incidentId);
       useNotificationFocus.getState().focusIncident(incidentId);
     }
     return;
@@ -66,6 +70,7 @@ export async function consumeInitialNotification(): Promise<void> {
     const initial = await notifee.getInitialNotification();
     const incidentId = initial?.notification?.data?.incidentId as string | undefined;
     if (incidentId) {
+      markIncidentAlarmed(incidentId);
       useNotificationFocus.getState().focusIncident(incidentId);
     }
   } catch {

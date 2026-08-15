@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import { apiFetch } from "../ui/api-client";
 import { useNotificationFocus } from "./notification-focus";
 import { registerBackgroundPushTask } from "./background-push";
+import { markIncidentAlarmed } from "./incident-alarm-guard";
 import { ensureIncidentAlarmChannel } from "./broadcast-notification";
 import { debugLog } from "../debug/debug-log";
 
@@ -16,7 +17,13 @@ export function registerPushTapHandler(): () => void {
   const handle = (response: Notifications.NotificationResponse | null) => {
     const data = response?.notification.request.content.data as Record<string, unknown> | undefined;
     const incidentId = typeof data?.incidentId === "string" ? data.incidentId : undefined;
-    if (incidentId) useNotificationFocus.getState().focusIncident(incidentId);
+    if (!incidentId) return;
+    // Tapping the alert IS the acknowledgement. Without this, the same push is
+    // re-delivered to the background task during the cold start the tap just
+    // caused, and the incident alarmed a second time while the user was already
+    // reading it.
+    markIncidentAlarmed(incidentId);
+    useNotificationFocus.getState().focusIncident(incidentId);
   };
   void Notifications.getLastNotificationResponseAsync().then(handle);
   const sub = Notifications.addNotificationResponseReceivedListener(handle);

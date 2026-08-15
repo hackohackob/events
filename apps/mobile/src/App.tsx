@@ -13,6 +13,7 @@ import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermiss
 import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
 import { ensureChatNotificationChannels } from "./notifications/chat-notification";
+import { hydrateAlarmGuard } from "./notifications/incident-alarm-guard";
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
 import { useSettingsStore } from "./settings/settings-store";
@@ -77,6 +78,9 @@ export default function App() {
     void useSettingsStore.getState().hydrate();
     void useIncidentReadsStore.getState().hydrate();
     void useZoneVisibilityStore.getState().hydrate();
+    // Which incidents have already rung — loaded early so a push arriving
+    // during startup can't re-alarm one the user has just tapped through.
+    void hydrateAlarmGuard();
     // Stamp when this JS bundle first ran on this device — done at launch, not
     // when the debug screen is opened, or "when the OTA arrived" would just say
     // "when you went looking for it".
