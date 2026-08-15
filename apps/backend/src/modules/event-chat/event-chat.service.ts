@@ -46,30 +46,14 @@ const MAX_MIRROR_TARGETS = 3;
 const FIX_FRESHNESS_MS = 20 * 60 * 1000;
 
 /**
- * Android channel for chat pushes. Two of them, because a channel's sound and
- * audio stream are frozen at creation and the app needs both: during the day
- * the chime is tied to the alarm volume slider, outside those hours to the
- * notification one. The app creates both (notifications/chat-notification.ts);
- * the server only names the right one. Hours are the event's local time —
- * everything in this system runs on Europe/Sofia.
+ * The Android channel chat pushes are delivered on. It is deliberately SILENT:
+ * the app plays the chime itself, because Android refuses to sound a
+ * notification while the ringer is on silent or vibrate no matter how the
+ * channel is configured. One channel, one sound, decided on the device — which
+ * is where the ringer state and the medic's local hour actually are.
+ * Created by the app (notifications/chat-notification.ts).
  */
-const CHAT_CHANNEL_ID = "team-chat-v2";
-const CHAT_AUDIBLE_CHANNEL_ID = "team-chat-audible-v2";
-const AUDIBLE_START_HOUR = 8;
-const AUDIBLE_END_HOUR = 20;
-
-const SOFIA_HOUR = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Sofia",
-  hour: "2-digit",
-  hour12: false,
-});
-
-function chatPushChannelId(now: Date = new Date()): string {
-  const hour = Number(SOFIA_HOUR.format(now));
-  return hour >= AUDIBLE_START_HOUR && hour < AUDIBLE_END_HOUR
-    ? CHAT_AUDIBLE_CHANNEL_ID
-    : CHAT_CHANNEL_ID;
-}
+const CHAT_CHANNEL_ID = "team-chat-v3";
 
 /** Tray preview. Photos, voice notes and pins carry no text of their own — a
  *  bare "New message" for all three told the reader nothing. */
@@ -349,7 +333,7 @@ export class EventChatService implements OnModuleInit {
       `💬 ${message.authorName || "Team chat"}`,
       chatPushPreview(message),
       { eventId: message.eventId, kind: "chat_message", messageId: message.id },
-      { channelId: chatPushChannelId(), excludeUserId: message.authorId ?? undefined },
+      { channelId: CHAT_CHANNEL_ID, excludeUserId: message.authorId ?? undefined },
     );
   }
 

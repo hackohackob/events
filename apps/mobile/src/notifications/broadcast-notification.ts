@@ -22,18 +22,32 @@ const ALERT_CHANNEL_ID = "alerts";
  * config can ring through an alarm stream the user has slid to zero.
  *
  * v7: another fresh id, after a report of the alarm being inaudible with the
- * phone merely on vibrate and DND off. The v6 config in this repo is correct
- * and always has been, which leaves the channel STATE on the device as the
- * suspect: a channel's sound and importance can also be changed by the user in
- * system settings (or knocked down by an OEM "silence notifications" gesture),
- * and once that happens the app cannot put it back — `setNotificationChannel`
- * is ignored for a channel that already exists. A new id is the only reset.
- * `logIncidentChannelState` reports what Android actually ended up with.
+ * phone merely on vibrate and DND off. The device then reported the channel
+ * holding exactly what was asked for — MAX importance, custom sound, ALARM
+ * audio usage — and still stayed silent, which settled it: Android applies
+ * ringer-mode suppression to a NOTIFICATION before the channel's audio
+ * attributes are consulted. No channel config can ring through vibrate.
+ *
+ * v8: therefore the channel no longer carries a sound AT ALL. The app plays the
+ * siren itself (incident-siren.ts), which is not a notification and is not
+ * suppressed — so it is audible in every ringer mode, and it is the same sound
+ * every time rather than "ours on vibrate, Android's otherwise". The channel is
+ * left with vibration and MAX importance; the noise is our job now.
+ *
+ * The one thing this gives up: a FULLY killed app cannot play anything, and a
+ * silent channel means such a delivery arrives with no sound. Location tracking
+ * holds a foreground service, so the process is normally alive.
  */
-export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v7";
-/** Superseded ids, removed so the app doesn't show three alarm channels in
+export const INCIDENT_ALARM_CHANNEL_ID = "incident-alarm-v8";
+/** Superseded ids, removed so the app doesn't show a pile of alarm channels in
  *  system settings (and so a stale one can't be re-targeted by an old push). */
-const LEGACY_ALARM_CHANNEL_IDS = ["alerts-critical", "incident-alarm", "incident-alarm-v5", "incident-alarm-v6"];
+const LEGACY_ALARM_CHANNEL_IDS = [
+  "alerts-critical",
+  "incident-alarm",
+  "incident-alarm-v5",
+  "incident-alarm-v6",
+  "incident-alarm-v7",
+];
 
 /**
  * An alarm on the ALARM stream is still silent if the user dragged that volume
@@ -84,13 +98,10 @@ export async function ensureIncidentAlarmChannel(): Promise<void> {
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
-    // Bundled siren (assets/sounds/incident_alarm.wav → res/raw) — plays for
-    // remote pushes too, where a looping sound isn't possible.
-    sound: "incident_alarm.wav",
-    audioAttributes: {
-      usage: Notifications.AndroidAudioUsage.ALARM,
-      contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-    },
+    // No channel sound: the app plays the siren itself so it is heard in every
+    // ringer mode and is always the same sound. Leaving one here as well would
+    // mean two copies a beat apart whenever the ringer was on.
+    sound: null,
     enableVibrate: true,
     vibrationPattern: [300, 600, 300, 600, 300, 600],
     enableLights: true,

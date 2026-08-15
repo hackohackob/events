@@ -3,34 +3,29 @@ import { Platform } from "react-native";
 import { debugLog } from "../debug/debug-log";
 
 /**
- * Team chat gets an SMS-grade alert: the default notification chime and a short
- * double buzz. Deliberately DEFAULT importance (sound + tray, no heads-up
- * takeover) — chat is useful but never urgent, and must not compete with the
- * incident alarm channel.
+ * Team chat gets an SMS-grade alert: a short chime (played by the app) and a
+ * double buzz. Deliberately DEFAULT importance — no heads-up takeover, because
+ * chat is useful but never urgent and must not compete with the incident alarm.
  *
- * Two channels, because a channel's sound and audio stream are immutable once
- * created and the app needs both behaviours:
+ * ── One channel, and it makes no sound ──
+ * There used to be two, to choose which volume slider the chime rode. Both are
+ * gone: Android suppresses a notification's sound by ringer mode BEFORE the
+ * channel's audio attributes are consulted, so no channel could ever be heard
+ * on a phone set to vibrate. (Verified on a device whose channel reported
+ * exactly the config asked for and was still silent.)
  *
- *  - `…-audible-…` puts the chime on the ALARM volume stream, so it is not
- *    dragged down with the notification slider. Used during working hours (see
- *    audible-hours.ts).
- *  - the plain channel uses the notification stream.
+ * So the channel is silent and the app plays the chime itself (chat-chime.ts).
+ * That is audio, not a notification, so nothing suppresses it — the same chime
+ * is heard in every ringer mode, instead of ours on vibrate and Android's
+ * default otherwise. A channel sound on top would just be a second noise a beat
+ * behind.
  *
- * Note what this does NOT do: it does not make chat audible on a phone set to
- * silent or vibrate. Android suppresses a notification's sound by ringer mode
- * before the channel's audio attributes are consulted — USAGE_ALARM chooses the
- * volume slider, not whether the sound is allowed to play at all. (Verified on
- * a device whose channel reported exactly the config asked for and was still
- * silent on vibrate.) Only audio the app plays itself escapes that, which the
- * incident siren does and chat deliberately does not — chat is not worth
- * overriding a user who has silenced their phone.
- *
- * ── Why the `-v2` suffix ──
+ * ── Why the version suffix ──
  * Android freezes a channel's sound, importance and vibration at CREATION and
- * ignores every later change to the same id. An earlier cut of this reused the
- * old `team-chat` id, which already existed on every install from a build that
- * had specified no sound — so "add a chime" silently did nothing on exactly the
- * devices it was meant for. New behaviour needs a new id.
+ * ignores every later change to the same id, so any change in behaviour needs a
+ * new id. An earlier cut reused `team-chat`, which already existed on every
+ * install from a build that specified no sound — "add a chime" silently did
+ * nothing on exactly the devices it was meant for.
  *
  * ── Why the OS renders these, and why they don't stack ──
  * Folding a burst into one growing tray entry needs the app to own the
@@ -42,10 +37,14 @@ import { debugLog } from "../debug/debug-log";
  * OS-rendered delivery is reliable and costs one tray entry per message. That is
  * the trade, and it is the right way round.
  */
-const CHAT_CHANNEL_ID = "team-chat-v2";
-const CHAT_AUDIBLE_CHANNEL_ID = "team-chat-audible-v2";
+export const CHAT_CHANNEL_ID = "team-chat-v3";
 /** Superseded ids, deleted on launch so they don't linger in system settings. */
-const LEGACY_CHAT_CHANNEL_IDS = ["team-chat", "team-chat-audible-v1"];
+const LEGACY_CHAT_CHANNEL_IDS = [
+  "team-chat",
+  "team-chat-audible-v1",
+  "team-chat-v2",
+  "team-chat-audible-v2",
+];
 
 /**
  * Short and unobtrusive — a text-message buzz, not the incident siren.
@@ -64,30 +63,13 @@ let channelsEnsured = false;
 async function ensureChatChannels(): Promise<void> {
   if (Platform.OS !== "android" || channelsEnsured) return;
 
-  // Created via expo-notifications (not notifee) because only it exposes
-  // audioAttributes — the piece that puts the chime on the alarm stream.
   await Notifications.setNotificationChannelAsync(CHAT_CHANNEL_ID, {
     name: "Team chat",
     description: "New messages in the event group chat.",
     importance: Notifications.AndroidImportance.DEFAULT,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-    sound: "default",
-    enableVibrate: true,
-    vibrationPattern: CHAT_CHANNEL_VIBRATION_PATTERN,
-  });
-
-  await Notifications.setNotificationChannelAsync(CHAT_AUDIBLE_CHANNEL_ID, {
-    name: "Team chat (working hours)",
-    description: "Chat messages during the working day — audible even on silent.",
-    importance: Notifications.AndroidImportance.DEFAULT,
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-    sound: "default",
-    audioAttributes: {
-      // USAGE_ALARM ties the chime to the alarm volume slider rather than the
-      // notification one. It does NOT defeat silent/vibrate — see above.
-      usage: Notifications.AndroidAudioUsage.ALARM,
-      contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-    },
+    // Silent by design — see the note above. The chime is played by the app.
+    sound: null,
     enableVibrate: true,
     vibrationPattern: CHAT_CHANNEL_VIBRATION_PATTERN,
   });

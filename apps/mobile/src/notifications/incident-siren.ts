@@ -1,6 +1,5 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from "expo-audio";
 import { ensureAlarmStreamVolume } from "./broadcast-notification";
-import { notificationSoundIsSuppressed } from "./ringer";
 import { debugLog } from "../debug/debug-log";
 
 /**
@@ -41,20 +40,14 @@ let audioModeSet = false;
 let capTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Fire the siren, unless the OS is already going to play it.
+ * Fire the siren. Unconditional: the alarm channel carries no sound of its own,
+ * so this is the alert's only voice, in every ringer mode and at every hour.
  *
- * Best-effort throughout: this runs alongside a notification that has already
- * been raised, so a failure here costs the extra loudness, never the alert.
+ * Best-effort throughout — it runs alongside a notification that has already
+ * been raised, so a failure here costs the loudness, never the alert itself.
  */
 export async function playIncidentSiren(): Promise<void> {
   try {
-    // In normal ringer mode Android plays the channel's siren itself; adding
-    // ours would be the same file twice, a beat apart.
-    if (!(await notificationSoundIsSuppressed())) {
-      debugLog("app", "info", "incident siren left to the OS (ringer is on)");
-      return;
-    }
-
     // Push the alarm slider up first — the file is loud, the slider may not be.
     await ensureAlarmStreamVolume();
 
