@@ -1,6 +1,8 @@
-import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { IsOptional, IsString } from "class-validator";
 import { AuthGuard } from "../common/guards/auth.guard";
+import { RolesGuard } from "../common/guards/roles.guard";
+import { Roles } from "../common/decorators/roles.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
 import { NotificationsService } from "./notifications.service";
@@ -32,5 +34,31 @@ export class NotificationsController {
       body.platform,
       body.deviceId,
     );
+  }
+
+  /** Dashboard: every device that would ring on an incident. */
+  @Get("subscriptions")
+  @UseGuards(RolesGuard)
+  @Roles("coordinator")
+  listSubscriptions(@Query("eventId") eventId?: string) {
+    return this.notificationsService.listSubscriptions(eventId);
+  }
+
+  /**
+   * Dashboard: unsubscribe every device (optionally just one event's). Safe —
+   * a phone re-registers by itself the next time it opens the app.
+   */
+  @Delete("subscriptions")
+  @UseGuards(RolesGuard)
+  @Roles("coordinator")
+  clearSubscriptions(@Query("eventId") eventId?: string) {
+    return this.notificationsService.clearSubscriptions(eventId);
+  }
+
+  @Delete("subscriptions/:id")
+  @UseGuards(RolesGuard)
+  @Roles("coordinator")
+  deleteSubscription(@Param("id") id: string) {
+    return this.notificationsService.deleteSubscription(id);
   }
 }

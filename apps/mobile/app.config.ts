@@ -71,6 +71,14 @@ const config: ExpoConfig = {
       // Standard HTTPS-only exemption — skips the export-compliance
       // questionnaire on every App Store Connect upload.
       ITSAppUsesNonExemptEncryption: false,
+      // App Review (guideline 5.1.1(ii)) rejected the Expo default purpose
+      // strings for being generic. Every string below must say what the data is
+      // used for AND give a concrete example. The camera/photos/microphone ones
+      // are ALSO set as props on the expo-image-picker / expo-audio plugins
+      // below, because an auto-applied config plugin overwrites whatever is
+      // here — keep the two copies in sync.
+      NSPhotoLibraryAddUsageDescription:
+        "Extreme Medics saves photos you take of an incident back to your photo library, so you keep your own copy of the scene you documented.",
     },
   },
   android: {
@@ -111,11 +119,31 @@ const config: ExpoConfig = {
         isAndroidForegroundServiceEnabled: true,
         isIosBackgroundLocationEnabled: true,
         locationAlwaysAndWhenInUsePermission:
-          "Allow Extreme Medics to share your location with event command while you are on duty.",
+          "Extreme Medics shares your location with event command while you are on duty — for example, so the dispatcher can send the nearest medic to a collapsed runner. Location is also used while the app is in the background so you stay on the map with the phone locked in your pocket.",
         locationAlwaysPermission:
-          "Allow Extreme Medics to share your location with event command while you are on duty.",
+          "Extreme Medics keeps sharing your location with event command in the background while your shift is active — for example, so the dispatcher can still route you to a casualty while your phone is locked in your pocket.",
         locationWhenInUsePermission:
-          "Allow Extreme Medics to use your location while reporting incidents and viewing the event map.",
+          "Extreme Medics uses your location to place you on the event map and to attach your position to an incident you report — for example, so the ambulance crew knows exactly where the injured runner is.",
+      },
+    ],
+    [
+      "expo-image-picker",
+      {
+        // Mirrors ios.infoPlist above — the plugin's defaults ("Allow $(PRODUCT_NAME)
+        // to access your camera") are what App Review rejected.
+        cameraPermission:
+          "Extreme Medics uses the camera so you can photograph an incident scene — for example, a picture of an injured runner's position that event command and the receiving hospital can see before the ambulance arrives.",
+        photosPermission:
+          "Extreme Medics needs your photo library so you can attach an existing photo to an incident report or a team chat message — for example, a picture of a hazard on the track you took earlier.",
+        microphonePermission:
+          "Extreme Medics uses the microphone for push-to-talk radio and voice notes — for example, dictating a casualty's condition to event command while your hands are busy treating them.",
+      },
+    ],
+    [
+      "expo-audio",
+      {
+        microphonePermission:
+          "Extreme Medics uses the microphone for push-to-talk radio and voice notes — for example, dictating a casualty's condition to event command while your hands are busy treating them.",
       },
     ],
     "@maplibre/maplibre-react-native",

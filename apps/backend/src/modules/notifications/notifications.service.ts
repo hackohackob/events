@@ -14,6 +14,36 @@ interface PushMessage {
   channelId?: string;
 }
 
+/**
+ * Guests aren't on the roster — they type a name that gets slugged into their
+ * userId (`external_ivan_petrov`, `runner_ivan_petrov_42`). Read it back out.
+ */
+function nameFromUserIdSlug(userId: string): string | null {
+  const slug = /^(?:external|runner)_(.+)$/.exec(userId)?.[1];
+  if (!slug) return null;
+  const pretty = slug
+    .replace(/_\d+$/, "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return pretty || null;
+}
+
+/** One registered device, as shown on the dashboard's Devices page. */
+export interface PushSubscription {
+  id: string;
+  userId: string;
+  /** Roster name this device last joined under, when it can be resolved. */
+  userName: string | null;
+  eventId: string;
+  platform: string;
+  deviceId: string | null;
+  /** Last 8 chars only — enough to tell two devices apart, not enough to push. */
+  tokenPreview: string;
+  updatedAt: string;
+}
+
 interface PushOptions {
   channelId?: string;
   /**
@@ -53,13 +83,44 @@ export class NotificationsService implements OnModuleInit {
         token      TEXT NOT NULL,
         platform   TEXT NOT NULL DEFAULT 'expo',
         device_id  TEXT,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE (user_id, event_id, token)
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
     await this.db.query(`
       CREATE INDEX IF NOT EXISTS idx_push_tokens_event ON push_tokens (event_id)
     `);
+    // Display name captured when the device registered, so the dashboard can
+    // show "Ivan's phone" instead of a bare medic uuid.
+    await this.db.query(`ALTER TABLE push_tokens ADD COLUMN IF NOT EXISTS user_name TEXT`);
+
+    // A device belongs to exactly ONE event: the last one it joined. The table
+    // used to key on (user_id, event_id, token), so every event a device ever
+    // joined left a row behind and old events kept alarming phones that had
+    // long since moved on. Collapse to one row per token — newest wins — and
+    // let the unique index keep it that way.
+    await this.db.query(`ALTER TABLE push_tokens DROP CONSTRAINT IF EXISTS push_tokens_user_id_event_id_token_key`);
+    const { rowCount } = await this.db.query(
+      `DELETE FROM push_tokens a
+        USING push_tokens b
+        WHERE a.token = b.token
+          AND (a.updated_at < b.updated_at OR (a.updated_at = b.updated_at AND a.id < b.id))`,
+    );
+    if (rowCount) {
+      this.logger.log(`Pruned ${rowCount} stale push subscription(s) from previously joined events`);
+    }
+    await this.db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_tokens_token ON push_tokens (token)`);
+  }
+
+  /**
+   * Best-effort display name for a session userId. Rostered medics carry their
+   * event_medics.id as the userId; guests encode their typed name in the slug.
+   */
+  private async resolveUserName(userId: string, eventId: string): Promise<string | null> {
+    const { rows } = await this.db.query<{ name: string }>(
+      `SELECT name FROM event_medics WHERE id::text = $1 AND event_id = $2`,
+      [userId, eventId],
+    );
+    return rows[0]?.name ?? nameFromUserIdSlug(userId);
   }
 
   async registerToken(
@@ -69,15 +130,70 @@ export class NotificationsService implements OnModuleInit {
     platform = "expo",
     deviceId?: string,
   ): Promise<void> {
+    const userName = await this.resolveUserName(userId, eventId);
+    // Conflict is on the token alone: re-registering MOVES the device to the
+    // event it just joined rather than adding a second subscription.
     await this.db.query(
-      `INSERT INTO push_tokens (user_id, event_id, token, platform, device_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now())
-       ON CONFLICT (user_id, event_id, token) DO UPDATE
-         SET platform   = EXCLUDED.platform,
+      `INSERT INTO push_tokens (user_id, event_id, token, platform, device_id, user_name, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (token) DO UPDATE
+         SET user_id    = EXCLUDED.user_id,
+             event_id   = EXCLUDED.event_id,
+             platform   = EXCLUDED.platform,
              device_id  = EXCLUDED.device_id,
+             user_name  = COALESCE(EXCLUDED.user_name, push_tokens.user_name),
              updated_at = now()`,
-      [userId, eventId, token, platform, deviceId ?? null],
+      [userId, eventId, token, platform, deviceId ?? null, userName],
     );
+  }
+
+  /** Every device currently registered for pushes, newest first. */
+  async listSubscriptions(eventId?: string): Promise<PushSubscription[]> {
+    const { rows } = await this.db.query<{
+      id: string;
+      user_id: string;
+      user_name: string | null;
+      event_id: string;
+      platform: string;
+      device_id: string | null;
+      token: string;
+      updated_at: Date;
+    }>(
+      // Prefer the name captured at registration; fall back to the live roster
+      // so devices registered before that column existed still show a name.
+      `SELECT p.id::text AS id, p.user_id, COALESCE(p.user_name, em.name) AS user_name,
+              p.event_id, p.platform, p.device_id, p.token, p.updated_at
+         FROM push_tokens p
+         LEFT JOIN event_medics em ON em.id::text = p.user_id AND em.event_id = p.event_id
+        ${eventId ? "WHERE p.event_id = $1" : ""}
+        ORDER BY p.updated_at DESC`,
+      eventId ? [eventId] : [],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      userName: r.user_name ?? nameFromUserIdSlug(r.user_id),
+      eventId: r.event_id,
+      platform: r.platform,
+      deviceId: r.device_id,
+      tokenPreview: r.token.replace(/\]$/, "").slice(-8),
+      updatedAt: r.updated_at.toISOString(),
+    }));
+  }
+
+  /** Unsubscribe one device. It re-registers only when that phone reopens the app. */
+  async deleteSubscription(id: string): Promise<{ deleted: number }> {
+    const { rowCount } = await this.db.query(`DELETE FROM push_tokens WHERE id::text = $1`, [id]);
+    return { deleted: rowCount ?? 0 };
+  }
+
+  /** Unsubscribe every device, or every device on one event. */
+  async clearSubscriptions(eventId?: string): Promise<{ deleted: number }> {
+    const { rowCount } = await this.db.query(
+      eventId ? `DELETE FROM push_tokens WHERE event_id = $1` : `DELETE FROM push_tokens`,
+      eventId ? [eventId] : [],
+    );
+    return { deleted: rowCount ?? 0 };
   }
 
   async sendToUser(

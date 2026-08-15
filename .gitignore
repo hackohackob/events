@@ -20,3 +20,9 @@ zello-integration.md
 # TS build info
 *.tsbuildinfo
 .DS_Store
+
+# Local signing credentials — never commit (keystore passwords)
+credentials.json
+*.jks
+*.keystore
+!apps/mobile/android/app/debug.keystore
