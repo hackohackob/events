@@ -52,6 +52,8 @@ import { SearchOverlay, type SearchTarget } from "../search/SearchOverlay";
 import { usePlacesStore } from "../search/places-store";
 import { SelectionPulse } from "./SelectionPulse";
 import { ScaleBar } from "./ScaleBar";
+import { unregisterPushToken } from "../notifications/push-registration";
+import { canQuitApp, quitApp } from "../ui/quit-app";
 import { EventChatScreen } from "../chat/EventChatScreen";
 import { ChatTabBadge } from "../chat/ChatTabBadge";
 import { useEventChatStore } from "../chat/event-chat-store";
@@ -4407,16 +4409,35 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             style={[styles.menuPageRow, styles.menuLeaveRow]}
             onPress={() => {
               setMenuOpen(false);
-              clearSession();
+              // Unregister BEFORE clearing the session: apiFetch signs the call
+              // with the session headers, and leaving must also stop the alarms
+              // for the event being left.
+              void unregisterPushToken().finally(() => clearSession());
             }}
           >
             <Feather name="log-out" size={18} color="#f87171" style={styles.menuPageIcon} />
             <View style={styles.menuPageTextWrap}>
               <Text style={[styles.menuPageTitle, styles.menuLeaveText]}>Leave Event</Text>
-              <Text style={styles.menuPageSubtitle}>Return to the join screen</Text>
+              <Text style={styles.menuPageSubtitle}>Stop notifications & return to the join screen</Text>
             </View>
             <Text style={styles.menuLeaveArrow}>→</Text>
           </Pressable>
+          {canQuitApp ? (
+            <Pressable
+              style={styles.menuPageRow}
+              onPress={() => {
+                setMenuOpen(false);
+                void quitApp();
+              }}
+            >
+              <Feather name="power" size={18} color="#fbbf24" style={styles.menuPageIcon} />
+              <View style={styles.menuPageTextWrap}>
+                <Text style={[styles.menuPageTitle, styles.menuQuitText]}>Quit App</Text>
+                <Text style={styles.menuPageSubtitle}>Stop tracking & close — you stay in the event</Text>
+              </View>
+              <Text style={styles.menuQuitArrow}>→</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -5835,6 +5856,14 @@ const styles = StyleSheet.create({
   },
   menuLeaveArrow: {
     color: "#f87171",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  menuQuitText: {
+    color: "#fbbf24",
+  },
+  menuQuitArrow: {
+    color: "#fbbf24",
     fontSize: 16,
     fontWeight: "700",
   },

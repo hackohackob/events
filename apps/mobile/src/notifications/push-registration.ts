@@ -24,6 +24,42 @@ export function registerPushTapHandler(): () => void {
 }
 
 /**
+ * Tell the backend to forget this device, so it stops receiving incident
+ * alarms for the event being left. Must run while the session is still active —
+ * apiFetch needs the auth headers — so call this BEFORE clearing the session.
+ *
+ * Never throws, and gives up after `timeoutMs` so a phone on the edge of
+ * coverage doesn't freeze the leave behind apiFetch's 15s radio cap. The
+ * request keeps running after we stop waiting; if it never lands, the row
+ * survives server-side and the dashboard's Devices page can clear it.
+ */
+export async function unregisterPushToken(timeoutMs = 4000): Promise<void> {
+  const send = async () => {
+    const { data: token } = await Notifications.getExpoPushTokenAsync({
+      projectId: Constants.expoConfig?.extra?.eas?.projectId,
+    });
+    await apiFetch("/notifications/token/unregister", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    debugLog("app", "info", "push token unregistered — device will not be alarmed");
+  };
+
+  const timedOut = Symbol("timeout");
+  try {
+    const result = await Promise.race([
+      send(),
+      new Promise<typeof timedOut>((resolve) => setTimeout(() => resolve(timedOut), timeoutMs)),
+    ]);
+    if (result === timedOut) {
+      debugLog("app", "warn", "push unregister still in flight — leaving anyway");
+    }
+  } catch (err) {
+    debugLog("app", "warn", "push token unregister failed; clear it from the dashboard", String(err));
+  }
+}
+
+/**
  * Request notification permissions and register the Expo push token
  * with the backend. Call this once after the user has joined an event.
  */

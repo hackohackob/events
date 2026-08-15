@@ -147,6 +147,17 @@ export class NotificationsService implements OnModuleInit {
     );
   }
 
+  /**
+   * Drop a device's registration — called when someone leaves an event, so a
+   * phone that is no longer on duty stops alarming. Keyed on the token alone:
+   * the caller physically holds it, and it identifies the device regardless of
+   * which user_id the row was last written under.
+   */
+  async unregisterToken(token: string): Promise<{ deleted: number }> {
+    const { rowCount } = await this.db.query(`DELETE FROM push_tokens WHERE token = $1`, [token]);
+    return { deleted: rowCount ?? 0 };
+  }
+
   /** Every device currently registered for pushes, newest first. */
   async listSubscriptions(eventId?: string): Promise<PushSubscription[]> {
     const { rows } = await this.db.query<{

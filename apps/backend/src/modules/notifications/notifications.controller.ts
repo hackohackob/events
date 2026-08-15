@@ -20,6 +20,11 @@ class RegisterTokenDto {
   deviceId?: string;
 }
 
+class UnregisterTokenDto {
+  @IsString()
+  token!: string;
+}
+
 @Controller("notifications")
 @UseGuards(AuthGuard)
 export class NotificationsController {
@@ -34,6 +39,16 @@ export class NotificationsController {
       body.platform,
       body.deviceId,
     );
+  }
+
+  /**
+   * Called by the app when the user leaves an event. POST rather than DELETE
+   * because the token travels in the body and proxies are free to strip a
+   * DELETE body.
+   */
+  @Post("token/unregister")
+  unregisterToken(@Body() body: UnregisterTokenDto) {
+    return this.notificationsService.unregisterToken(body.token);
   }
 
   /** Dashboard: every device that would ring on an incident. */
