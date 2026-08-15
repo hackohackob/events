@@ -101,7 +101,8 @@ import {
   slopeColor,
 } from "./slope-shading";
 import { showBroadcastNotification } from "../notifications/broadcast-notification";
-import { playIncidentSiren } from "../notifications/incident-siren";
+import { playIncidentSiren, stopIncidentSiren } from "../notifications/incident-siren";
+import { playChatChime } from "../notifications/chat-chime";
 import { incidentNotificationBody } from "../notifications/incident-notification";
 import { shouldRaiseIncidentAlarm } from "../notifications/incident-alarm-guard";
 import { useIncidentReadsStore, incidentHasUnread } from "../incidents/incident-reads-store";
@@ -3093,6 +3094,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     if (!selectedIncident) return;
     setMenuOpen(false);
     setLayersOpen(false);
+    // Looking at the incident IS the acknowledgement — the siren has done its
+    // job and should not keep going while you read.
+    stopIncidentSiren();
   }, [selectedIncident]);
 
   // Team-chat unread badge: count incoming messages (not my own) while the chat
@@ -3106,6 +3110,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     const onChatMessage = (msg: EventMessageDto) => {
       if (msg.authorId && msg.authorId === sessionUserId) return;
       useEventChatStore.getState().bump();
+      // The tray notification comes from the push; this only adds the sound,
+      // and only when the ringer would have muted the notification's own.
+      // System/feed cards (added POI, incident echoes) stay silent.
+      if (msg.kind !== "system" && !msg.feedType) void playChatChime();
     };
     socket.on("event.message", onChatMessage);
     return () => {

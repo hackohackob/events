@@ -5,6 +5,7 @@ import { apiFetch } from "../ui/api-client";
 import { useNotificationFocus } from "./notification-focus";
 import { registerBackgroundPushTask } from "./background-push";
 import { markIncidentAlarmed } from "./incident-alarm-guard";
+import { stopIncidentSiren } from "./incident-siren";
 import { ensureIncidentAlarmChannel } from "./broadcast-notification";
 import { debugLog } from "../debug/debug-log";
 
@@ -18,11 +19,22 @@ export function registerPushTapHandler(): () => void {
     const data = response?.notification.request.content.data as Record<string, unknown> | undefined;
     const incidentId = typeof data?.incidentId === "string" ? data.incidentId : undefined;
     if (!incidentId) return;
-    // Tapping the alert IS the acknowledgement. Without this, the same push is
-    // re-delivered to the background task during the cold start the tap just
-    // caused, and the incident alarmed a second time while the user was already
-    // reading it.
+
+    // Tapped or swiped away, either counts as "I've seen it": silence the siren
+    // and stop any other delivery path re-ringing for this incident. Without the
+    // latter, the same push is re-delivered to the background task during the
+    // cold start the tap just caused, and it alarmed a second time while the
+    // user was already reading it.
+    stopIncidentSiren();
     markIncidentAlarmed(incidentId);
+
+    // Only an actual tap should pull them to the incident. Anything else (an
+    // action button, a future dismiss action) means "not now" and must not
+    // hijack whatever they were doing. The constant is inlined because this
+    // version of expo-notifications exports it without declaring it in its
+    // types.
+    const DEFAULT_ACTION = "expo.modules.notifications.actions.DEFAULT";
+    if (response?.actionIdentifier !== DEFAULT_ACTION) return;
     useNotificationFocus.getState().focusIncident(incidentId);
   };
   void Notifications.getLastNotificationResponseAsync().then(handle);

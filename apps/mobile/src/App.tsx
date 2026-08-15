@@ -14,6 +14,7 @@ import { hideTrackingNotification, consumeInitialNotification } from "./notifica
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
 import { ensureChatNotificationChannels } from "./notifications/chat-notification";
 import { logIncidentChannelState } from "./notifications/broadcast-notification";
+import { stopIncidentSiren } from "./notifications/incident-siren";
 import { hydrateAlarmGuard } from "./notifications/incident-alarm-guard";
 import { MapScreen } from "./map/MapScreen";
 import { useSessionStore } from "./security/session-store";
@@ -141,6 +142,11 @@ export default function App() {
     if (!token) return;
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "active") {
+        // Opening the app is an acknowledgement — whatever route the medic took
+        // to get here, the siren has been heard and should stop. This is also
+        // the backstop for an alert swiped away on an OEM that doesn't report
+        // the dismissal.
+        stopIncidentSiren();
         void flushLocationQueue();
         void sendCurrentLocationNow();
         // Foregrounding clears transient start failures (e.g. the Android 12+

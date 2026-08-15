@@ -4,6 +4,7 @@ import { stopLocationLoop } from "../location/location-tracker";
 import { useIncidentStore } from "../incidents/incident-store";
 import { useNotificationFocus } from "./notification-focus";
 import { markIncidentAlarmed } from "./incident-alarm-guard";
+import { stopIncidentSiren } from "./incident-siren";
 import { debugLog } from "../debug/debug-log";
 
 // The persistent tracking notification is owned by expo-location's foreground
@@ -33,6 +34,13 @@ export async function hideTrackingNotification(): Promise<void> {
 
 /** Shared handler for both foreground and background notifee events. */
 async function handleNotifeeEvent({ type, detail }: { type: EventType; detail: any }): Promise<void> {
+  // Swiping the alert away is an acknowledgement too — stop the siren, but
+  // leave the app where it is.
+  if (type === EventType.DISMISSED) {
+    if (detail.notification?.data?.incidentId) stopIncidentSiren();
+    return;
+  }
+
   // Tapping the notification body (not an action button) → focus the incident.
   if (type === EventType.PRESS) {
     const incidentId = detail.notification?.data?.incidentId as string | undefined;
@@ -41,6 +49,7 @@ async function handleNotifeeEvent({ type, detail }: { type: EventType; detail: a
       // The tap is the acknowledgement — stop any other delivery path from
       // ringing for this incident again (see incident-alarm-guard).
       markIncidentAlarmed(incidentId);
+      stopIncidentSiren();
       useNotificationFocus.getState().focusIncident(incidentId);
     }
     return;
@@ -71,6 +80,7 @@ export async function consumeInitialNotification(): Promise<void> {
     const incidentId = initial?.notification?.data?.incidentId as string | undefined;
     if (incidentId) {
       markIncidentAlarmed(incidentId);
+      stopIncidentSiren();
       useNotificationFocus.getState().focusIncident(incidentId);
     }
   } catch {

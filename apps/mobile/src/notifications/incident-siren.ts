@@ -1,5 +1,6 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from "expo-audio";
 import { ensureAlarmStreamVolume } from "./broadcast-notification";
+import { notificationSoundIsSuppressed } from "./ringer";
 import { debugLog } from "../debug/debug-log";
 
 /**
@@ -15,26 +16,45 @@ import { debugLog } from "../debug/debug-log";
  * everything the app asked for — and still silent on vibrate.
  *
  * Audio the app plays itself is a different path entirely. It is not a
- * notification, so ringer mode does not suppress it, and it is audible with the
- * phone on vibrate. This needs the JS process to be running — which it normally
- * is, because location tracking keeps a foreground service alive — so it covers
- * the foreground and backgrounded cases. A fully killed app still falls back to
- * whatever the OS notification manages on its own.
+ * notification, so ringer mode does not suppress it. This needs the JS process
+ * to be running — which it normally is, because location tracking keeps a
+ * foreground service alive — so it covers the foreground and backgrounded
+ * cases. A fully killed app still falls back to whatever the OS manages alone.
  */
 
 /** The bundled 30s siren, the same file the alarm channel points at. */
 const SIREN = require("../../assets/sounds/incident_alarm.wav");
 
+/**
+ * Hard stop, however the siren was started.
+ *
+ * The bundled file runs ~30s and not every "I've seen it" gesture is
+ * observable: expo-notifications does not report a swipe-away of an
+ * OS-rendered notification at all. Rather than leave a siren that can only be
+ * silenced by opening the app, it is capped — long enough that nobody sleeps
+ * through it, short enough that a missed acknowledgement isn't punishing.
+ */
+const MAX_SIREN_MS = 15_000;
+
 let player: AudioPlayer | null = null;
 let audioModeSet = false;
+let capTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Fire the siren. Best-effort throughout: this runs alongside a notification
- * that has already been raised, so a failure here costs the extra loudness,
- * never the alert itself.
+ * Fire the siren, unless the OS is already going to play it.
+ *
+ * Best-effort throughout: this runs alongside a notification that has already
+ * been raised, so a failure here costs the extra loudness, never the alert.
  */
 export async function playIncidentSiren(): Promise<void> {
   try {
+    // In normal ringer mode Android plays the channel's siren itself; adding
+    // ours would be the same file twice, a beat apart.
+    if (!(await notificationSoundIsSuppressed())) {
+      debugLog("app", "info", "incident siren left to the OS (ringer is on)");
+      return;
+    }
+
     // Push the alarm slider up first — the file is loud, the slider may not be.
     await ensureAlarmStreamVolume();
 
@@ -50,17 +70,33 @@ export async function playIncidentSiren(): Promise<void> {
     if (!player) player = createAudioPlayer(SIREN);
     player.seekTo(0);
     player.play();
+    if (capTimer) clearTimeout(capTimer);
+    capTimer = setTimeout(stopIncidentSiren, MAX_SIREN_MS);
     debugLog("app", "info", "incident siren playing");
   } catch (err) {
     debugLog("app", "warn", "incident siren failed", String(err));
   }
 }
 
-/** Stop the siren early — the medic has seen the incident. */
+/**
+ * Silence the siren — the medic has acknowledged the incident.
+ *
+ * Called from every path that means "I've seen it": tapping or dismissing the
+ * notification, opening the incident, or simply bringing the app to the front.
+ * The siren file runs ~30s, and having to sit through it after you have already
+ * opened the incident is its own small emergency.
+ */
 export function stopIncidentSiren(): void {
   try {
-    player?.pause();
+    if (capTimer) {
+      clearTimeout(capTimer);
+      capTimer = null;
+    }
+    if (!player) return;
+    player.pause();
+    player.seekTo(0);
+    debugLog("app", "info", "incident siren stopped");
   } catch {
-    // Nothing useful to do; the file stops on its own after ~30s.
+    // Nothing useful to do; the file ends on its own.
   }
 }
