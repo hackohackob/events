@@ -168,6 +168,10 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+    // Android Auto (androidx.car.app templates). Also declared from
+    // app.config.ts so a prebuild that regenerates this file cannot drop it.
+    implementation("androidx.car.app:app:1.4.0")
+
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";

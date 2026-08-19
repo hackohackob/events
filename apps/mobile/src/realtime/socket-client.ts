@@ -56,3 +56,14 @@ export function resetSocket(): void {
   socket.disconnect();
   socket = null;
 }
+
+/**
+ * Whether a socket exists AND is currently connected.
+ *
+ * Deliberately does not call {@link getSocket}: that CREATES a socket, so a
+ * caller merely reporting connectivity (the Android Auto diagnostics screen)
+ * would dial out on a device that has intentionally not connected yet.
+ */
+export function isSocketConnected(): boolean {
+  return socket?.connected === true;
+}

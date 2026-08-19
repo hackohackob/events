@@ -1,5 +1,11 @@
 import type { ExpoConfig } from "expo/config";
-import { withAndroidManifest, type ConfigPlugin } from "expo/config-plugins";
+import {
+  AndroidConfig,
+  withAndroidManifest,
+  withAppBuildGradle,
+  withDangerousMod,
+  type ConfigPlugin,
+} from "expo/config-plugins";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -34,6 +40,103 @@ const withNotifeeLocationForegroundService: ConfigPlugin = (expoConfig) =>
     }
     return mod;
   });
+
+/**
+ * Android Auto.
+ *
+ * The car app is native Kotlin under `android/.../car/`, but three pieces of
+ * wiring live in generated files that `expo prebuild` rewrites from scratch:
+ * the CarAppService declaration, the `androidx.car.app` dependency, and the
+ * `automotive_app_desc.xml` resource that makes Android Auto discover the
+ * service at all. Losing any one of them removes the app from the car silently
+ * — it just stops appearing in the launcher — so all three are re-applied here.
+ */
+const CAR_APP_SERVICE = "com.academyfirstaid.extrememedics.car.MedicsCarAppService";
+const CAR_APP_LIB_VERSION = "1.4.0";
+
+const withAndroidAutoManifest: ConfigPlugin = (expoConfig) =>
+  withAndroidManifest(expoConfig, (mod) => {
+    const manifest = mod.modResults.manifest;
+    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(mod.modResults);
+
+    // NAVIGATION_TEMPLATES unlocks the turn-by-turn template; ACCESS_SURFACE is
+    // what allows drawing our own map onto the car screen. Without the latter,
+    // setSurfaceCallback throws a SecurityException that kills the app the
+    // instant the car screen opens.
+    manifest["uses-permission"] = manifest["uses-permission"] ?? [];
+    for (const permission of ["androidx.car.app.NAVIGATION_TEMPLATES", "androidx.car.app.ACCESS_SURFACE"]) {
+      if (!manifest["uses-permission"].some((entry) => entry.$?.["android:name"] === permission)) {
+        manifest["uses-permission"].push({ $: { "android:name": permission } });
+      }
+    }
+
+    // The descriptor resource + the minimum car API level we build against.
+    const metaData = [
+      { name: "com.google.android.gms.car.application", resource: "@xml/automotive_app_desc" },
+      { name: "androidx.car.app.minCarApiLevel", value: "1" },
+    ];
+    application["meta-data"] = application["meta-data"] ?? [];
+    for (const entry of metaData) {
+      const existing = application["meta-data"].find((item) => item.$?.["android:name"] === entry.name);
+      const attributes: Record<string, string> = { "android:name": entry.name };
+      if ("resource" in entry) attributes["android:resource"] = entry.resource;
+      if ("value" in entry) attributes["android:value"] = entry.value;
+      if (existing) existing.$ = attributes as typeof existing.$;
+      else application["meta-data"].push({ $: attributes as never });
+    }
+
+    // The service itself, with the NAVIGATION category — that category is what
+    // grants the custom map surface and the turn-by-turn template.
+    application.service = application.service ?? [];
+    const withoutCarService = application.service.filter(
+      (service) => service.$?.["android:name"] !== CAR_APP_SERVICE,
+    );
+    withoutCarService.push({
+      $: { "android:name": CAR_APP_SERVICE, "android:exported": "true" } as never,
+      "intent-filter": [
+        {
+          action: [{ $: { "android:name": "androidx.car.app.CarAppService" } }],
+          category: [{ $: { "android:name": "androidx.car.app.category.NAVIGATION" } }],
+        },
+      ],
+    } as never);
+    application.service = withoutCarService;
+
+    return mod;
+  });
+
+const withAndroidAutoGradle: ConfigPlugin = (expoConfig) =>
+  withAppBuildGradle(expoConfig, (mod) => {
+    if (mod.modResults.language !== "groovy") return mod;
+    if (mod.modResults.contents.includes("androidx.car.app:app")) return mod;
+    mod.modResults.contents = mod.modResults.contents.replace(
+      'implementation("com.facebook.react:react-android")',
+      'implementation("com.facebook.react:react-android")\n\n    // Android Auto (androidx.car.app templates).\n' +
+        `    implementation("androidx.car.app:app:${CAR_APP_LIB_VERSION}")`,
+    );
+    return mod;
+  });
+
+/** Recreates res/xml/automotive_app_desc.xml, which prebuild does not preserve. */
+const withAndroidAutoDescriptor: ConfigPlugin = (expoConfig) =>
+  withDangerousMod(expoConfig, [
+    "android",
+    (mod) => {
+      const xmlDir = path.join(mod.modRequest.platformProjectRoot, "app", "src", "main", "res", "xml");
+      fs.mkdirSync(xmlDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(xmlDir, "automotive_app_desc.xml"),
+        [
+          '<?xml version="1.0" encoding="utf-8"?>',
+          "<automotiveApp>",
+          '    <uses name="template" />',
+          "</automotiveApp>",
+          "",
+        ].join("\n"),
+      );
+      return mod;
+    },
+  ]);
 
 // @notifee/react-native ships its native artifact in a local Maven repo inside
 // the package; register it so Gradle can resolve app.notifee:core.
@@ -163,6 +266,9 @@ const config: ExpoConfig = {
       },
     ],
     withNotifeeLocationForegroundService,
+    withAndroidAutoManifest,
+    withAndroidAutoGradle,
+    withAndroidAutoDescriptor,
   ],
   extra: {
     eas: {

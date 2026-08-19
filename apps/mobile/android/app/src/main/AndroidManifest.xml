@@ -7,6 +7,8 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES"/>
+  <uses-permission android:name="androidx.car.app.ACCESS_SURFACE"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
@@ -31,6 +33,16 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/ffe5d9fa-a192-4b34-be11-5a43598959c3"/>
     <service android:name="app.notifee.core.ForegroundService" android:foregroundServiceType="shortService|location" tools:replace="android:foregroundServiceType"/>
+    <!-- Android Auto. The NAVIGATION category is what lets the app draw its own
+         map onto the car surface and use the turn-by-turn template. -->
+    <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
+    <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1"/>
+    <service android:name="com.academyfirstaid.extrememedics.car.MedicsCarAppService" android:exported="true">
+      <intent-filter>
+        <action android:name="androidx.car.app.CarAppService"/>
+        <category android:name="androidx.car.app.category.NAVIGATION"/>
+      </intent-filter>
+    </service>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>

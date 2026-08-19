@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares to Android Auto that this app projects a car app built from the
+  androidx.car.app templates. Without this file the CarAppService is never
+  discovered, no matter what the manifest says.
+-->
+<automotiveApp>
+    <uses name="template" />
+</automotiveApp>

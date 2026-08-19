@@ -41,6 +41,12 @@ interface SettingsState {
    */
   showArchived: boolean;
   /**
+   * Project the app onto the car's screen when Android Auto is connected.
+   * Default on — the switch exists so a misbehaving head unit can be shut out
+   * mid-event without reinstalling anything.
+   */
+  androidAutoEnabled: boolean;
+  /**
    * Mirrors my own medic status being "stationary". Not persisted — it is
    * re-derived from the live roster on every launch (see MedicStatusControl).
    */
@@ -54,6 +60,7 @@ interface SettingsState {
   setKmMarkersEnabled: (enabled: boolean) => void;
   setKmMarkerIntervalKm: (km: number) => void;
   setShowArchived: (enabled: boolean) => void;
+  setAndroidAutoEnabled: (enabled: boolean) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -68,6 +75,7 @@ const DEFAULTS = {
   kmMarkersEnabled: true,
   kmMarkerIntervalKm: 5,
   showArchived: false,
+  androidAutoEnabled: true,
 };
 
 function persist(
@@ -79,6 +87,7 @@ function persist(
     | "kmMarkersEnabled"
     | "kmMarkerIntervalKm"
     | "showArchived"
+    | "androidAutoEnabled"
   >,
 ) {
   void AsyncStorage.setItem(
@@ -90,6 +99,7 @@ function persist(
       kmMarkersEnabled: state.kmMarkersEnabled,
       kmMarkerIntervalKm: state.kmMarkerIntervalKm,
       showArchived: state.showArchived,
+      androidAutoEnabled: state.androidAutoEnabled,
     }),
   );
 }
@@ -101,6 +111,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   kmMarkersEnabled: DEFAULTS.kmMarkersEnabled,
   kmMarkerIntervalKm: DEFAULTS.kmMarkerIntervalKm,
   showArchived: DEFAULTS.showArchived,
+  androidAutoEnabled: DEFAULTS.androidAutoEnabled,
   stationaryMode: false,
   hydrated: false,
 
@@ -129,6 +140,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ showArchived });
     persist({ ...get(), showArchived });
   },
+  setAndroidAutoEnabled: (androidAutoEnabled) => {
+    set({ androidAutoEnabled });
+    persist({ ...get(), androidAutoEnabled });
+  },
 
   hydrate: async () => {
     try {
@@ -147,6 +162,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           kmMarkerIntervalKm:
             typeof parsed.kmMarkerIntervalKm === "number" ? parsed.kmMarkerIntervalKm : DEFAULTS.kmMarkerIntervalKm,
           showArchived: typeof parsed.showArchived === "boolean" ? parsed.showArchived : DEFAULTS.showArchived,
+          androidAutoEnabled:
+            typeof parsed.androidAutoEnabled === "boolean" ? parsed.androidAutoEnabled : DEFAULTS.androidAutoEnabled,
         });
       }
     } catch {

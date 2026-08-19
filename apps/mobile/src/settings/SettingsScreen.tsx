@@ -12,6 +12,7 @@ import {
 import { startLocationLoop } from "../location/location-tracker";
 import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
 import { PttBridgeSection } from "../ptt/PttBridgeSection";
+import { AndroidAutoSection } from "../car/AndroidAutoSection";
 import { useRosterStore } from "../security/roster-store";
 import { useSessionStore } from "../security/session-store";
 import { setMedicVehicleType } from "../ui/event-actions";
@@ -258,6 +259,9 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
             ) : null}
           </View>
         </View>
+
+        {/* ── Android Auto ────────────────────────────────────── */}
+        <AndroidAutoSection />
 
         {/* ── Coordinator-only view options ───────────────────── */}
         {isCoordinator ? (

@@ -40,6 +40,14 @@ import { hydrateMapCacheIfEmpty, startMapCachePersistence } from "./map-cache";
 import { useSessionStore } from "../security/session-store";
 import { useRosterStore } from "../security/roster-store";
 import { freshnessBucket, freshnessColor, freshnessLabel } from "./freshness";
+import { setMapFeedOwnedByScreen } from "../car/car-feed";
+import {
+  activeMedicToMarker,
+  incidentToMarker,
+  poiToMarker,
+  type IncidentResponse,
+  type MedicActiveResponse,
+} from "./marker-mappers";
 import { LocationScreen } from "../debug/LocationScreen";
 import { DebugScreen } from "../debug/DebugScreen";
 import { useLocationStatus } from "../debug/location-status";
@@ -218,101 +226,6 @@ interface EventLocationResponse {
   description?: string;
   respondingIncidentId?: string;
   respondingParamedicIds?: string[];
-}
-
-interface MedicActiveResponse {
-  medicId: string;
-  eventId: string;
-  name: string;
-  vehicleType?: VehicleType;
-  lat: number;
-  lng: number;
-  accuracy?: number;
-  battery?: number;
-  charging?: boolean;
-  status?: string;
-  destination?: { lat: number; lng: number; label: string } | null;
-  route?: MedicMarkerRoute | null;
-  recordedAt?: string;
-  lastSeenAt?: string;
-}
-
-interface IncidentResponse {
-  id: string;
-  name?: string;
-  type: string;
-  description?: string;
-  lat: number;
-  lng: number;
-  status?: string;
-  severity?: string;
-  photoUrl?: string;
-  photoUrls?: string[];
-  responders?: string[];
-  createdBy?: string;
-  reportedBy?: string;
-  reporterPhone?: string;
-  patientBib?: string;
-  patientName?: string;
-  patientPhone?: string;
-  allergies?: string;
-  medications?: string;
-  bloodType?: string;
-  conditions?: string;
-  createdAt?: string;
-  lastMessageAt?: string;
-}
-
-function incidentToMarker(incident: IncidentResponse) {
-  return {
-    id: incident.id,
-    type: "incident" as const,
-    label: incident.name ?? incident.type,
-    name: incident.name,
-    lat: incident.lat,
-    lng: incident.lng,
-    description: incident.description,
-    respondingParamedicIds: incident.responders,
-    status: incident.status,
-    incidentType: incident.type,
-    photoUrl: incident.photoUrl,
-    photoUrls: incident.photoUrls,
-    reportedBy: incident.reportedBy,
-    reporterPhone: incident.reporterPhone,
-    patientBib: incident.patientBib,
-    patientName: incident.patientName,
-    patientPhone: incident.patientPhone,
-    allergies: incident.allergies,
-    medications: incident.medications,
-    bloodType: incident.bloodType,
-    conditions: incident.conditions,
-    createdBy: incident.createdBy,
-    createdAt: incident.createdAt,
-  };
-}
-
-function poiToMarker(poi: {
-  id: string;
-  type: string;
-  lat: number;
-  lng: number;
-  name?: string;
-  description?: string;
-  icon?: string;
-  archived?: boolean;
-}) {
-  return {
-    id: poi.id,
-    type: "infrastructure" as const,
-    label: poi.name ?? poi.type,
-    name: poi.name,
-    lat: poi.lat,
-    lng: poi.lng,
-    poiType: poi.type,
-    poiIcon: poi.icon,
-    poiDescription: poi.description,
-    poiArchived: poi.archived,
-  };
 }
 
 /** Resolved/closed incidents stay on the map but render grey instead of red. */
@@ -2057,6 +1970,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
   useEffect(() => {
     const socket = getSocket();
+    // This screen owns the live feed; the Android Auto fallback feed stands
+    // down while we're mounted so the two can never both write the map store.
+    setMapFeedOwnedByScreen(true);
 
     // ── Coalesced location ingestion ────────────────────────────────────────
     // Position events stream in from every runner and medic; applying each one
@@ -2267,6 +2183,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     socket.on("zone.removed", (payload: { id: string }) => useZonesStore.getState().remove(payload.id));
 
     return () => {
+      setMapFeedOwnedByScreen(false);
       if (locationFlushTimer != null) clearTimeout(locationFlushTimer);
       socket.off("location.updated");
       socket.off("medic_location");

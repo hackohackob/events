@@ -26,6 +26,9 @@ class MainApplication : Application(), ReactApplication {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               // add(MyReactNativePackage())
               add(PowerManagerPackage())
+              // Android Auto bridge. Registered unconditionally: it is inert
+              // until the car app actually connects.
+              add(com.academyfirstaid.extrememedics.car.CarBridgePackage())
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
