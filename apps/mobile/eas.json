@@ -56,6 +56,10 @@
     "production": {
       "ios": {
         "ascAppId": "6791476044"
+      },
+      "android": {
+        "serviceAccountKeyPath": "/Users/atanasatanasov/keystores/extrememedics-play-service-account.json",
+        "track": "internal"
       }
     }
   }
