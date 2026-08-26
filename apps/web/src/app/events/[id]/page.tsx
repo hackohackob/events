@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState, useEffect, useMemo, useRef } from 'react'
+import { use, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
@@ -25,6 +25,10 @@ import { useParticipants } from '@/hooks/useParticipants'
 import { useZones } from '@/hooks/useZones'
 import ZonesPanel from '@/components/map/ZonesPanel'
 import TracksPanel, { TrackElevationOverlay } from '@/components/map/TracksPanel'
+import TrailsPanel from '@/components/trails/TrailsPanel'
+import { TRAIL_WINDOWS, type TrailWindow } from '@/api/trails'
+import TimeScrubber, { type ReplaySpeed } from '@/components/trails/TimeScrubber'
+import { useTrails } from '@/hooks/useTrails'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
@@ -293,7 +297,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const { data: event, isLoading, isError } = useEvent(id)
   const activate = useActivateEvent()
   const deactivate = useDeactivateEvent()
-  const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents' | 'participants'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'medics' | 'incidents' | 'participants' | 'replay'>('info')
   const [showTracks, setShowTracks] = useState(true)
   // Individually hidden tracks (Layers → Tracks). Kept as the *hidden* set so a
   // track that appears later (GPX still loading, day filter change) is visible.
@@ -405,6 +409,52 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const chat = useEventChat({ eventId: id, enabled: isActive })
   const [roster, setRoster] = useState<EventMedic[]>([])
   const [alarmInc, setAlarmInc] = useState<{ name?: string; type: string } | null>(null)
+
+  // ── Location history (Replay) ───────────────────────────────────────────
+  // Nothing is fetched until the tab is opened; `trailCursorMs === null` means
+  // "show the whole window", which is also the state the Live button returns to.
+  const [trailWindow, setTrailWindow] = useState<TrailWindow>(12)
+  // null = "everyone in the current window", which is the default and cannot
+  // go stale when the window's roster changes underneath it. An explicit array
+  // is only stored once the coordinator actually picks people.
+  const [trailSelection, setTrailSelection] = useState<string[] | null>(null)
+  const [trailFocusMedicId, setTrailFocusMedicId] = useState<string | null>(null)
+  const [replayOpen, setReplayOpen] = useState(false)
+  const [trailCursorMs, setTrailCursorMs] = useState<number | null>(null)
+  const [trailPlaying, setTrailPlaying] = useState(false)
+  const [trailSpeed, setTrailSpeed] = useState<ReplaySpeed>(120)
+  const trailsEnabled = activeTab === 'replay' || replayOpen
+  const { summaries: trailSummaries, selectedIds: trailSelectedIds, trails, loading: trailsLoading, error: trailsError } =
+    useTrails(id, trailsEnabled, trailWindow, trailSelection)
+
+  /** Toggling resolves the implicit "everyone" into a concrete list first. */
+  const toggleTrailMedic = useCallback((medicId: string) => {
+    setTrailSelection(prev => {
+      const base = prev ?? trailSummaries.map(t => t.medicId)
+      return base.includes(medicId) ? base.filter(x => x !== medicId) : [...base, medicId]
+    })
+  }, [trailSummaries])
+
+  // The replay's own clock. Anchored when the transport opens rather than read
+  // live, so the timeline doesn't stretch under the playhead mid-playback.
+  const [replayWindow, setReplayWindow] = useState<{ fromMs: number; toMs: number } | null>(null)
+  useEffect(() => {
+    if (!replayOpen) {
+      setReplayWindow(null)
+      setTrailCursorMs(null)
+      setTrailPlaying(false)
+      return
+    }
+    // Take the span from the data rather than recomputing it: the archive's
+    // window is the event's own days, which "now minus N hours" cannot express.
+    const first = trails[0]
+    if (first) {
+      setReplayWindow({ fromMs: Date.parse(first.from), toMs: Date.parse(first.to) })
+    } else if (trailWindow !== 'event') {
+      const toMs = Date.now()
+      setReplayWindow({ fromMs: toMs - trailWindow * 3_600_000, toMs })
+    }
+  }, [replayOpen, trailWindow, trails])
 
   // Roster carries skills / capabilities / coordinator type — joined to live medics by id.
   useEffect(() => {
@@ -785,7 +835,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
           {/* Tab bar */}
           <div className="flex border-b" style={{ borderColor: 'rgba(148,163,184,0.08)' }}>
-            {(['info', 'medics', 'incidents', 'participants'] as const).map(tab => (
+            {(['info', 'medics', 'incidents', 'participants', 'replay'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -809,6 +859,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     style={{ background: '#ef4444', color: '#fff' }}
                   >
                     {liveIncidents.filter(i => i.status === 'open').length}
+                  </span>
+                )}
+                {tab === 'replay' && trailSelectedIds.length > 0 && (
+                  <span
+                    className="absolute top-2 right-1/4 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black"
+                    style={{ background: '#38bdf8', color: '#04121f' }}
+                  >
+                    {trailSelectedIds.length}
                   </span>
                 )}
                 {tab === 'participants' ? 'people' : tab}
@@ -1125,6 +1183,43 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               </div>
             )}
 
+            {/* ── REPLAY TAB ── */}
+            {activeTab === 'replay' && (
+              <TrailsPanel
+                summaries={trailSummaries}
+                trails={trails}
+                selectedIds={trailSelectedIds}
+                onToggle={toggleTrailMedic}
+                onSelectAll={() => setTrailSelection(null)}
+                onClearAll={() => { setTrailSelection([]); setTrailFocusMedicId(null) }}
+                window={trailWindow}
+                onWindow={(next) => { setTrailWindow(next); setTrailSelection(null) }}
+                loading={trailsLoading}
+                error={trailsError}
+                focusMedicId={trailFocusMedicId}
+                onLocate={(medicId) => {
+                  // Make sure the trail is actually drawn before flying to it.
+                  setTrailSelection(prev => {
+                    const base = prev ?? trailSummaries.map(t => t.medicId)
+                    return base.includes(medicId) ? base : [...base, medicId]
+                  })
+                  setTrailFocusMedicId(prev => (prev === medicId ? null : medicId))
+                  const trail = trails.find(t => t.medicId === medicId)
+                  const last = trail && trail.count > 0 ? trail.count - 1 : -1
+                  if (trail && last >= 0) {
+                    setParticipantFocus({
+                      lng: trail.samples.lng[last],
+                      lat: trail.samples.lat[last],
+                      nonce: Date.now(),
+                    })
+                    setPanelOpen(false)
+                  }
+                }}
+                replayOpen={replayOpen}
+                onToggleReplay={() => setReplayOpen(open => !open)}
+              />
+            )}
+
             {/* ── PARTICIPANTS TAB ── */}
             {activeTab === 'participants' && (
               <ParticipantsPanel
@@ -1237,7 +1332,26 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             }}
             showKmMarks={showTracks && showKmMarks}
             kmMarkIntervalKm={kmMarkInterval}
+            trails={trailsEnabled ? trails : []}
+            trailCursorMs={trailCursorMs}
+            trailFocusMedicId={trailFocusMedicId}
           />
+
+          {/* Replay transport, pinned across the bottom of the map. */}
+          {replayOpen && replayWindow && (
+            <TimeScrubber
+              fromMs={replayWindow.fromMs}
+              toMs={replayWindow.toMs}
+              cursorMs={trailCursorMs}
+              onCursor={setTrailCursorMs}
+              playing={trailPlaying}
+              onPlaying={setTrailPlaying}
+              speed={trailSpeed}
+              onSpeed={setTrailSpeed}
+              trails={trails}
+              onClose={() => setReplayOpen(false)}
+            />
+          )}
 
           {/* Elevation profile of the selected track — a strip across the full
               width of the map, like the chart under the map in the editor. */}

@@ -21,6 +21,7 @@ import { PttModule } from "./ptt/ptt.module";
 import { RealtimeModule } from "./realtime/realtime.module";
 import { RoutingModule } from "./routing/routing.module";
 import { SearchModule } from "./search/search.module";
+import { TrailsModule } from "./trails/trails.module";
 import { UnitsModule } from "./units/units.module";
 import { UsersModule } from "./users/users.module";
 import { WeatherModule } from "./weather/weather.module";
@@ -49,6 +50,7 @@ import { WeatherModule } from "./weather/weather.module";
     RealtimeModule,
     RoutingModule,
     SearchModule,
+    TrailsModule,
     UnitsModule,
     UsersModule,
     WeatherModule,

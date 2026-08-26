@@ -881,3 +881,137 @@ export interface UpsertHospitalRequest {
   capabilities?: HospitalCapability[];
   notes?: string;
 }
+
+// ─── Medic location history ("Trails") ───────────────────────────────────────
+
+/** Hard ceiling on how far back a trail can be requested. History is stored
+ *  permanently, but the product only ever exposes the last half-day. */
+export const TRAIL_MAX_HOURS = 12;
+
+/** Default lookback when a caller doesn't ask for a specific window. */
+export const TRAIL_DEFAULT_HOURS = 12;
+
+/**
+ * A gap this long between two breadcrumbs is a tracking outage — a Doze
+ * freeze, a dead battery, no signal — not travel.
+ *
+ * Shared by the server (which excludes such gaps from distance and stationary
+ * time) and both clients (which break the drawn line there). If they ever
+ * disagreed, a trail would report a distance its own line didn't show, or draw
+ * a straight line across country through an outage the stats had discounted.
+ */
+export const TRAIL_OUTAGE_GAP_MS = 15 * 60_000;
+
+/**
+ * Which span a trail request covers.
+ *
+ * `rolling` — the operational view: the last N hours up to now, capped at 12.
+ * `event`   — the archive: the event's own days and daily window, however long
+ *             ago it ran. History is recorded only while an event is active,
+ *             so this is exactly the set of breadcrumbs that belong to it.
+ */
+export type TrailWindowMode = "rolling" | "event";
+
+/**
+ * A medic's breadcrumbs in columnar form. One array per field instead of an
+ * array of objects: a 12h trail at the fastest cadence is ~1440 samples, and
+ * columns cut the JSON to roughly a third of the object-per-point encoding
+ * (no repeated keys) while staying trivially readable on both clients.
+ *
+ * Every array has exactly `count` entries and shares the same index space, so
+ * sample `i` is `(t[i], lat[i], lng[i], spd[i], bat[i])`.
+ */
+export interface TrailSamples {
+  /** Epoch milliseconds, ascending. */
+  t: number[];
+  lat: number[];
+  lng: number[];
+  /** Ground speed in m/s; null where the fix carried none. */
+  spd: Array<number | null>;
+  /** Battery level 0–1; null where the fix carried none. */
+  bat: Array<number | null>;
+}
+
+/** A place the medic held for a meaningful stretch, collapsed to one marker. */
+export interface TrailDwell {
+  lat: number;
+  lng: number;
+  /** ISO time the medic settled here. */
+  from: string;
+  /** ISO time they left (or the end of the window if they're still there). */
+  to: string;
+  durationMs: number;
+}
+
+export interface TrailStats {
+  /** Great-circle distance summed over the (decimated) trail, in metres. */
+  distanceMeters: number;
+  /** Time spent above the moving threshold. */
+  movingMs: number;
+  /** Time inside the window spent below it. */
+  stationaryMs: number;
+  /** Fastest single-sample speed in m/s, when any sample carried speed. */
+  maxSpeed?: number;
+  /** Distance / movingMs, in m/s. */
+  avgMovingSpeed?: number;
+  /** Battery at the start and end of the window (0–1), when reported. */
+  batteryStart?: number;
+  batteryEnd?: number;
+}
+
+export interface MedicTrail {
+  eventId: string;
+  medicId: string;
+  name: string;
+  vehicleType?: VehicleType;
+  /** Which span this is — echoed back so the UI can label it correctly. */
+  mode: TrailWindowMode;
+  /** Window actually covered (ISO). */
+  from: string;
+  to: string;
+  /** Samples returned after decimation. */
+  count: number;
+  /** Samples the window holds before decimation — the honest raw total. */
+  rawCount: number;
+  samples: TrailSamples;
+  dwells: TrailDwell[];
+  stats: TrailStats;
+}
+
+/** Multi-medic response for the coordinator's replay view. */
+export interface TrailBundle {
+  eventId: string;
+  mode: TrailWindowMode;
+  from: string;
+  to: string;
+  trails: MedicTrail[];
+}
+
+/**
+ * Distinct, colour-blind-safe hues for trail lines. Deliberately avoids the
+ * greens and reds already spoken for by medic status and incident severity, so
+ * a trail never reads as a state.
+ */
+export const TRAIL_COLORS = [
+  "#38bdf8", // sky
+  "#a78bfa", // violet
+  "#fbbf24", // amber
+  "#f472b6", // pink
+  "#2dd4bf", // teal
+  "#fb923c", // orange
+  "#818cf8", // indigo
+  "#e879f9", // fuchsia
+] as const;
+
+/**
+ * Stable colour for a medic's trail. Derived from the id rather than from list
+ * position so a medic keeps the same colour across the phone, the dashboard,
+ * and a reload that reorders the roster.
+ */
+export function trailColor(medicId: string): string {
+  let hash = 0;
+  for (let i = 0; i < medicId.length; i += 1) {
+    hash = (hash * 31 + medicId.charCodeAt(i)) >>> 0;
+  }
+  return TRAIL_COLORS[hash % TRAIL_COLORS.length];
+}

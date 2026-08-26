@@ -15,6 +15,7 @@ import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { EventsService } from "../events/events.service";
+import { TrailRecorderService } from "../trails/trail-recorder.service";
 
 interface RosterRow {
   id: string;
@@ -74,6 +75,7 @@ export class MedicsService implements OnModuleInit {
     private readonly redis: RedisService,
     private readonly notifications: NotificationsService,
     private readonly events: EventsService,
+    private readonly trailRecorder: TrailRecorderService,
   ) {}
 
   /**
@@ -335,6 +337,39 @@ export class MedicsService implements OnModuleInit {
         recordedAt, now,
       ],
     );
+
+    // Breadcrumb the fix. Synchronous but trivial — the recorder only runs a
+    // distance check and an array push; the write itself is batched onto a
+    // timer, so history never lengthens a location ping.
+    //
+    // Only ACTIVE events inside their daily window are recorded: history is a
+    // record of the event, not of the medic's life. The live position above is
+    // stored regardless — this gates persistence, not the map.
+    //
+    // Guarded because this is the ingest path for EVERY app version in the
+    // field: losing a breadcrumb is a missing dot on a replay, but throwing
+    // here would drop a live medic off the map.
+    try {
+      // Judged on the FIX's own time, not wall-clock now: a phone that queues
+      // fixes through an outage and flushes them at 18:05 still took them
+      // inside the window, and they belong in the event's history.
+      if (this.events.shouldRecordHistory(params.eventId, new Date(recordedAt))) {
+        this.trailRecorder.record({
+          eventId: params.eventId,
+          medicId: params.medicId,
+          lat: params.lat,
+          lng: params.lng,
+          recordedAt,
+          speed: params.speed,
+          heading: params.heading,
+          accuracy: params.accuracy,
+          battery: params.battery,
+          charging: params.charging,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`trail breadcrumb skipped: ${String(err)}`);
+    }
 
     await this.publishMedicLocation(params.eventId, state);
 

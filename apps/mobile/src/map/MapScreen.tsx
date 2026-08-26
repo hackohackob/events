@@ -99,6 +99,10 @@ import { ZoneDrawOverlay } from "./zones/ZoneDrawOverlay";
 import { useZoneEntryAlarm } from "./zones/zone-alarm";
 import { broadcastZone, deleteZone, updateZone } from "./zones/zone-api";
 import { useZoneVisibilityStore } from "./zones/zone-visibility-store";
+import { TrailLayer } from "../trails/TrailLayer";
+import { TrailPanel } from "../trails/TrailPanel";
+import { useTrailStore } from "../trails/trail-store";
+import { trailBounds } from "../trails/trail-geometry";
 import { useSharedValue } from "react-native-reanimated";
 import { isMapGestureActive, noteMapGesture } from "./map-gesture";
 import {
@@ -3182,6 +3186,29 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       : null;
 
   // ── Scale ruler placement ──
+  // Frame a trail the moment it loads, once per open. Keyed on the trail
+  // object rather than on `target` so a window change (1h → 12h) re-frames to
+  // the new extent, while the 30s live refresh does not yank the camera.
+  const trail = useTrailStore((s) => s.trail);
+  const trailOpen = useTrailStore((s) => s.target !== null);
+  const framedTrail = useRef<string | null>(null);
+  useEffect(() => {
+    if (!trail) {
+      framedTrail.current = null;
+      return;
+    }
+    const key = `${trail.medicId}:${trail.from}`;
+    if (framedTrail.current === key) return;
+    framedTrail.current = key;
+    const bounds = trailBounds(trail);
+    if (!bounds) return;
+    const [[west, south], [east, north]] = bounds;
+    cameraRef.current?.fitBounds([west, south, east, north], {
+      padding: { top: 110, right: 50, bottom: Math.round(SCREEN_HEIGHT * 0.34), left: 50 },
+      duration: 700,
+    });
+  }, [trail]);
+
   // The ruler rides just above the tallest open bottom drawer; with none open
   // it sits above the bottom menu. Hidden when a drawer covers most of the
   // screen (no meaningful map left to measure).
@@ -3195,7 +3222,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   );
   // Hidden while navigating — the nav HUD owns the bottom of the screen (speed
   // puck + dock) and carries its own distance readouts.
-  const scaleBarVisible = openDrawerFraction < 0.6 && navPhase !== "active" && trackNavPhase === "idle";
+  // …and hidden behind the location-history transport, which occupies the same
+  // corner of the screen.
+  const scaleBarVisible =
+    openDrawerFraction < 0.6 && navPhase !== "active" && trackNavPhase === "idle" && !trailOpen;
   const scaleBarBottom =
     openDrawerFraction > 0
       ? Math.round(SCREEN_HEIGHT * openDrawerFraction) + 14
@@ -3700,6 +3730,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               </React.Fragment>
             );
           })}
+
+        {/* Location history overlay. Renders nothing unless a trail is open. */}
+        <TrailLayer zoom={mapZoom} />
 
         {/* Team zones (medic-only) + the live freehand sketch while drawing. */}
         {isTeamRole ? <ZonesLayer zones={zones} /> : null}
@@ -4261,6 +4294,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           <ScaleBar zoom={mapZoom} latitude={mapCenterLat} />
         </View>
       ) : null}
+
+      {/* Location history transport, docked over the bottom of the map. */}
+      <TrailPanel bottomInset={BOTTOM_BAR_HEIGHT + 6} />
 
       {/* Freehand zone drawing (touch catcher + naming card). */}
       {isTeamRole && zoneDrawPhase !== "idle" ? <ZoneDrawOverlay mapRef={mapRef} /> : null}
@@ -5252,7 +5288,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
       {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
-      {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive ? (
+      {/* Also hidden while a trail is open: the transport occupies the same
+          corner, and the FAB sat directly on top of its LIVE button. */}
+      {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive && !trailOpen ? (
         <IncidentFAB
           // "Add point" from the FAB drops at my own position — the long-press
           // menu is still the way to place one somewhere else on the map.

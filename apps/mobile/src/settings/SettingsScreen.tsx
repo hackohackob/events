@@ -9,6 +9,7 @@ import {
   STATIONARY_INTERVAL_MS,
   useSettingsStore,
 } from "./settings-store";
+import { useTrailStore } from "../trails/trail-store";
 import { startLocationLoop } from "../location/location-tracker";
 import { isDndBypassGranted, openDndAccessSettings } from "../notifications/dnd-access";
 import { PttBridgeSection } from "../ptt/PttBridgeSection";
@@ -171,6 +172,28 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
               : "Lower frequencies save battery. A persistent notification keeps tracking alive in the background."}
           </Text>
         </View>
+
+        {/* Own trail. Also reachable by tapping your own dot on the map, but
+            that only occurs to people who already know the feature exists. */}
+        <Pressable
+          style={styles.historyRow}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            useTrailStore.getState().open({ name: "My location history" });
+            // The trail draws on the map, so this screen has to get out of
+            // the way for it to be visible at all.
+            onClose();
+          }}
+        >
+          <View style={styles.historyIcon}>
+            <Feather name="clock" size={16} color="#7dd3fc" />
+          </View>
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>My location history</Text>
+            <Text style={styles.rowSub}>Replay where you have been over the last 12 hours.</Text>
+          </View>
+          <Feather name="chevron-right" size={18} color="#38bdf8" />
+        </Pressable>
 
         {/* ── Push-to-talk bridges ────────────────────────────── */}
         {isCoordinator ? (
@@ -373,6 +396,26 @@ export function SettingsScreen({ onClose }: { onClose: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: "rgba(56,189,248,0.09)",
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.25)",
+  },
+  historyIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(56,189,248,0.14)",
+  },
+
   container: { flex: 1, backgroundColor: "#050b16" },
   header: {
     flexDirection: "row",

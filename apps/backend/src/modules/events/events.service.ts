@@ -174,6 +174,57 @@ const SOFIA_HHMM = new Intl.DateTimeFormat("en-GB", {
   hour12: false,
 });
 
+
+/** Full Europe/Sofia breakdown of an instant, used to convert wall time ↔ UTC. */
+const SOFIA_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Sofia",
+  hour12: false,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+/** Sofia's UTC offset (ms) at a given instant — DST-correct, no tz library. */
+function sofiaOffsetMs(at: Date): number {
+  const parts = Object.fromEntries(SOFIA_PARTS.formatToParts(at).map((p) => [p.type, p.value]));
+  const asIfUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour === "24" ? "0" : parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asIfUtc - at.getTime();
+}
+
+/**
+ * Turn a Sofia wall-clock date + "HH:mm" into a real instant.
+ *
+ * Event dates and active hours are written as local wall time ("14 Aug,
+ * 06:00"), but breadcrumbs are stored in UTC. Reading the two against each
+ * other without this conversion silently shifts an event window by the
+ * offset — three hours in a Bulgarian summer, which is a quarter of a race day.
+ */
+function sofiaWallTimeToInstant(dateISO: string, hhmm: string): Date {
+  const naive = new Date(`${dateISO}T${hhmm}:00Z`);
+  if (Number.isNaN(naive.getTime())) return new Date(NaN);
+  // Two passes: the offset is looked up at the approximate instant, then
+  // re-checked, so a window that starts within a DST transition still lands.
+  const first = new Date(naive.getTime() - sofiaOffsetMs(naive));
+  return new Date(naive.getTime() - sofiaOffsetMs(first));
+}
+
+/** "2026-08-15" + 1 → "2026-08-16" (calendar days, no timezone involved). */
+function addDays(dateISO: string, days: number): string {
+  const d = new Date(`${dateISO}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function normalizeActiveHours(
   input?: { start?: string; end?: string } | null,
 ): EventActiveHours | undefined {
@@ -345,6 +396,48 @@ export class EventsService implements OnModuleInit {
     return ah.start <= ah.end
       ? hm >= ah.start && hm <= ah.end
       : hm >= ah.start || hm <= ah.end;
+  }
+
+  /**
+   * Should medic breadcrumbs be written right now for this event?
+   *
+   * Location history is kept for ACTIVE events, inside their daily window,
+   * only. A draft event isn't running and a closed one is over; outside the
+   * declared hours a medic's phone is their own business. Ingestion of the
+   * *live* position is unaffected — this gates persistence, not the map.
+   */
+  shouldRecordHistory(eventId: string, now: Date = new Date()): boolean {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event || event.status !== "active") return false;
+    return this.isWithinActiveHours(eventId, now);
+  }
+
+  /**
+   * The event's own span as real instants: first date at the start of the
+   * active window through last date at the end of it. This is what "show me
+   * the whole event, however long ago it was" resolves to, as opposed to the
+   * rolling last-12h view used during operations.
+   *
+   * Returns null for an event with no dates, which has no span to show.
+   */
+  getEventWindow(eventId: string): { from: string; to: string } | null {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event || event.dates.length === 0) return null;
+
+    const dates = [...event.dates].sort();
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    const hours = event.activeHours;
+
+    const from = sofiaWallTimeToInstant(first, hours?.start ?? "00:00");
+    // An overnight window ("22:00"–"04:00") ends on the morning after the last
+    // day, so the closing instant belongs to the following date.
+    const endsNextDay = !!hours && hours.end < hours.start;
+    const lastDay = endsNextDay ? addDays(last, 1) : last;
+    const to = sofiaWallTimeToInstant(lastDay, hours?.end ?? "23:59");
+
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+    return { from: from.toISOString(), to: to.toISOString() };
   }
 
   async remove(id: string): Promise<boolean> {

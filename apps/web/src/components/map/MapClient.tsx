@@ -6,7 +6,8 @@ import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapPin } from 'lucide-react'
 import type { PointOfInterest, POIType } from '@/lib/types'
-import type { EventZone, MedicState } from '@events/contracts'
+import type { EventZone, MedicState, MedicTrail } from '@events/contracts'
+import TrailLayers from '@/components/trails/TrailLayers'
 import { smoothZonePolygon, zoneFeature } from '@/lib/zone-geometry'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
@@ -250,6 +251,12 @@ interface MapClientProps {
   showKmMarks?: boolean
   /** Spacing between km chips, in km (default 5). */
   kmMarkIntervalKm?: number
+  /** Medic location history to draw (Replay tab). Empty = feature is off. */
+  trails?: MedicTrail[]
+  /** Replay cursor in epoch ms; null draws each trail whole with no puck. */
+  trailCursorMs?: number | null
+  /** Highlight one trail and fade the rest. */
+  trailFocusMedicId?: string | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1375,6 +1382,9 @@ export default function MapClient({
   onPickLocation,
   showKmMarks = false,
   kmMarkIntervalKm = 5,
+  trails = [],
+  trailCursorMs = null,
+  trailFocusMedicId = null,
 }: MapClientProps) {
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
@@ -1617,6 +1627,18 @@ export default function MapClient({
     >
       {showControls && (
         <NavigationControl position="bottom-right" showCompass showZoom visualizePitch={enable3d} />
+      )}
+
+      {/* Location history. Sits below the live markers so a replay never hides
+          where a medic is right now. Dwell pins are dropped past a wide zoom,
+          where a 12h trail's stops would otherwise stack into a blob. */}
+      {trails.length > 0 && (
+        <TrailLayers
+          trails={trails}
+          cursorMs={trailCursorMs}
+          focusMedicId={trailFocusMedicId}
+          showDwells={liveZoom >= 11}
+        />
       )}
 
       {/* Team zones (medic-only regions) */}

@@ -10,6 +10,7 @@ import { setMedicVehicleType } from "../ui/event-actions";
 import { useMapStore } from "./map-store";
 import { debugLog } from "../debug/debug-log";
 import { freshnessColor, freshnessLabel } from "./freshness";
+import { useTrailStore } from "../trails/trail-store";
 
 /** The subset of a map marker a medic detail sheet needs. */
 export interface MedicSheetMarker {
@@ -84,6 +85,8 @@ export function MedicSheet({ marker, rosterEntry, badge, onClose, onClearDestina
   const amCoordinator = useRosterStore((s) => s.amCoordinator);
   const myId = useSessionStore((s) => s.userId);
   const canEditVehicle = amCoordinator || marker.id === myId;
+  const isMe = marker.id === myId;
+  const canSeeHistory = isMe || amCoordinator;
   const vehicleType = marker.vehicleType ?? rosterEntry?.vehicleType ?? DEFAULT_VEHICLE_TYPE;
   const [vehicleOpen, setVehicleOpen] = useState(false);
   const [savingVehicle, setSavingVehicle] = useState<VehicleType | null>(null);
@@ -290,6 +293,30 @@ export function MedicSheet({ marker, rosterEntry, badge, onClose, onClearDestina
           </View>
         ) : null}
 
+        {/* ── Location history ──
+            Own trail is always available; someone else's is coordinator-only,
+            which the server enforces too — this just doesn't offer a button
+            that would come back 403. */}
+        {canSeeHistory ? (
+          <Pressable
+            style={styles.historyBtn}
+            onPress={() => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              useTrailStore.getState().open({
+                medicId: isMe ? undefined : marker.id,
+                name: isMe ? "My location history" : (marker.name ?? marker.label),
+              });
+              onClose();
+            }}
+          >
+            <Feather name="clock" size={14} color="#7dd3fc" />
+            <Text style={styles.historyBtnText}>
+              {isMe ? "My last 12 hours" : "Last 12 hours"}
+            </Text>
+            <Feather name="chevron-right" size={15} color="#38bdf8" />
+          </Pressable>
+        ) : null}
+
         {/* ── Skills ── */}
         {skills.length > 0 ? (
           <>
@@ -310,6 +337,20 @@ export function MedicSheet({ marker, rosterEntry, badge, onClose, onClearDestina
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+
+  historyBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: "rgba(56,189,248,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(56,189,248,0.28)",
+  },
+  historyBtnText: { flex: 1, color: "#7dd3fc", fontSize: 13.5, fontWeight: "800" },
   accent: { height: 3, borderRadius: 2, marginHorizontal: 20, marginBottom: 10, opacity: 0.85 },
 
   header: {
