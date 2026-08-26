@@ -203,12 +203,14 @@ export class TrailRecorderService implements OnModuleInit, OnModuleDestroy {
   /**
    * Create the history table if it isn't there yet.
    *
-   * The deploy workflow ships images and restarts compose; it does NOT run
-   * `infra/migrations`. Anything that only exists in a migration file is
-   * therefore absent in production until someone SSHes in — which is why
-   * MedicsService creates `participant_profiles` at boot too. This mirrors
-   * migration 006 exactly, and every statement is idempotent, so running both
-   * is harmless.
+   * Production does not need this: the API image's CMD runs `migrate:sql`
+   * before starting, so `infra/migrations/006` has already applied. It is here
+   * for the environments that never run migrations — `start:dev` goes straight
+   * to ts-node, so a freshly created local database has no trail table at all,
+   * and the first location ping would otherwise fail on every flush.
+   *
+   * Mirrors migration 006 exactly and every statement is idempotent, so the two
+   * running against the same database is a no-op.
    */
   private async ensureSchema(): Promise<void> {
     const statements = [
