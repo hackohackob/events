@@ -325,6 +325,19 @@ export interface ParticipantLastLocation {
   freshness?: "fresh" | "warning" | "stale" | "offline";
 }
 
+/**
+ * Roles that are running the event, as opposed to taking part in it.
+ *
+ * The distinction matters for medic positions: participants may only see them
+ * inside the event's declared hours, while staff need them whenever they open
+ * the app. Note that the mobile app stamps EVERY rostered person — coordinators
+ * included — with role "medic", so a test for "coordinator" alone never
+ * identifies staff on a phone.
+ */
+export function isStaffRole(role?: string): boolean {
+  return role === "medic" || role === "paramedic" || role === "coordinator";
+}
+
 /** Freshness bucket type, shared by backend + both frontends so status dots
  *  and "time ago" text can never disagree. */
 export type FreshnessState = "fresh" | "warning" | "stale" | "offline";

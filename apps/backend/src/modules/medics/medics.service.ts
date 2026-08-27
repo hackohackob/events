@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import {
   computeFreshness,
+  isStaffRole,
   DEFAULT_VEHICLE_TYPE,
   MedicDestination,
   MedicRoute,
@@ -80,19 +81,27 @@ export class MedicsService implements OnModuleInit {
 
   /**
    * Broadcast a medic position update. Inside the event's active hours it goes
-   * to the shared map room; outside them only coordinators receive it (they
-   * join the :map:coordinators room at connect). Ingestion is never filtered.
+   * to the shared map room; outside them only STAFF receive it (they join the
+   * :map:staff room at connect). Ingestion is never filtered.
    */
   private async publishMedicLocation(eventId: string, state: MedicState): Promise<void> {
     const channel = this.events.isWithinActiveHours(eventId)
       ? `event:${eventId}:map`
-      : `event:${eventId}:map:coordinators`;
+      : `event:${eventId}:map:staff`;
     await this.redis.publish(channel, { type: "medic_location", payload: state });
   }
 
-  /** Non-coordinators may see medic positions only inside the event's active hours. */
+  /**
+   * Participants may see medic positions only inside the event's active hours;
+   * staff always can.
+   *
+   * This used to read `role !== "coordinator"`, which hid the whole team from
+   * every medic on a phone: the mobile app stamps every rostered person —
+   * coordinators included — with role "medic". With an event declaring hours of
+   * 06:00–23:00, opening the app at midnight showed an empty map.
+   */
   isMedicVisibilityRestricted(eventId: string, role?: string): boolean {
-    return role !== "coordinator" && !this.events.isWithinActiveHours(eventId);
+    return !isStaffRole(role) && !this.events.isWithinActiveHours(eventId);
   }
 
   async onModuleInit() {

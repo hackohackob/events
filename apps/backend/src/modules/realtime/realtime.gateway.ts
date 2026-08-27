@@ -6,7 +6,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from "@nestjs/websockets";
-import { SessionPayload, UserRole } from "@events/contracts";
+import { isStaffRole, SessionPayload, UserRole } from "@events/contracts";
 import { Server, Socket } from "socket.io";
 
 @WebSocketGateway({
@@ -46,9 +46,12 @@ export class RealtimeGateway implements OnGatewayConnection {
       client.join(`event:${eventId}:incidents`);
     }
     // Outside an event's active hours medic locations are published to this
-    // coordinator-only room instead of the shared :map room.
-    if (role === "coordinator") {
-      client.join(`event:${eventId}:map:coordinators`);
+    // staff-only room instead of the shared :map room. Every staff role has to
+    // join it, not just "coordinator" — the mobile app stamps all rostered
+    // people as "medic", so restricting this to coordinators left medics with
+    // no live positions at all once the event's hours had passed.
+    if (isStaffRole(role)) {
+      client.join(`event:${eventId}:map:staff`);
     }
   }
 
