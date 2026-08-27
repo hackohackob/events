@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
-import { PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import { PanResponder, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
@@ -65,9 +65,11 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
           setPlain((s) => ({ ...s, cancel: s.cancel + 1 }));
         },
         // Never hand the gesture over voluntarily — anything that takes it has
-        // to take it, which is exactly what we want to measure.
+        // to take it, which is exactly what we want to measure. Both of these
+        // are refusals: the first turns down a JS-side request for the
+        // responder, the second stops a NATIVE view from simply helping itself.
         onPanResponderTerminationRequest: () => false,
-        onShouldBlockNativeResponder: () => false,
+        onShouldBlockNativeResponder: () => true,
       }),
     [],
   );
@@ -125,7 +127,7 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.body}>
+      <View style={styles.body}>
         <Text style={styles.intro}>
           Drag a slow circle inside each box for a couple of seconds, then press Share and send
           the numbers over.
@@ -161,7 +163,7 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
         <View style={[styles.verdict, { borderColor: verdict.color }]}>
           <Text style={[styles.verdictText, { color: verdict.color }]}>{verdict.text}</Text>
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -242,11 +244,15 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", gap: 8, marginLeft: "auto" },
   smallBtn: { backgroundColor: "#16263d", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   smallBtnText: { color: "#9fb3cc", fontSize: 12, fontWeight: "700" },
-  body: { padding: 16, paddingBottom: 48, gap: 10 },
+  // No ScrollView, on purpose — see onShouldBlockNativeResponder above. The
+  // pads share whatever is left after the fixed rows so the screen still
+  // fits without one.
+  body: { flex: 1, padding: 16, paddingBottom: 24, gap: 8 },
   intro: { color: "#7c8a9c", fontSize: 13, lineHeight: 19, marginBottom: 4 },
   padTitle: { color: "#9fb3cc", fontSize: 12, fontWeight: "800", letterSpacing: 0.6, marginTop: 6 },
   pad: {
-    height: 130,
+    flex: 1,
+    minHeight: 90,
     borderRadius: 14,
     backgroundColor: "#0b1729",
     borderWidth: 1,
