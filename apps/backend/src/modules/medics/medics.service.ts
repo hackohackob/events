@@ -342,18 +342,15 @@ export class MedicsService implements OnModuleInit {
     // distance check and an array push; the write itself is batched onto a
     // timer, so history never lengthens a location ping.
     //
-    // Only ACTIVE events inside their daily window are recorded: history is a
-    // record of the event, not of the medic's life. The live position above is
-    // stored regardless — this gates persistence, not the map.
+    // Recorded for any ACTIVE event. Restricting this to the event's dates or
+    // hours makes the rolling "last N hours" view empty outside them; the
+    // event archive does that scoping at read time instead.
     //
     // Guarded because this is the ingest path for EVERY app version in the
     // field: losing a breadcrumb is a missing dot on a replay, but throwing
     // here would drop a live medic off the map.
     try {
-      // Judged on the FIX's own time, not wall-clock now: a phone that queues
-      // fixes through an outage and flushes them at 18:05 still took them
-      // inside the window, and they belong in the event's history.
-      if (this.events.shouldRecordHistory(params.eventId, new Date(recordedAt))) {
+      if (this.events.shouldRecordHistory(params.eventId)) {
         this.trailRecorder.record({
           eventId: params.eventId,
           medicId: params.medicId,

@@ -415,33 +415,26 @@ export class EventsService implements OnModuleInit {
   }
 
   /**
-   * Should medic breadcrumbs be written right now for this event?
+   * Should medic breadcrumbs be written for this event?
    *
-   * Location history is kept for ACTIVE events, inside their daily window,
-   * only. A draft event isn't running and a closed one is over; outside the
-   * declared hours a medic's phone is their own business. Ingestion of the
-   * *live* position is unaffected — this gates persistence, not the map.
+   * ACTIVE status is the ONLY condition. It deliberately does not consider the
+   * event's dates or daily hours: the rolling "last N hours" view is the
+   * operational one — a coordinator checking where a medic has been in the last
+   * hour needs an answer on setup day, at 03:00, and the morning after, not
+   * only during the declared race window.
+   *
+   * Scoping to the event's own days and hours happens at READ time, in the
+   * `window=event` archive query. Doing it here instead is what broke
+   * production on 2026-08-27: an event dated two days out recorded nothing at
+   * all, so every rolling window came back empty while medics were plainly
+   * reporting. Filter late, record broadly.
+   *
+   * Ingestion of the *live* position is unaffected either way — this gates
+   * persistence, not the map.
    */
-  shouldRecordHistory(eventId: string, now: Date = new Date()): boolean {
+  shouldRecordHistory(eventId: string): boolean {
     const event = this.events.find((e) => e.id === eventId);
-    if (!event || event.status !== "active") return false;
-    if (!this.isWithinActiveHours(eventId, now)) return false;
-
-    // …and on one of the event's own DAYS. isWithinActiveHours only compares
-    // "HH:mm", so without this an event left active kept recording every day
-    // forever — a race in May was still collecting breadcrumbs in August, all
-    // filed under that event.
-    if (event.dates.length === 0) return true;
-    const today = sofiaDate(now);
-    if (event.dates.includes(today)) return true;
-
-    // An overnight window ("22:00"–"04:00") spills into the morning after the
-    // last day, and those fixes still belong to that day's session.
-    const hours = event.activeHours;
-    if (hours && hours.end < hours.start && SOFIA_HHMM.format(now) <= hours.end) {
-      return event.dates.includes(addDays(today, -1));
-    }
-    return false;
+    return !!event && event.status === "active";
   }
 
   /**

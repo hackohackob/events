@@ -1,4 +1,5 @@
 import client from "./client";
+import { toCalendarDate } from "@/lib/calendar-date"
 import type { EventFormData } from "@/lib/types";
 
 export interface ApiEventSummary {
@@ -46,7 +47,7 @@ export async function createEvent(data: EventFormData) {
     description: data.description || undefined,
     imageUrl: data.imageUrl || undefined,
     commandPhone: data.commandPhone.trim() || undefined,
-    dates: data.dates.map((d) => d.toISOString().split("T")[0]),
+    dates: data.dates.map(toCalendarDate),
     activeHours: data.activeHours ?? undefined,
     location: data.location
       ? {
@@ -56,7 +57,7 @@ export async function createEvent(data: EventFormData) {
         }
       : undefined,
     days: data.days.map((day) => ({
-      date: day.date.toISOString().split("T")[0],
+      date: toCalendarDate(day.date),
       disciplines: day.disciplines.map((disc) => ({
         name: disc.name,
         type: disc.type,
@@ -105,13 +106,13 @@ export async function updateEvent(id: string, data: EventFormData) {
     description: data.description || undefined,
     imageUrl: data.imageUrl || undefined,
     commandPhone: data.commandPhone.trim() || undefined,
-    dates: data.dates.map((d) => d.toISOString().split("T")[0]),
+    dates: data.dates.map(toCalendarDate),
     activeHours: data.activeHours ?? undefined,
     location: data.location
       ? { name: data.location.name, lng: data.location.coordinates[0], lat: data.location.coordinates[1] }
       : undefined,
     days: data.days.map((day) => ({
-      date: day.date.toISOString().split("T")[0],
+      date: toCalendarDate(day.date),
       disciplines: day.disciplines.map((disc) => ({
         name: disc.name,
         type: disc.type,

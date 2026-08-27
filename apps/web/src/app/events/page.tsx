@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { calendarYear, formatCalendarDate } from '@/lib/calendar-date'
 import { Plus, Calendar, MapPin, Users, Activity, ChevronRight, Copy, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -20,9 +21,9 @@ function formatEventDates(dates: string[]): string {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
   if (dates.length === 1) {
-    return fmt(dates[0]) + ', ' + new Date(dates[0]).getFullYear()
+    return fmt(dates[0]) + ', ' + calendarYear(dates[0])
   }
-  return fmt(dates[0]) + ' – ' + fmt(dates[dates.length - 1]) + ', ' + new Date(dates[0]).getFullYear()
+  return fmt(dates[0]) + ' – ' + fmt(dates[dates.length - 1]) + ', ' + calendarYear(dates[0])
 }
 
 function EventCard({ event, onDuplicate, onDelete }: { event: ApiEventSummary; onDuplicate: (id: string) => void; onDelete: (id: string) => void }) {

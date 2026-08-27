@@ -1,6 +1,7 @@
 'use client'
 
 import { use, useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { calendarYear, formatCalendarDate, fromCalendarDate } from '@/lib/calendar-date'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
@@ -49,9 +50,9 @@ const POI_ICON: Record<string, string> = {
 
 function formatDates(dates: string[]): string {
   if (!dates || dates.length === 0) return '—'
-  const fmt = (s: string) => new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  if (dates.length === 1) return fmt(dates[0]) + ', ' + new Date(dates[0]).getFullYear()
-  return fmt(dates[0]) + ' – ' + fmt(dates[dates.length - 1]) + ', ' + new Date(dates[0]).getFullYear()
+  const fmt = (s: string) => formatCalendarDate(s)
+  if (dates.length === 1) return fmt(dates[0]) + ', ' + calendarYear(dates[0])
+  return fmt(dates[0]) + ' – ' + fmt(dates[dates.length - 1]) + ', ' + calendarYear(dates[0])
 }
 
 function msToLabel(ms: number): string {
@@ -747,7 +748,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 All
               </button>
               {eventDays.map((day, i) => {
-                const d = new Date(day.date)
+                const d = fromCalendarDate(day.date)
                 const shortDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                 const isSelected = selectedDayIdx === i
                 return (
@@ -860,7 +861,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                         <div key={day.date} className="rounded-2xl p-4" style={{ background: 'rgba(20,33,61,0.8)', border: '1px solid rgba(148,163,184,0.08)' }}>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-semibold text-slate-200">
-                              Day {i + 1} — {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' })}
+                              Day {i + 1} — {formatCalendarDate(day.date, { weekday: 'short', month: 'long', day: 'numeric' })}
                             </span>
                             <div className="flex items-center gap-2">
                               {(day.pois || []).length > 0 && (

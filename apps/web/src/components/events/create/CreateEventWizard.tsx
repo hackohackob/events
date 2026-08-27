@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, use } from 'react'
+import { fromCalendarDate } from '@/lib/calendar-date'
 import Link from 'next/link'
 import { ChevronRight, CheckCircle, Eye } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -73,13 +74,13 @@ export default function CreateEventWizard({
           imageUrl: event.imageUrl ?? null,
           commandPhone: event.commandPhone ?? '',
           dates: event.dates.length > 0
-            ? event.dates.map(d => { const dt = new Date(d); dt.setHours(0, 0, 0, 0); return dt })
+            ? event.dates.map(fromCalendarDate)
             : [today],
           location: null,
           activeHours: event.activeHours ?? null,
           days: await Promise.all((event.days ?? []).map(async (day, dayIdx) => ({
             id: `day-${dayIdx + 1}`,
-            date: (() => { const d = new Date(day.date); d.setHours(0, 0, 0, 0); return d })(),
+            date: fromCalendarDate(day.date),
             disciplines: await Promise.all((day.disciplines ?? []).map(async (disc, discIdx): Promise<Discipline> => {
               const gpx = disc.gpxUrl ? await fetchGpxTrack(disc.gpxUrl) : { coordinates: [], elevationProfile: [] }
               return {
