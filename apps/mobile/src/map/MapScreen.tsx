@@ -3252,6 +3252,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         logo={false}
         attribution={false}
         compass={false}
+        // These three are already MapLibre's defaults — they are spelled out
+        // because on Android the *prop having been set* is load-bearing.
+        // MLRNMapView keeps `scrollEnabled` at null until `dragPan` arrives,
+        // and its onTouchEvent only calls requestDisallowInterceptTouchEvent()
+        // when that field is exactly `true`. With the prop omitted the map
+        // therefore never claimed a drag from its ancestors, so any
+        // gesture-handler above it (the bottom sheets' root) was free to steal
+        // the pan/pinch mid-gesture — pan and zoom then do nothing while plain
+        // taps, which no handler competes for, keep working. Reported on a
+        // ZenFone 9 (Android 14); a faster touch sampling rate makes the
+        // handler above win the race far more often.
+        dragPan={true}
+        touchZoom={true}
+        doubleTapZoom={true}
         // Disable MapLibre's built-in (top-left) scale bar — we render our own
         // styled one bottom-left (see ScaleBar / styles.scaleBar).
         scaleBar={false}

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { type DebugCategory, type DebugLevel, useDebugLog } from "./debug-log";
+import { TouchTestScreen } from "./TouchTestScreen";
 
 type Filter = DebugCategory | "all" | "errors";
 // "errors" is a cross-category filter (level === "error"), kept first after
@@ -32,6 +33,9 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
   const entries = useDebugLog((s) => s.entries);
   const clear = useDebugLog((s) => s.clear);
   const [filter, setFilter] = useState<Filter>("all");
+  // Field diagnosis for "the map won't pan / the drawer ignores my finger":
+  // a separate view, so nothing about the log screen changes when it is off.
+  const [touchTest, setTouchTest] = useState(false);
 
   const visible = useMemo(() => {
     if (filter === "all") return entries;
@@ -50,6 +54,8 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
     await Share.share({ message: text || "(empty debug log)" });
   };
 
+  if (touchTest) return <TouchTestScreen onClose={() => setTouchTest(false)} />;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -60,6 +66,9 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
         ) : null}
         <Text style={styles.heading}>Debug log</Text>
         <View style={styles.headerActions}>
+          <Pressable style={styles.smallBtn} onPress={() => setTouchTest(true)}>
+            <Text style={styles.smallBtnText}>Touch</Text>
+          </Pressable>
           <Pressable style={styles.smallBtn} onPress={() => void copyAll()}>
             <Text style={styles.smallBtnText}>Share</Text>
           </Pressable>
