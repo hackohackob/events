@@ -5,10 +5,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
   ChevronRight, ChevronLeft, Calendar, MapPin, Users, Activity,
-  Play, Pause, ArrowLeft, Edit, Wifi, WifiOff, User, Navigation,
-  Layers, AlertTriangle, QrCode, X, Megaphone, Moon, Stethoscope, Crown, Pencil, MessageCircle, ChevronDown, Clock
+  Play, Pause, ArrowLeft, Edit, WifiOff, User, Navigation,
+  Layers, AlertTriangle, X, Megaphone, Moon, Stethoscope, Crown, Pencil, MessageCircle, ChevronDown, Clock
 } from 'lucide-react'
-import { QRCodeSVG } from 'qrcode.react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
 import { useLiveMap } from '@/hooks/useLiveMap'
 import { useHeatmap } from '@/hooks/useHeatmap'
@@ -107,62 +106,6 @@ function ActiveHoursBadge({ hours }: { hours: { start: string; end: string } }) 
 
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
 
-function QRModal({ eventId, onClose }: { eventId: string; onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 50, background: 'rgba(5,10,20,0.82)', backdropFilter: 'blur(14px)' }}
-      onClick={onClose}
-    >
-      <div
-        className="relative flex flex-col items-center gap-6 p-10 rounded-3xl"
-        style={{
-          maxWidth: 420, width: '90%',
-          background: 'rgba(8,15,28,0.97)',
-          border: '1px solid rgba(34,197,94,0.2)',
-          boxShadow: '0 0 60px rgba(34,197,94,0.12), 0 24px 80px rgba(0,0,0,0.7)',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-xl transition-colors"
-          style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(148,163,184,0.1)' }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#e2e8f0')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        <div className="text-center">
-          <div className="text-xl font-bold text-slate-100 mb-1">Join Event</div>
-          <div className="text-sm" style={{ color: '#64748b' }}>Scan with the MedEvac app to join instantly</div>
-        </div>
-
-        {/* QR Code */}
-        <div
-          className="p-4 rounded-2xl"
-          style={{ background: '#fff' }}
-        >
-          <QRCodeSVG value={eventId} size={216} level="M" />
-        </div>
-
-        {/* Join code */}
-        <div className="text-center">
-          <div className="text-xs font-semibold mb-2" style={{ color: '#64748b' }}>JOIN CODE</div>
-          <div className="font-mono text-4xl font-black tracking-widest" style={{ color: '#22c55e' }}>
-            {eventId}
-          </div>
-        </div>
-
-        <div className="text-xs text-center" style={{ color: '#475569' }}>
-          Open the MedEvac mobile app → Join Event → scan or enter code above
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Medic Row ────────────────────────────────────────────────────────────────
 
@@ -330,7 +273,6 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [layersOpen, setLayersOpen] = useState(true)
   // -1 = All days, 0+ = specific day index
   const [selectedDayIdx, setSelectedDayIdx] = useState<number>(-1)
-  const [showQR, setShowQR] = useState(false)
   const [addPoiCoords, setAddPoiCoords] = useState<[number, number] | null>(null)
   const [addPoiType, setAddPoiType] = useState<POIType>('medical-point')
   const [addPoiName, setAddPoiName] = useState('')
@@ -666,18 +608,20 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           {event.activeHours && <ActiveHoursBadge hours={event.activeHours} />}
         </div>
         <div className="flex items-center gap-3">
-          {/* WS connection badge (active events only) */}
-          {isActive && (
+          {/* Only the BAD state is worth header space: "Live" merely repeated
+              the Active pill beside the title, while a dropped socket is
+              something a coordinator has to know about. */}
+          {isActive && !connected && (
             <div
               className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full"
               style={{
-                background: connected ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.1)',
-                border: `1px solid ${connected ? 'rgba(34,197,94,0.25)' : 'rgba(100,116,139,0.2)'}`,
-                color: connected ? '#22c55e' : '#64748b',
+                background: 'rgba(100,116,139,0.1)',
+                border: '1px solid rgba(100,116,139,0.2)',
+                color: '#64748b',
               }}
             >
-              {connected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-              {connected ? 'Live' : 'Reconnecting…'}
+              <WifiOff className="w-3 h-3" />
+              Reconnecting…
             </div>
           )}
           {/* Team chat launcher (active events) */}
@@ -700,22 +644,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
           {isActive && (
             <button
               onClick={() => setShowBroadcast(true)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
+              className="flex items-center justify-center p-2 rounded-xl transition-all"
               style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', color: '#f59e0b' }}
               title="Broadcast to all medics"
+              aria-label="Broadcast to all medics"
             >
-              <Megaphone className="w-4 h-4" /> Broadcast
+              <Megaphone className="w-4 h-4" />
             </button>
           )}
-          {/* QR Code button */}
-          <button
-            onClick={() => setShowQR(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', color: '#22c55e' }}
-            title="Show join QR code"
-          >
-            <QrCode className="w-4 h-4" />
-          </button>
           {event.status === 'draft' && (
             <Link
               href={`/events/create?edit=${id}`}
@@ -1750,7 +1686,6 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
       )}
 
       {/* QR Code Modal */}
-      {showQR && <QRModal eventId={event.id} onClose={() => setShowQR(false)} />}
 
       {/* Add POI Modal */}
       {addPoiCoords && (
