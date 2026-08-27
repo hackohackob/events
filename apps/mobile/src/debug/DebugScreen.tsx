@@ -2,9 +2,8 @@ import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { type DebugCategory, type DebugLevel, useDebugLog } from "./debug-log";
-import { TouchTestScreen } from "./TouchTestScreen";
-import { MapTestScreen } from "./MapTestScreen";
-import { XRAY_MAX, useMapXray } from "./map-xray";
+import { MapDebugSettings } from "./MapDebugSettings";
+import { mapDebugDirtyCount, useMapDebug } from "./map-debug";
 
 type Filter = DebugCategory | "all" | "errors";
 // "errors" is a cross-category filter (level === "error"), kept first after
@@ -37,8 +36,11 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
   const [filter, setFilter] = useState<Filter>("all");
   // Field diagnosis for "the map won't pan / the drawer ignores my finger":
   // a separate view, so nothing about the log screen changes when it is off.
-  const [tool, setTool] = useState<"log" | "touch" | "map">("log");
-  const xrayLevel = useMapXray((s) => s.level);
+  const [tool, setTool] = useState<"log" | "settings">("log");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const hidden = useMapDebug((s) => s.hidden);
+  const mapZIndex = useMapDebug((s) => s.mapZIndex);
+  const mapDebugDirty = mapDebugDirtyCount(hidden, mapZIndex);
 
   const visible = useMemo(() => {
     if (filter === "all") return entries;
@@ -57,8 +59,7 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
     await Share.share({ message: text || "(empty debug log)" });
   };
 
-  if (tool === "touch") return <TouchTestScreen onClose={() => setTool("log")} />;
-  if (tool === "map") return <MapTestScreen onClose={() => setTool("log")} />;
+  if (tool === "settings") return <MapDebugSettings onClose={() => setTool("log")} />;
 
   return (
     <View style={styles.container}>
@@ -70,40 +71,52 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
         ) : null}
         <Text style={styles.heading}>Debug log</Text>
         <View style={styles.headerActions}>
-          <Pressable style={styles.smallBtn} onPress={() => setTool("touch")}>
-            <Text style={styles.smallBtnText}>Touch</Text>
-          </Pressable>
-          <Pressable style={styles.smallBtn} onPress={() => setTool("map")}>
-            <Text style={styles.smallBtnText}>Map</Text>
-          </Pressable>
-          <Pressable style={styles.smallBtn} onPress={() => void copyAll()}>
-            <Text style={styles.smallBtnText}>Share</Text>
-          </Pressable>
-          <Pressable style={styles.smallBtn} onPress={clear}>
-            <Text style={styles.smallBtnText}>Clear</Text>
+          {mapDebugDirty > 0 ? (
+            <Pressable style={styles.dirtyPill} onPress={() => setTool("settings")}>
+              <Text style={styles.dirtyPillText}>{mapDebugDirty} changed</Text>
+            </Pressable>
+          ) : null}
+          <Pressable style={styles.menuBtn} onPress={() => setMenuOpen(o => !o)} hitSlop={8}>
+            <Feather name={menuOpen ? "x" : "more-vertical"} size={20} color="#cbd5e1" />
           </Pressable>
         </View>
       </View>
 
-      {/* Map x-ray. Picking a level closes Debug so the real map is visible;
-          the orange chip on the map cycles from there. */}
-      <View style={styles.xrayRow}>
-        <Text style={styles.xrayLabel}>Map x-ray</Text>
-        {Array.from({ length: XRAY_MAX + 1 }, (_, level) => (
-          <Pressable
-            key={level}
-            style={[styles.xrayBtn, xrayLevel === level && styles.xrayBtnActive]}
-            onPress={() => {
-              useMapXray.getState().setLevel(level);
-              if (level > 0) onClose?.();
-            }}
-          >
-            <Text style={[styles.xrayBtnText, xrayLevel === level && styles.xrayBtnTextActive]}>
-              {level === 0 ? "off" : level}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {menuOpen ? (
+        <>
+          <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)} />
+          <View style={styles.menu}>
+            <MenuItem
+              icon="sliders"
+              label="Map settings"
+              hint="Overlays and map layer"
+              onPress={() => {
+                setMenuOpen(false);
+                setTool("settings");
+              }}
+            />
+            <MenuItem
+              icon="share"
+              label="Share log"
+              hint={`${entries.length} entries`}
+              onPress={() => {
+                setMenuOpen(false);
+                void copyAll();
+              }}
+            />
+            <MenuItem
+              icon="trash-2"
+              label="Clear log"
+              hint="Wipes what is listed below"
+              destructive
+              onPress={() => {
+                setMenuOpen(false);
+                clear();
+              }}
+            />
+          </View>
+        </>
+      ) : null}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterBar} contentContainerStyle={styles.filterBarContent}>
         {CATEGORIES.map((cat) => {
@@ -157,13 +170,64 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
   );
 }
 
+function MenuItem({
+  icon,
+  label,
+  hint,
+  destructive = false,
+  onPress,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  hint: string;
+  destructive?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.menuItem} onPress={onPress}>
+      <Feather name={icon} size={17} color={destructive ? "#f87171" : "#34d399"} />
+      <View style={styles.menuItemText}>
+        <Text style={[styles.menuItemLabel, destructive && styles.menuItemLabelDestructive]}>{label}</Text>
+        <Text style={styles.menuItemHint}>{hint}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  xrayRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingBottom: 8 },
-  xrayLabel: { color: "#7c8a9c", fontSize: 12, fontWeight: "700", marginRight: 2 },
-  xrayBtn: { backgroundColor: "#0b1729", borderRadius: 8, paddingHorizontal: 11, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(148,163,184,0.12)" },
-  xrayBtnActive: { backgroundColor: "#f59e0b", borderColor: "#f59e0b" },
-  xrayBtnText: { color: "#9fb3cc", fontSize: 12, fontWeight: "800" },
-  xrayBtnTextActive: { color: "#1c1207" },
+  menuBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  dirtyPill: { backgroundColor: "#f59e0b", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  dirtyPillText: { color: "#1c1207", fontSize: 11, fontWeight: "900" },
+  menuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
+  menu: {
+    position: "absolute",
+    top: 58,
+    right: 14,
+    zIndex: 21,
+    minWidth: 232,
+    backgroundColor: "#0b1729",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+    paddingVertical: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  menuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  menuItemText: { flex: 1 },
+  menuItemLabel: { color: "#dbe6f3", fontSize: 14, fontWeight: "800" },
+  menuItemLabelDestructive: { color: "#f87171" },
+  menuItemHint: { color: "#5f7da0", fontSize: 11, marginTop: 1 },
   container: { flex: 1, backgroundColor: "#020b18" },
   header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   backBtn: {

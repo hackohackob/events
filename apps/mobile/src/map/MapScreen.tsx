@@ -52,7 +52,7 @@ import { LocationScreen } from "../debug/LocationScreen";
 import { DebugScreen } from "../debug/DebugScreen";
 import { useLocationStatus } from "../debug/location-status";
 import { debugLog } from "../debug/debug-log";
-import { XRAY_Z, useMapXray } from "../debug/map-xray";
+import { mapDebugDirtyCount, useMapDebug } from "../debug/map-debug";
 import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
@@ -1475,8 +1475,13 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const markers = useMapStore((state) => state.markers);
   const tracks = useMapStore((state) => state.tracks);
   const centerOnUserRequestId = useMapStore((state) => state.centerOnUserRequestId);
-  // Debug bisect only. 0 (the default) changes nothing at all.
-  const xrayLevel = useMapXray((state) => state.level);
+  // Field bisect for "the map won't pan" (Debug ▸ Map settings). With nothing
+  // switched off and the layer at Default, every branch below behaves exactly
+  // as it did before this existed.
+  const mapDebugHidden = useMapDebug((state) => state.hidden);
+  const mapDebugZIndex = useMapDebug((state) => state.mapZIndex);
+  const showEl = useCallback((id: string) => mapDebugHidden[id] !== true, [mapDebugHidden]);
+  const mapDebugDirty = mapDebugDirtyCount(mapDebugHidden, mapDebugZIndex);
   const resetNorthRequestId = useMapStore((state) => state.resetNorthRequestId);
   const setMarkers = useMapStore((state) => state.setMarkers);
   const setTracks = useMapStore((state) => state.setTracks);
@@ -3239,8 +3244,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       <MapLibreMap
         ref={mapRef}
         // Off by default, and deliberately the SAME object as before when off —
-        // see debug/map-xray for what the levels mean.
-        style={xrayLevel > 0 ? [styles.map, { zIndex: XRAY_Z[xrayLevel] }] : styles.map}
+        // see debug/map-debug for what the presets mean.
+        style={mapDebugZIndex > 0 ? [styles.map, { zIndex: mapDebugZIndex }] : styles.map}
         mapStyle={{
           version: 8,
           sources: {},
@@ -4108,7 +4113,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       </MapLibreMap>
 
       {/* Move-POI helper: shown while the next tap will reposition the point. */}
-      {movingPoi ? (
+      {showEl("moveHelpers") && movingPoi ? (
         <View style={styles.poiMoveBanner}>
           <Text style={styles.poiMoveBannerText} numberOfLines={1}>
             📍 Tap the map to move “{movingPoi.label}”
@@ -4120,7 +4125,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ) : null}
 
       {/* Move-incident helper: the next tap relocates the incident pin. */}
-      {movingIncident ? (
+      {showEl("moveHelpers") && movingIncident ? (
         <View style={styles.poiMoveBanner}>
           <Text style={styles.poiMoveBannerText} numberOfLines={1}>
             🚨 Tap the map to move “{movingIncident.label}”
@@ -4158,7 +4163,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </View>
       </View> */}
 
-      {overlayOpen ? (
+      {showEl("menuBackdrop") && overlayOpen ? (
         <Pressable
           style={styles.menuBackdrop}
           onPress={() => {
@@ -4169,7 +4174,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ) : null}
 
       {/* Offline incident badge — tap to inspect pending reports */}
-      {(offlineQueueCount > 0 || justFlushed) ? (
+      {showEl("offlineBadge") && (offlineQueueCount > 0 || justFlushed) ? (
         <Pressable
           style={styles.offlineBadgeHit}
           onPress={() => setPendingSheetOpen(true)}
@@ -4199,7 +4204,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           composer the whole drawer lifts further — its top edge then slid
           underneath this header and the status bar. Nothing here is reachable
           with a drawer over it anyway, so it gets out of the way. */}
-      {!selectedIncident ? (
+      {showEl("topHeader") && !selectedIncident ? (
       <View style={styles.topHeader} pointerEvents="box-none">
         <Pressable
           style={styles.menuButton}
@@ -4308,19 +4313,19 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Map scale bar (мащаб) — bottom-left, outside the top header so its
           absolute `bottom` offset is relative to the screen, not the header.
           Rides above whichever bottom drawer is currently open. */}
-      {scaleBarVisible ? (
+      {showEl("scaleBar") && scaleBarVisible ? (
         <View style={[styles.scaleBar, { bottom: scaleBarBottom }]} pointerEvents="none">
           <ScaleBar zoom={mapZoom} latitude={mapCenterLat} />
         </View>
       ) : null}
 
       {/* Location history transport, docked over the bottom of the map. */}
-      <TrailPanel bottomInset={BOTTOM_BAR_HEIGHT + 6} />
+      {showEl("trailPanel") ? <TrailPanel bottomInset={BOTTOM_BAR_HEIGHT + 6} /> : null}
 
       {/* Freehand zone drawing (touch catcher + naming card). */}
-      {isTeamRole && zoneDrawPhase !== "idle" ? <ZoneDrawOverlay mapRef={mapRef} /> : null}
+      {showEl("zoneDraw") && isTeamRole && zoneDrawPhase !== "idle" ? <ZoneDrawOverlay mapRef={mapRef} /> : null}
 
-      {menuOpen ? (
+      {showEl("menuPopup") && menuOpen ? (
         <ScrollView
           style={styles.menuPopup}
           contentContainerStyle={styles.menuPopupContent}
@@ -4448,7 +4453,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </ScrollView>
       ) : null}
 
-      {layersOpen ? (
+      {showEl("layersPopup") && layersOpen ? (
         <ScrollView style={styles.layersPopup} contentContainerStyle={styles.layersPopupContent}>
           {/* Tab bar: overlays / tracks / zones — keeps each list short. */}
           <View style={styles.layersTabRow}>
@@ -4673,626 +4678,630 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </ScrollView>
       ) : null}
 
-      <BottomSheet
-        ref={trackSheetRef}
-        index={-1}
-        snapPoints={TRACK_SHEET_SNAP_POINTS}
-        enableDynamicSizing={false}
-        enablePanDownToClose={false}
-        // Only the top handle drags the sheet — so scrubbing the elevation graph
-        // doesn't steal the gesture and move the drawer.
-        enableContentPanningGesture={false}
-        onChange={setTrackSheetIndex}
-        backgroundStyle={styles.markerSheetBg}
-        handleStyle={styles.sheetHandleContainer}
-        handleIndicatorStyle={styles.sheetHandle}
-      >
-        <BottomSheetView style={styles.markerSheetContent}>
-        <View style={styles.tracksDrawer}>
-          <View style={styles.tracksDrawerHeaderRow}>
-            <Text style={styles.tracksDrawerKicker}>TRACK STUDIO</Text>
-            <Text style={styles.tracksDrawerMeta}>
-              {trackSheetIndex >= 1
-                ? (focusedTrackProfile ? `${(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km` : "No track")
-                : "▲ pull up for details"}
-            </Text>
-          </View>
-
-          <Pressable style={styles.trackSelectButton} onPress={() => setTrackPickerOpen((open) => !open)}>
-            <Text style={styles.trackSelectLabel}>Selected track</Text>
-            <View style={styles.trackSelectValueWrap}>
-              <Text style={styles.trackSelectValue}>{focusedTrack?.label ?? "Choose track"}</Text>
-              <Text style={styles.trackSelectCaret}>{trackPickerOpen ? "^" : "v"}</Text>
+      {showEl("trackSheet") ? (
+        <BottomSheet
+          ref={trackSheetRef}
+          index={-1}
+          snapPoints={TRACK_SHEET_SNAP_POINTS}
+          enableDynamicSizing={false}
+          enablePanDownToClose={false}
+          // Only the top handle drags the sheet — so scrubbing the elevation graph
+          // doesn't steal the gesture and move the drawer.
+          enableContentPanningGesture={false}
+          onChange={setTrackSheetIndex}
+          backgroundStyle={styles.markerSheetBg}
+          handleStyle={styles.sheetHandleContainer}
+          handleIndicatorStyle={styles.sheetHandle}
+        >
+          <BottomSheetView style={styles.markerSheetContent}>
+          <View style={styles.tracksDrawer}>
+            <View style={styles.tracksDrawerHeaderRow}>
+              <Text style={styles.tracksDrawerKicker}>TRACK STUDIO</Text>
+              <Text style={styles.tracksDrawerMeta}>
+                {trackSheetIndex >= 1
+                  ? (focusedTrackProfile ? `${(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km` : "No track")
+                  : "▲ pull up for details"}
+              </Text>
             </View>
-          </Pressable>
 
-          {trackPickerOpen ? (
-            <ScrollView
-              style={styles.trackPickerScroll}
-              contentContainerStyle={styles.trackPickerContent}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-            >
-              {tracks.map((track) => {
-                const isActive = focusedTrack?.id === track.id;
-                return (
-                  <Pressable
-                    key={track.id}
-                    style={[styles.trackPickerChip, isActive ? styles.trackPickerChipActive : null]}
-                    onPress={() => {
-                      setFocusedTrackId(track.id);
-                      setTrackProfileProgress(0);
-                      setTrackScrubbed(false);
-                      setTrackPickerOpen(false);
-                    }}
-                  >
-                    <Text style={[styles.trackPickerChipText, isActive ? styles.trackPickerChipTextActive : null]}>
-                      {track.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-
-          {focusedTrackProfile && focusedTrackSample ? (
-            <View style={styles.profileCard}>
-              <View style={styles.profileReadoutRow}>
-                {/* Where I am along the track (matches the blue position dot). */}
-                <View>
-                  <Text style={styles.profileMetricLabel}>My distance</Text>
-                  <Text style={[styles.profileMetricValue, styles.profileMetricValueMine]}>
-                    {myTrackPosition ? `${(myTrackPosition.distanceMeters / 1000).toFixed(2)} km` : "—"}
-                  </Text>
-                </View>
-                {/* Scrub cursor distance (matches the yellow dot) — only once scrubbed. */}
-                {trackScrubbed ? (
-                  <>
-                    <View style={styles.profileMetricSpacer} />
-                    <View>
-                      <Text style={styles.profileMetricLabel}>Scrub point</Text>
-                      <Text style={[styles.profileMetricValue, styles.profileMetricValueScrub]}>
-                        {(focusedTrackSample.distanceMeters / 1000).toFixed(2)} km
-                      </Text>
-                    </View>
-                  </>
-                ) : null}
-                <View style={styles.profileMetricSpacer} />
-                <View>
-                  <Text style={styles.profileMetricLabel}>Elevation</Text>
-                  <Text style={styles.profileMetricValue}>
-                    {Math.round(
-                      trackScrubbed
-                        ? focusedTrackSample.elevationMeters
-                        : (myTrackPosition?.elevationMeters ?? focusedTrackSample.elevationMeters),
-                    )}{" "}
-                    m
-                  </Text>
-                </View>
+            <Pressable style={styles.trackSelectButton} onPress={() => setTrackPickerOpen((open) => !open)}>
+              <Text style={styles.trackSelectLabel}>Selected track</Text>
+              <View style={styles.trackSelectValueWrap}>
+                <Text style={styles.trackSelectValue}>{focusedTrack?.label ?? "Choose track"}</Text>
+                <Text style={styles.trackSelectCaret}>{trackPickerOpen ? "^" : "v"}</Text>
               </View>
-              <View ref={trackProfileChartRef} style={styles.profileGradientChart}>
-                <View style={styles.profileGradientChartZeroLine} />
-                {elevationChartSegments}
-                <View style={[styles.profileGradientChartCursorLine, { left: `${trackProfileProgress * 100}%` }]} />
-                <View
-                  style={[
-                    styles.profileGradientChartCursorDot,
-                    {
-                      left: `${trackProfileProgress * 100}%`,
-                      top: `${focusedTrackElevationCursorTopPercent}%`,
-                    },
-                  ]}
-                />
-                {/* POIs and incidents on this track, sitting on the line where
-                    they fall. The one nearest the cursor is enlarged and named
-                    below; the rest stay as quiet dots. */}
-                {focusedTrackMarks.map((mark) => {
-                  const active = activeTrackMark?.mark.id === mark.id;
+            </Pressable>
+
+            {trackPickerOpen ? (
+              <ScrollView
+                style={styles.trackPickerScroll}
+                contentContainerStyle={styles.trackPickerContent}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+              >
+                {tracks.map((track) => {
+                  const isActive = focusedTrack?.id === track.id;
                   return (
-                    <View
-                      key={mark.id}
-                      pointerEvents="none"
-                      style={[
-                        styles.profileMarkDot,
-                        active ? styles.profileMarkDotActive : null,
-                        {
-                          left: `${mark.progress * 100}%`,
-                          top: `${mark.topPercent}%`,
-                          backgroundColor: mark.color,
-                        },
-                      ]}
-                    />
+                    <Pressable
+                      key={track.id}
+                      style={[styles.trackPickerChip, isActive ? styles.trackPickerChipActive : null]}
+                      onPress={() => {
+                        setFocusedTrackId(track.id);
+                        setTrackProfileProgress(0);
+                        setTrackScrubbed(false);
+                        setTrackPickerOpen(false);
+                      }}
+                    >
+                      <Text style={[styles.trackPickerChipText, isActive ? styles.trackPickerChipTextActive : null]}>
+                        {track.label}
+                      </Text>
+                    </Pressable>
                   );
                 })}
+              </ScrollView>
+            ) : null}
 
-                {/* The user's own position projected onto the track */}
-                {myTrackPosition ? (
-                  <>
-                    <View style={[styles.profileMyLocationLine, { left: `${myTrackPosition.progress * 100}%` }]} />
-                    <View
-                      style={[
-                        styles.profileMyLocationDot,
-                        { left: `${myTrackPosition.progress * 100}%`, top: `${myTrackCursorTopPercent}%` },
-                      ]}
-                    />
-                  </>
-                ) : null}
-                {/* Name whatever the cursor is on top of. Pinned to the top of
-                    the chart so it never sits over the mark it is naming, and
-                    clamped in pixels because the chart clips its overflow. */}
-                {activeTrackMark && trackProfileWidth > 0 ? (
-                  <View
-                    pointerEvents="none"
-                    style={[
-                      styles.profileMarkCallout,
-                      {
-                        borderColor: `${activeTrackMark.mark.color}99`,
-                        left: Math.max(
-                          4,
-                          Math.min(
-                            trackProfileWidth - TRACK_MARK_CALLOUT_W - 4,
-                            activeTrackMark.mark.progress * trackProfileWidth - TRACK_MARK_CALLOUT_W / 2,
-                          ),
-                        ),
-                      },
-                    ]}
-                  >
-                    {activeTrackMark.mark.kind === "incident" ? (
-                      <Feather name="alert-triangle" size={11} color={activeTrackMark.mark.color} />
-                    ) : (
-                      <PoiIcon
-                        type={activeTrackMark.mark.poiType}
-                        icon={activeTrackMark.mark.poiIcon}
-                        size={12}
-                        color={activeTrackMark.mark.color}
-                      />
-                    )}
-                    <Text style={styles.profileMarkCalloutText} numberOfLines={1}>
-                      {activeTrackMark.mark.label}
-                    </Text>
-                    <Text style={[styles.profileMarkCalloutMeta, { color: activeTrackMark.mark.color }]}>
-                      {(activeTrackMark.mark.distanceMeters / 1000).toFixed(1)} km
+            {focusedTrackProfile && focusedTrackSample ? (
+              <View style={styles.profileCard}>
+                <View style={styles.profileReadoutRow}>
+                  {/* Where I am along the track (matches the blue position dot). */}
+                  <View>
+                    <Text style={styles.profileMetricLabel}>My distance</Text>
+                    <Text style={[styles.profileMetricValue, styles.profileMetricValueMine]}>
+                      {myTrackPosition ? `${(myTrackPosition.distanceMeters / 1000).toFixed(2)} km` : "—"}
                     </Text>
                   </View>
-                ) : null}
-
-                {/* Transparent scrub surface on top so it always wins the
-                    responder and reports locationX relative to the chart. */}
-                <View
-                  style={styles.profileGradientScrubSurface}
-                  onLayout={(event) => {
-                    setTrackProfileWidth(event.nativeEvent.layout.width);
-                    measureTrackProfileChart();
-                  }}
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onResponderGrant={(event) => {
-                    setTrackScrubbed(true);
-                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
-                  }}
-                  onResponderMove={(event) => {
-                    updateTrackProfileProgressFromPageX(event.nativeEvent.pageX);
-                  }}
-                />
-              </View>
-
-              {trackSheetIndex >= 1 ? (
-                <View style={styles.trackExpandedSection}>
-                  <Text style={styles.trackExpandedKicker}>YOUR PROGRESS</Text>
-                  {myTrackPosition ? (
+                  {/* Scrub cursor distance (matches the yellow dot) — only once scrubbed. */}
+                  {trackScrubbed ? (
                     <>
-                      <View style={styles.trackMetricsGrid}>
-                        <View style={styles.trackMetricCard}>
-                          <Text style={styles.trackMetricLabel}>Distance left</Text>
-                          <Text style={styles.trackMetricValue}>{(myTrackPosition.distanceLeftMeters / 1000).toFixed(2)} km</Text>
-                        </View>
-                        <View style={styles.trackMetricCard}>
-                          <Text style={styles.trackMetricLabel}>Climb left</Text>
-                          <Text style={[styles.trackMetricValue, { color: "#f97316" }]}>↑ {Math.round(myTrackPosition.ascentLeftMeters)} m</Text>
-                        </View>
-                        <View style={styles.trackMetricCard}>
-                          <Text style={styles.trackMetricLabel}>Descent left</Text>
-                          <Text style={[styles.trackMetricValue, { color: "#38bdf8" }]}>↓ {Math.round(myTrackPosition.descentLeftMeters)} m</Text>
-                        </View>
-                        <View style={styles.trackMetricCard}>
-                          <Text style={styles.trackMetricLabel}>Completed</Text>
-                          <Text style={styles.trackMetricValue}>{Math.round(myTrackPosition.progress * 100)}%</Text>
-                        </View>
-                        <View style={styles.trackMetricCard}>
-                          <Text style={styles.trackMetricLabel}>Off track</Text>
-                          <Text style={[styles.trackMetricValue, myTrackPosition.offTrackMeters > 80 ? { color: "#ef4444" } : null]}>
-                            {Math.round(myTrackPosition.offTrackMeters)} m
-                          </Text>
-                        </View>
-                        <View style={styles.trackMetricCard}>
-                          <Text style={styles.trackMetricLabel}>Total climb</Text>
-                          <Text style={styles.trackMetricValue}>↑ {focusedTrack?.elevationProfile?.totalAscentMeters ?? 0} m</Text>
-                        </View>
+                      <View style={styles.profileMetricSpacer} />
+                      <View>
+                        <Text style={styles.profileMetricLabel}>Scrub point</Text>
+                        <Text style={[styles.profileMetricValue, styles.profileMetricValueScrub]}>
+                          {(focusedTrackSample.distanceMeters / 1000).toFixed(2)} km
+                        </Text>
                       </View>
                     </>
-                  ) : (
-                    <Text style={styles.profileEmptyText}>Waiting for your location to place you on the track…</Text>
-                  )}
+                  ) : null}
+                  <View style={styles.profileMetricSpacer} />
+                  <View>
+                    <Text style={styles.profileMetricLabel}>Elevation</Text>
+                    <Text style={styles.profileMetricValue}>
+                      {Math.round(
+                        trackScrubbed
+                          ? focusedTrackSample.elevationMeters
+                          : (myTrackPosition?.elevationMeters ?? focusedTrackSample.elevationMeters),
+                      )}{" "}
+                      m
+                    </Text>
+                  </View>
                 </View>
-              ) : null}
-            </View>
-          ) : (
-            <View style={styles.profileEmpty}>
-              <Text style={styles.profileEmptyText}>Pick a track to inspect profile and location cursor.</Text>
-            </View>
-          )}
-
-          {/* Follow track — voice-guided track navigation along the raw GPX
-              (works even where the routing graph has no matching ways). Shown
-              only in the expanded drawer, below everything else. */}
-          {trackSheetIndex >= 1 && focusedTrack && focusedTrack.points.length >= 2 ? (
-            <Pressable
-              style={({ pressed }) => [styles.followTrackButton, pressed && styles.followTrackButtonPressed]}
-              onPress={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                trackSheetRef.current?.close();
-                setActiveTab("map");
-                useTrackNavStore.getState().start({
-                  id: focusedTrack.id,
-                  label: focusedTrack.label,
-                  color: focusedTrack.color ?? trackColor(focusedTrack.id),
-                  points: focusedTrack.points,
-                });
-              }}
-            >
-              <Feather name="navigation" size={17} color="#04140E" />
-              <Text style={styles.followTrackButtonText}>Follow track</Text>
-              {focusedTrackProfile ? (
-                <Text style={styles.followTrackButtonMeta}>
-                  {(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km · voice guidance
-                </Text>
-              ) : null}
-            </Pressable>
-          ) : null}
-        </View>
-        </BottomSheetView>
-      </BottomSheet>
-
-      <BottomSheet
-        ref={markerSheetRef}
-        index={-1}
-        snapPoints={markerSheetSnapPoints}
-        enableDynamicSizing={false}
-        enablePanDownToClose
-        // Only the top handle drags the sheet. Otherwise press-and-hold on the
-        // incident voice (push-to-talk) mic button feeds into the content pan
-        // gesture and collapses the expanded sheet. The handle still drags.
-        enableContentPanningGesture={false}
-        onClose={closeSelection}
-        onChange={(i) => setMarkerSheetIndex(i)}
-        animatedPosition={markerSheetPosition}
-        // The exit-point card butts against this edge, so drop the rounded
-        // corners while it is there — otherwise the two surfaces don't meet.
-        backgroundStyle={[styles.markerSheetBg, selectedExitPoint ? styles.markerSheetBgFlush : null]}
-        handleStyle={styles.sheetHandleContainer}
-        handleIndicatorStyle={styles.sheetHandle}
-      >
-        {/* Plain View (not BottomSheetView) so the inner BottomSheetScrollView
-            keeps a bounded flex height and actually scrolls long content. */}
-        <View style={styles.markerSheetContent}>
-        {selectedMarker && selectedIncident ? (
-          <IncidentSheet
-            incident={selectedIncident}
-            distanceKm={incidentDistance}
-            markerById={markerById}
-            onClose={closeSelection}
-            onOpenPhoto={(url) => setPhotoViewerUrl(url)}
-            onMoveLocation={() => {
-              setMovingIncident({
-                id: selectedIncident.id,
-                label: selectedIncident.name ?? selectedIncident.label,
-              });
-              closeSelection();
-            }}
-            onAsphaltPins={(pins) => {
-              setAsphaltPins(pins);
-              if (!pins || pins.length === 0) return;
-              // Keep the sheet at the collapsed snap and fit every exit pin +
-              // the incident into the visible upper half of the map.
-              markerSheetRef.current?.snapToIndex(0);
-              let minLat = selectedIncident.lat;
-              let maxLat = selectedIncident.lat;
-              let minLng = selectedIncident.lng;
-              let maxLng = selectedIncident.lng;
-              for (const pin of pins) {
-                minLat = Math.min(minLat, pin.lat);
-                maxLat = Math.max(maxLat, pin.lat);
-                minLng = Math.min(minLng, pin.lng);
-                maxLng = Math.max(maxLng, pin.lng);
-              }
-              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
-                padding: { top: 90, right: 44, bottom: Math.round(SCREEN_HEIGHT * 0.46), left: 44 },
-                duration: 620,
-              });
-            }}
-            onClosestMedics={(medics) => {
-              setClosestMedicRoutes(medics);
-              if (!medics) {
-                setSelectedClosestMedicId(null);
-                return;
-              }
-              // Hold the collapsed snap the moment the view opens; the routes
-              // themselves may still be loading.
-              markerSheetRef.current?.snapToIndex(0);
-              if (medics.length === 0) return;
-              // Frame the incident plus every candidate medic in the visible
-              // upper half of the map.
-              let minLat = selectedIncident.lat;
-              let maxLat = selectedIncident.lat;
-              let minLng = selectedIncident.lng;
-              let maxLng = selectedIncident.lng;
-              for (const medic of medics) {
-                if (!Number.isFinite(medic.lat) || !Number.isFinite(medic.lng)) continue;
-                minLat = Math.min(minLat, medic.lat);
-                maxLat = Math.max(maxLat, medic.lat);
-                minLng = Math.min(minLng, medic.lng);
-                maxLng = Math.max(maxLng, medic.lng);
-              }
-              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
-                padding: { top: 90, right: 48, bottom: Math.round(SCREEN_HEIGHT * 0.54), left: 48 },
-                duration: 640,
-              });
-            }}
-            onSelectClosestMedic={(medic) => {
-              setSelectedClosestMedicId(medic?.medicId ?? null);
-              if (!medic) return;
-              // Frame just this medic's leg so its route reads clearly.
-              const minLat = Math.min(medic.lat, selectedIncident.lat);
-              const maxLat = Math.max(medic.lat, selectedIncident.lat);
-              const minLng = Math.min(medic.lng, selectedIncident.lng);
-              const maxLng = Math.max(medic.lng, selectedIncident.lng);
-              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
-                padding: { top: 100, right: 56, bottom: Math.round(SCREEN_HEIGHT * 0.58), left: 56 },
-                duration: 560,
-              });
-            }}
-            onSelectAsphaltPoint={(point) => {
-              setSelectedExitPoint(point);
-              if (!point) return;
-              // Frame the whole leg (incident → point) in the visible upper half.
-              const minLat = Math.min(point.lat, selectedIncident.lat);
-              const maxLat = Math.max(point.lat, selectedIncident.lat);
-              const minLng = Math.min(point.lng, selectedIncident.lng);
-              const maxLng = Math.max(point.lng, selectedIncident.lng);
-              cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
-                padding: { top: 100, right: 56, bottom: Math.round(SCREEN_HEIGHT * 0.56), left: 56 },
-                duration: 560,
-              });
-            }}
-          />
-        ) : selectedMarker?.type === "paramedic" ? (
-          <MedicSheet
-            marker={selectedMarker}
-            rosterEntry={rosterMedics.find((m) => m.id === selectedMarker.id)}
-            badge={medicInitials[selectedMarker.id]}
-            onClose={closeSelection}
-            onClearDestination={() => {
-              const medicId = selectedMarker.id;
-              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-              // Optimistic: drop the destination/route locally; the server
-              // broadcast confirms it for everyone else.
-              const existing = useMapStore.getState().markers;
-              setMarkers(
-                existing.map((m) =>
-                  m.id === medicId ? { ...m, destination: null, route: null, status: "available" } : m,
-                ),
-              );
-              void assignDestination(null, medicId).catch((err) =>
-                debugLog("api", "error", "clear destination failed", String(err)),
-              );
-            }}
-          />
-        ) : selectedMarker ? (
-          <>
-            <View style={styles.sheetHeader}>
-              <View
-                style={[
-                  styles.incidentIconWrap,
-                  selectedMarker.type === "runner"
-                    ? styles.sheetParticipantIconBg
-                    : selectedMarker.type === "infrastructure"
-                      ? { backgroundColor: `${poiConfig(selectedMarker.poiType).color}26` }
-                      : null,
-                ]}
-              >
-                {selectedMarker.type === "infrastructure" ? (
-                  <PoiIcon
-                    type={selectedMarker.poiType}
-                    icon={selectedMarker.poiIcon}
-                    size={20}
-                    color={poiConfig(selectedMarker.poiType).color}
-                  />
-                ) : (
-                  <Text
+                <View ref={trackProfileChartRef} style={styles.profileGradientChart}>
+                  <View style={styles.profileGradientChartZeroLine} />
+                  {elevationChartSegments}
+                  <View style={[styles.profileGradientChartCursorLine, { left: `${trackProfileProgress * 100}%` }]} />
+                  <View
                     style={[
-                      styles.incidentIconText,
-                      selectedMarker.type === "incident" ? null : styles.sheetCompactIconText,
+                      styles.profileGradientChartCursorDot,
+                      {
+                        left: `${trackProfileProgress * 100}%`,
+                        top: `${focusedTrackElevationCursorTopPercent}%`,
+                      },
                     ]}
-                  >
-                    {selectedMarker.type === "incident"
-                      ? "!"
-                      : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.sheetHeaderTextWrap}>
-                <Text style={styles.sheetTitle}>
-                  {selectedMarker.type === "incident" ? incidentTitle(selectedMarker) : selectedMarker.name ?? selectedMarker.label}
-                </Text>
-                <Text style={styles.sheetMetaText}>
-                  {selectedMarker.type === "incident"
-                    ? `${incidentTypeLabel(selectedIncident?.incidentType)} · ${incidentStatusLabel(selectedIncident?.status)}`
-                    : selectedMarker.type === "infrastructure"
-                      ? poiTypeLabel(selectedMarker.poiType)
-                      : "Participant"}
-                </Text>
-                <Text style={styles.sheetMetaText}>
-                  {selectedMarker.type === "incident"
-                    ? incidentDistance != null
-                      ? `${incidentDistance.toFixed(1)} km from your location`
-                      : "Locating you…"
-                    : selectedMarker.type === "infrastructure"
-                      ? `${selectedMarker.lat.toFixed(5)}, ${selectedMarker.lng.toFixed(5)}`
-                      : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
-                </Text>
-              </View>
+                  />
+                  {/* POIs and incidents on this track, sitting on the line where
+                      they fall. The one nearest the cursor is enlarged and named
+                      below; the rest stay as quiet dots. */}
+                  {focusedTrackMarks.map((mark) => {
+                    const active = activeTrackMark?.mark.id === mark.id;
+                    return (
+                      <View
+                        key={mark.id}
+                        pointerEvents="none"
+                        style={[
+                          styles.profileMarkDot,
+                          active ? styles.profileMarkDotActive : null,
+                          {
+                            left: `${mark.progress * 100}%`,
+                            top: `${mark.topPercent}%`,
+                            backgroundColor: mark.color,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
 
-              <Pressable style={styles.sheetCloseButton} onPress={closeSelection}>
-                <Text style={styles.sheetCloseButtonText}>X</Text>
-              </Pressable>
-            </View>
-
-            <BottomSheetScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
-              {selectedMarker.type === "infrastructure" ? (
-                <>
-                  {selectedMarker.poiArchived ? (
-                    <View style={styles.sheetInfoRow}>
-                      <Text style={styles.sheetInfoLabel}>Status</Text>
-                      <Text style={[styles.sheetInfoValue, { color: "#94a3b8" }]}>
-                        Archived — not visible to the team
+                  {/* The user's own position projected onto the track */}
+                  {myTrackPosition ? (
+                    <>
+                      <View style={[styles.profileMyLocationLine, { left: `${myTrackPosition.progress * 100}%` }]} />
+                      <View
+                        style={[
+                          styles.profileMyLocationDot,
+                          { left: `${myTrackPosition.progress * 100}%`, top: `${myTrackCursorTopPercent}%` },
+                        ]}
+                      />
+                    </>
+                  ) : null}
+                  {/* Name whatever the cursor is on top of. Pinned to the top of
+                      the chart so it never sits over the mark it is naming, and
+                      clamped in pixels because the chart clips its overflow. */}
+                  {activeTrackMark && trackProfileWidth > 0 ? (
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.profileMarkCallout,
+                        {
+                          borderColor: `${activeTrackMark.mark.color}99`,
+                          left: Math.max(
+                            4,
+                            Math.min(
+                              trackProfileWidth - TRACK_MARK_CALLOUT_W - 4,
+                              activeTrackMark.mark.progress * trackProfileWidth - TRACK_MARK_CALLOUT_W / 2,
+                            ),
+                          ),
+                        },
+                      ]}
+                    >
+                      {activeTrackMark.mark.kind === "incident" ? (
+                        <Feather name="alert-triangle" size={11} color={activeTrackMark.mark.color} />
+                      ) : (
+                        <PoiIcon
+                          type={activeTrackMark.mark.poiType}
+                          icon={activeTrackMark.mark.poiIcon}
+                          size={12}
+                          color={activeTrackMark.mark.color}
+                        />
+                      )}
+                      <Text style={styles.profileMarkCalloutText} numberOfLines={1}>
+                        {activeTrackMark.mark.label}
+                      </Text>
+                      <Text style={[styles.profileMarkCalloutMeta, { color: activeTrackMark.mark.color }]}>
+                        {(activeTrackMark.mark.distanceMeters / 1000).toFixed(1)} km
                       </Text>
                     </View>
                   ) : null}
-                  {selectedMarker.poiDescription ? (
-                    <View style={styles.sheetInfoRow}>
-                      <Text style={styles.sheetInfoLabel}>Description</Text>
-                      <Text style={styles.sheetInfoValue}>{selectedMarker.poiDescription}</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.sheetInfoValue}>Point of interest</Text>
-                  )}
-                  <AssignDestinationBar
-                    destination={{
-                      lat: selectedMarker.lat,
-                      lng: selectedMarker.lng,
-                      label: selectedMarker.name ?? selectedMarker.label,
+
+                  {/* Transparent scrub surface on top so it always wins the
+                      responder and reports locationX relative to the chart. */}
+                  <View
+                    style={styles.profileGradientScrubSurface}
+                    onLayout={(event) => {
+                      setTrackProfileWidth(event.nativeEvent.layout.width);
+                      measureTrackProfileChart();
+                    }}
+                    onStartShouldSetResponder={() => true}
+                    onMoveShouldSetResponder={() => true}
+                    onResponderGrant={(event) => {
+                      setTrackScrubbed(true);
+                      updateTrackProfileProgressFromPageX(event.nativeEvent.pageX, event.nativeEvent.locationX);
+                    }}
+                    onResponderMove={(event) => {
+                      updateTrackProfileProgressFromPageX(event.nativeEvent.pageX);
                     }}
                   />
-                  {/* Editing the point itself is the coordinator's call — every
-                      medic can still move or archive one from the field. */}
-                  {isCoordinator ? (
+                </View>
+
+                {trackSheetIndex >= 1 ? (
+                  <View style={styles.trackExpandedSection}>
+                    <Text style={styles.trackExpandedKicker}>YOUR PROGRESS</Text>
+                    {myTrackPosition ? (
+                      <>
+                        <View style={styles.trackMetricsGrid}>
+                          <View style={styles.trackMetricCard}>
+                            <Text style={styles.trackMetricLabel}>Distance left</Text>
+                            <Text style={styles.trackMetricValue}>{(myTrackPosition.distanceLeftMeters / 1000).toFixed(2)} km</Text>
+                          </View>
+                          <View style={styles.trackMetricCard}>
+                            <Text style={styles.trackMetricLabel}>Climb left</Text>
+                            <Text style={[styles.trackMetricValue, { color: "#f97316" }]}>↑ {Math.round(myTrackPosition.ascentLeftMeters)} m</Text>
+                          </View>
+                          <View style={styles.trackMetricCard}>
+                            <Text style={styles.trackMetricLabel}>Descent left</Text>
+                            <Text style={[styles.trackMetricValue, { color: "#38bdf8" }]}>↓ {Math.round(myTrackPosition.descentLeftMeters)} m</Text>
+                          </View>
+                          <View style={styles.trackMetricCard}>
+                            <Text style={styles.trackMetricLabel}>Completed</Text>
+                            <Text style={styles.trackMetricValue}>{Math.round(myTrackPosition.progress * 100)}%</Text>
+                          </View>
+                          <View style={styles.trackMetricCard}>
+                            <Text style={styles.trackMetricLabel}>Off track</Text>
+                            <Text style={[styles.trackMetricValue, myTrackPosition.offTrackMeters > 80 ? { color: "#ef4444" } : null]}>
+                              {Math.round(myTrackPosition.offTrackMeters)} m
+                            </Text>
+                          </View>
+                          <View style={styles.trackMetricCard}>
+                            <Text style={styles.trackMetricLabel}>Total climb</Text>
+                            <Text style={styles.trackMetricValue}>↑ {focusedTrack?.elevationProfile?.totalAscentMeters ?? 0} m</Text>
+                          </View>
+                        </View>
+                      </>
+                    ) : (
+                      <Text style={styles.profileEmptyText}>Waiting for your location to place you on the track…</Text>
+                    )}
+                  </View>
+                ) : null}
+              </View>
+            ) : (
+              <View style={styles.profileEmpty}>
+                <Text style={styles.profileEmptyText}>Pick a track to inspect profile and location cursor.</Text>
+              </View>
+            )}
+
+            {/* Follow track — voice-guided track navigation along the raw GPX
+                (works even where the routing graph has no matching ways). Shown
+                only in the expanded drawer, below everything else. */}
+            {trackSheetIndex >= 1 && focusedTrack && focusedTrack.points.length >= 2 ? (
+              <Pressable
+                style={({ pressed }) => [styles.followTrackButton, pressed && styles.followTrackButtonPressed]}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  trackSheetRef.current?.close();
+                  setActiveTab("map");
+                  useTrackNavStore.getState().start({
+                    id: focusedTrack.id,
+                    label: focusedTrack.label,
+                    color: focusedTrack.color ?? trackColor(focusedTrack.id),
+                    points: focusedTrack.points,
+                  });
+                }}
+              >
+                <Feather name="navigation" size={17} color="#04140E" />
+                <Text style={styles.followTrackButtonText}>Follow track</Text>
+                {focusedTrackProfile ? (
+                  <Text style={styles.followTrackButtonMeta}>
+                    {(focusedTrackProfile.totalDistanceMeters / 1000).toFixed(1)} km · voice guidance
+                  </Text>
+                ) : null}
+              </Pressable>
+            ) : null}
+          </View>
+          </BottomSheetView>
+        </BottomSheet>
+      ) : null}
+
+      {showEl("markerSheet") ? (
+        <BottomSheet
+          ref={markerSheetRef}
+          index={-1}
+          snapPoints={markerSheetSnapPoints}
+          enableDynamicSizing={false}
+          enablePanDownToClose
+          // Only the top handle drags the sheet. Otherwise press-and-hold on the
+          // incident voice (push-to-talk) mic button feeds into the content pan
+          // gesture and collapses the expanded sheet. The handle still drags.
+          enableContentPanningGesture={false}
+          onClose={closeSelection}
+          onChange={(i) => setMarkerSheetIndex(i)}
+          animatedPosition={markerSheetPosition}
+          // The exit-point card butts against this edge, so drop the rounded
+          // corners while it is there — otherwise the two surfaces don't meet.
+          backgroundStyle={[styles.markerSheetBg, selectedExitPoint ? styles.markerSheetBgFlush : null]}
+          handleStyle={styles.sheetHandleContainer}
+          handleIndicatorStyle={styles.sheetHandle}
+        >
+          {/* Plain View (not BottomSheetView) so the inner BottomSheetScrollView
+              keeps a bounded flex height and actually scrolls long content. */}
+          <View style={styles.markerSheetContent}>
+          {selectedMarker && selectedIncident ? (
+            <IncidentSheet
+              incident={selectedIncident}
+              distanceKm={incidentDistance}
+              markerById={markerById}
+              onClose={closeSelection}
+              onOpenPhoto={(url) => setPhotoViewerUrl(url)}
+              onMoveLocation={() => {
+                setMovingIncident({
+                  id: selectedIncident.id,
+                  label: selectedIncident.name ?? selectedIncident.label,
+                });
+                closeSelection();
+              }}
+              onAsphaltPins={(pins) => {
+                setAsphaltPins(pins);
+                if (!pins || pins.length === 0) return;
+                // Keep the sheet at the collapsed snap and fit every exit pin +
+                // the incident into the visible upper half of the map.
+                markerSheetRef.current?.snapToIndex(0);
+                let minLat = selectedIncident.lat;
+                let maxLat = selectedIncident.lat;
+                let minLng = selectedIncident.lng;
+                let maxLng = selectedIncident.lng;
+                for (const pin of pins) {
+                  minLat = Math.min(minLat, pin.lat);
+                  maxLat = Math.max(maxLat, pin.lat);
+                  minLng = Math.min(minLng, pin.lng);
+                  maxLng = Math.max(maxLng, pin.lng);
+                }
+                cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                  padding: { top: 90, right: 44, bottom: Math.round(SCREEN_HEIGHT * 0.46), left: 44 },
+                  duration: 620,
+                });
+              }}
+              onClosestMedics={(medics) => {
+                setClosestMedicRoutes(medics);
+                if (!medics) {
+                  setSelectedClosestMedicId(null);
+                  return;
+                }
+                // Hold the collapsed snap the moment the view opens; the routes
+                // themselves may still be loading.
+                markerSheetRef.current?.snapToIndex(0);
+                if (medics.length === 0) return;
+                // Frame the incident plus every candidate medic in the visible
+                // upper half of the map.
+                let minLat = selectedIncident.lat;
+                let maxLat = selectedIncident.lat;
+                let minLng = selectedIncident.lng;
+                let maxLng = selectedIncident.lng;
+                for (const medic of medics) {
+                  if (!Number.isFinite(medic.lat) || !Number.isFinite(medic.lng)) continue;
+                  minLat = Math.min(minLat, medic.lat);
+                  maxLat = Math.max(maxLat, medic.lat);
+                  minLng = Math.min(minLng, medic.lng);
+                  maxLng = Math.max(maxLng, medic.lng);
+                }
+                cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                  padding: { top: 90, right: 48, bottom: Math.round(SCREEN_HEIGHT * 0.54), left: 48 },
+                  duration: 640,
+                });
+              }}
+              onSelectClosestMedic={(medic) => {
+                setSelectedClosestMedicId(medic?.medicId ?? null);
+                if (!medic) return;
+                // Frame just this medic's leg so its route reads clearly.
+                const minLat = Math.min(medic.lat, selectedIncident.lat);
+                const maxLat = Math.max(medic.lat, selectedIncident.lat);
+                const minLng = Math.min(medic.lng, selectedIncident.lng);
+                const maxLng = Math.max(medic.lng, selectedIncident.lng);
+                cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                  padding: { top: 100, right: 56, bottom: Math.round(SCREEN_HEIGHT * 0.58), left: 56 },
+                  duration: 560,
+                });
+              }}
+              onSelectAsphaltPoint={(point) => {
+                setSelectedExitPoint(point);
+                if (!point) return;
+                // Frame the whole leg (incident → point) in the visible upper half.
+                const minLat = Math.min(point.lat, selectedIncident.lat);
+                const maxLat = Math.max(point.lat, selectedIncident.lat);
+                const minLng = Math.min(point.lng, selectedIncident.lng);
+                const maxLng = Math.max(point.lng, selectedIncident.lng);
+                cameraRef.current?.fitBounds([minLng, minLat, maxLng, maxLat], {
+                  padding: { top: 100, right: 56, bottom: Math.round(SCREEN_HEIGHT * 0.56), left: 56 },
+                  duration: 560,
+                });
+              }}
+            />
+          ) : selectedMarker?.type === "paramedic" ? (
+            <MedicSheet
+              marker={selectedMarker}
+              rosterEntry={rosterMedics.find((m) => m.id === selectedMarker.id)}
+              badge={medicInitials[selectedMarker.id]}
+              onClose={closeSelection}
+              onClearDestination={() => {
+                const medicId = selectedMarker.id;
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                // Optimistic: drop the destination/route locally; the server
+                // broadcast confirms it for everyone else.
+                const existing = useMapStore.getState().markers;
+                setMarkers(
+                  existing.map((m) =>
+                    m.id === medicId ? { ...m, destination: null, route: null, status: "available" } : m,
+                  ),
+                );
+                void assignDestination(null, medicId).catch((err) =>
+                  debugLog("api", "error", "clear destination failed", String(err)),
+                );
+              }}
+            />
+          ) : selectedMarker ? (
+            <>
+              <View style={styles.sheetHeader}>
+                <View
+                  style={[
+                    styles.incidentIconWrap,
+                    selectedMarker.type === "runner"
+                      ? styles.sheetParticipantIconBg
+                      : selectedMarker.type === "infrastructure"
+                        ? { backgroundColor: `${poiConfig(selectedMarker.poiType).color}26` }
+                        : null,
+                  ]}
+                >
+                  {selectedMarker.type === "infrastructure" ? (
+                    <PoiIcon
+                      type={selectedMarker.poiType}
+                      icon={selectedMarker.poiIcon}
+                      size={20}
+                      color={poiConfig(selectedMarker.poiType).color}
+                    />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.incidentIconText,
+                        selectedMarker.type === "incident" ? null : styles.sheetCompactIconText,
+                      ]}
+                    >
+                      {selectedMarker.type === "incident"
+                        ? "!"
+                        : selectedMarker.bibNumber?.slice(0, 2) ?? "R"}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.sheetHeaderTextWrap}>
+                  <Text style={styles.sheetTitle}>
+                    {selectedMarker.type === "incident" ? incidentTitle(selectedMarker) : selectedMarker.name ?? selectedMarker.label}
+                  </Text>
+                  <Text style={styles.sheetMetaText}>
+                    {selectedMarker.type === "incident"
+                      ? `${incidentTypeLabel(selectedIncident?.incidentType)} · ${incidentStatusLabel(selectedIncident?.status)}`
+                      : selectedMarker.type === "infrastructure"
+                        ? poiTypeLabel(selectedMarker.poiType)
+                        : "Participant"}
+                  </Text>
+                  <Text style={styles.sheetMetaText}>
+                    {selectedMarker.type === "incident"
+                      ? incidentDistance != null
+                        ? `${incidentDistance.toFixed(1)} km from your location`
+                        : "Locating you…"
+                      : selectedMarker.type === "infrastructure"
+                        ? `${selectedMarker.lat.toFixed(5)}, ${selectedMarker.lng.toFixed(5)}`
+                        : `Bib ${selectedMarker.bibNumber ?? "N/A"}`}
+                  </Text>
+                </View>
+
+                <Pressable style={styles.sheetCloseButton} onPress={closeSelection}>
+                  <Text style={styles.sheetCloseButtonText}>X</Text>
+                </Pressable>
+              </View>
+
+              <BottomSheetScrollView style={styles.sheetBody} contentContainerStyle={styles.sheetBodyContent} showsVerticalScrollIndicator={false}>
+                {selectedMarker.type === "infrastructure" ? (
+                  <>
+                    {selectedMarker.poiArchived ? (
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Status</Text>
+                        <Text style={[styles.sheetInfoValue, { color: "#94a3b8" }]}>
+                          Archived — not visible to the team
+                        </Text>
+                      </View>
+                    ) : null}
+                    {selectedMarker.poiDescription ? (
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Description</Text>
+                        <Text style={styles.sheetInfoValue}>{selectedMarker.poiDescription}</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.sheetInfoValue}>Point of interest</Text>
+                    )}
+                    <AssignDestinationBar
+                      destination={{
+                        lat: selectedMarker.lat,
+                        lng: selectedMarker.lng,
+                        label: selectedMarker.name ?? selectedMarker.label,
+                      }}
+                    />
+                    {/* Editing the point itself is the coordinator's call — every
+                        medic can still move or archive one from the field. */}
+                    {isCoordinator ? (
+                      <Pressable
+                        style={styles.poiEditBtn}
+                        onPress={() => {
+                          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          setEditingPoi({
+                            id: selectedMarker.id,
+                            type: selectedMarker.poiType,
+                            name: selectedMarker.name,
+                            description: selectedMarker.poiDescription,
+                            icon: selectedMarker.poiIcon,
+                            lat: selectedMarker.lat,
+                            lng: selectedMarker.lng,
+                          });
+                          closeSelection();
+                        }}
+                      >
+                        <Text style={styles.poiEditBtnText}>✏️  Edit point details</Text>
+                      </Pressable>
+                    ) : null}
                     <Pressable
-                      style={styles.poiEditBtn}
+                      style={styles.poiMoveBtn}
                       onPress={() => {
                         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        setEditingPoi({
+                        setMovingPoi({
                           id: selectedMarker.id,
-                          type: selectedMarker.poiType,
-                          name: selectedMarker.name,
-                          description: selectedMarker.poiDescription,
-                          icon: selectedMarker.poiIcon,
-                          lat: selectedMarker.lat,
-                          lng: selectedMarker.lng,
+                          label: selectedMarker.name ?? selectedMarker.label,
                         });
                         closeSelection();
                       }}
                     >
-                      <Text style={styles.poiEditBtnText}>✏️  Edit point details</Text>
+                      <Text style={styles.poiMoveBtnText}>📍  Move point (tap the new location)</Text>
                     </Pressable>
-                  ) : null}
-                  <Pressable
-                    style={styles.poiMoveBtn}
-                    onPress={() => {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      setMovingPoi({
-                        id: selectedMarker.id,
-                        label: selectedMarker.name ?? selectedMarker.label,
-                      });
-                      closeSelection();
-                    }}
-                  >
-                    <Text style={styles.poiMoveBtnText}>📍  Move point (tap the new location)</Text>
-                  </Pressable>
-                  {selectedMarker.poiArchived ? (
-                    <Pressable
-                      style={styles.poiArchiveBtn}
-                      onPress={() => {
-                        const poiId = selectedMarker.id;
-                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        const existing = useMapStore.getState().markers;
-                        setMarkers(
-                          existing.map((m) => (m.id === poiId ? { ...m, poiArchived: undefined } : m)),
-                        );
-                        closeSelection();
-                        void updatePoi(poiId, { archived: false }).catch((err) =>
-                          debugLog("api", "error", "restore POI failed", String(err)),
-                        );
-                      }}
-                    >
-                      <Text style={styles.poiArchiveBtnText}>♻️  Restore point (show to everyone)</Text>
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      style={styles.poiArchiveBtn}
-                      onPress={() => {
-                        const poiId = selectedMarker.id;
-                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                        const existing = useMapStore.getState().markers;
-                        setMarkers(existing.filter((m) => m.id !== poiId));
-                        closeSelection();
-                        void archivePoi(poiId).catch((err) =>
-                          debugLog("api", "error", "archive POI failed", String(err)),
-                        );
-                      }}
-                    >
-                      <Text style={styles.poiArchiveBtnText}>🗄  Archive point (hide for everyone)</Text>
-                    </Pressable>
-                  )}
-                </>
-              ) : (
-                <>
-                  <View style={styles.sheetInfoRow}>
-                    <Text style={styles.sheetInfoLabel}>Role</Text>
-                    <Text style={styles.sheetInfoValue}>Participant</Text>
-                  </View>
-                  <View style={styles.sheetInfoRow}>
-                    <Text style={styles.sheetInfoLabel}>Identifier</Text>
-                    <Text style={styles.sheetInfoValue}>{selectedMarker.bibNumber ?? selectedMarker.id}</Text>
-                  </View>
-                  {(() => {
-                    const ageMs = selectedMarker.lastSeenAt
-                      ? Date.now() - new Date(selectedMarker.lastSeenAt).getTime()
-                      : undefined;
-                    return (
+                    {selectedMarker.poiArchived ? (
+                      <Pressable
+                        style={styles.poiArchiveBtn}
+                        onPress={() => {
+                          const poiId = selectedMarker.id;
+                          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          const existing = useMapStore.getState().markers;
+                          setMarkers(
+                            existing.map((m) => (m.id === poiId ? { ...m, poiArchived: undefined } : m)),
+                          );
+                          closeSelection();
+                          void updatePoi(poiId, { archived: false }).catch((err) =>
+                            debugLog("api", "error", "restore POI failed", String(err)),
+                          );
+                        }}
+                      >
+                        <Text style={styles.poiArchiveBtnText}>♻️  Restore point (show to everyone)</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        style={styles.poiArchiveBtn}
+                        onPress={() => {
+                          const poiId = selectedMarker.id;
+                          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                          const existing = useMapStore.getState().markers;
+                          setMarkers(existing.filter((m) => m.id !== poiId));
+                          closeSelection();
+                          void archivePoi(poiId).catch((err) =>
+                            debugLog("api", "error", "archive POI failed", String(err)),
+                          );
+                        }}
+                      >
+                        <Text style={styles.poiArchiveBtnText}>🗄  Archive point (hide for everyone)</Text>
+                      </Pressable>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.sheetInfoRow}>
+                      <Text style={styles.sheetInfoLabel}>Role</Text>
+                      <Text style={styles.sheetInfoValue}>Participant</Text>
+                    </View>
+                    <View style={styles.sheetInfoRow}>
+                      <Text style={styles.sheetInfoLabel}>Identifier</Text>
+                      <Text style={styles.sheetInfoValue}>{selectedMarker.bibNumber ?? selectedMarker.id}</Text>
+                    </View>
+                    {(() => {
+                      const ageMs = selectedMarker.lastSeenAt
+                        ? Date.now() - new Date(selectedMarker.lastSeenAt).getTime()
+                        : undefined;
+                      return (
+                        <View style={styles.sheetInfoRow}>
+                          <Text style={styles.sheetInfoLabel}>Last seen</Text>
+                          <Text style={[styles.sheetInfoValue, { color: freshnessColor(ageMs) }]}>
+                            {ageMs === undefined ? "Unknown" : freshnessLabel(ageMs)}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                    {selectedMarker.accuracy != null ? (
                       <View style={styles.sheetInfoRow}>
-                        <Text style={styles.sheetInfoLabel}>Last seen</Text>
-                        <Text style={[styles.sheetInfoValue, { color: freshnessColor(ageMs) }]}>
-                          {ageMs === undefined ? "Unknown" : freshnessLabel(ageMs)}
+                        <Text style={styles.sheetInfoLabel}>Accuracy</Text>
+                        <Text style={styles.sheetInfoValue}>±{Math.round(selectedMarker.accuracy)} m</Text>
+                      </View>
+                    ) : null}
+                    {selectedMarker.battery != null ? (
+                      <View style={styles.sheetInfoRow}>
+                        <Text style={styles.sheetInfoLabel}>Battery</Text>
+                        <Text style={styles.sheetInfoValue}>
+                          {Math.round(selectedMarker.battery * 100)}%{selectedMarker.charging ? " ⚡" : ""}
                         </Text>
                       </View>
-                    );
-                  })()}
-                  {selectedMarker.accuracy != null ? (
-                    <View style={styles.sheetInfoRow}>
-                      <Text style={styles.sheetInfoLabel}>Accuracy</Text>
-                      <Text style={styles.sheetInfoValue}>±{Math.round(selectedMarker.accuracy)} m</Text>
-                    </View>
-                  ) : null}
-                  {selectedMarker.battery != null ? (
-                    <View style={styles.sheetInfoRow}>
-                      <Text style={styles.sheetInfoLabel}>Battery</Text>
-                      <Text style={styles.sheetInfoValue}>
-                        {Math.round(selectedMarker.battery * 100)}%{selectedMarker.charging ? " ⚡" : ""}
-                      </Text>
-                    </View>
-                  ) : null}
-                </>
-              )}
+                    ) : null}
+                  </>
+                )}
 
-            </BottomSheetScrollView>
-          </>
-        ) : null}
-        </View>
-      </BottomSheet>
+              </BottomSheetScrollView>
+            </>
+          ) : null}
+          </View>
+        </BottomSheet>
+      ) : null}
 
       {/* Selected exit point preview — deliberately OUTSIDE the drawer, but glued
           flush to its top edge so it eats as little map as possible. */}
-      {selectedExitPoint ? (
+      {showEl("exitPreview") && selectedExitPoint ? (
         <ExitPointPreview
           point={selectedExitPoint}
           sheetTop={markerSheetPosition}
@@ -5306,10 +5315,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
-      {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
+      {showEl("medicStatus") && activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
       {/* Also hidden while a trail is open: the transport occupies the same
           corner, and the FAB sat directly on top of its LIVE button. */}
-      {!selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive && !trailOpen ? (
+      {showEl("incidentFab") && !selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive && !trailOpen ? (
         <IncidentFAB
           // "Add point" from the FAB drops at my own position — the long-press
           // menu is still the way to place one somewhere else on the map.
@@ -5325,111 +5334,123 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           }}
         />
       ) : null}
-      <ReportIncidentSheet />
+      {showEl("reportSheet") ? <ReportIncidentSheet /> : null}
 
       {/* Universal search: places / coordinates in any format / bibs. */}
-      <SearchOverlay
-        visible={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        onView={(target: SearchTarget) => {
-          setSearchOpen(false);
-          setActiveTab("map");
-          setPreviewPoint(target);
-          cameraRef.current?.easeTo({
-            center: [target.lng, target.lat],
-            zoom: Math.max(mapZoom, 13.5),
-            duration: 600,
-          });
-        }}
-        onNavigate={(target: SearchTarget) => {
-          setSearchOpen(false);
-          setActiveTab("map");
-          useNavStore.getState().openTransport({ lat: target.lat, lng: target.lng, label: target.label });
-        }}
-      />
+      {showEl("searchOverlay") ? (
+        <SearchOverlay
+          visible={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onView={(target: SearchTarget) => {
+            setSearchOpen(false);
+            setActiveTab("map");
+            setPreviewPoint(target);
+            cameraRef.current?.easeTo({
+              center: [target.lng, target.lat],
+              zoom: Math.max(mapZoom, 13.5),
+              duration: 600,
+            });
+          }}
+          onNavigate={(target: SearchTarget) => {
+            setSearchOpen(false);
+            setActiveTab("map");
+            useNavStore.getState().openTransport({ lat: target.lat, lng: target.lng, label: target.label });
+          }}
+        />
+      ) : null}
 
       {/* Hospitals directory drawer (opened from the Menu). "Navigate" hands the
           hospital off to the regular transport → route-variants flow. */}
-      <HospitalsSheet
-        sheetRef={hospitalsSheetRef}
-        currentFix={myLocationFix ? { lat: myLocationFix.lat, lng: myLocationFix.lng } : null}
-        onIndexChange={setHospitalsSheetIndex}
-        highlight={hospitalHighlight}
-        onNavigate={(hospital) => {
-          hospitalsSheetRef.current?.close();
-          useNavStore.getState().openTransport({ lat: hospital.lat, lng: hospital.lng, label: hospital.name });
-        }}
-      />
+      {showEl("hospitalsSheet") ? (
+        <HospitalsSheet
+          sheetRef={hospitalsSheetRef}
+          currentFix={myLocationFix ? { lat: myLocationFix.lat, lng: myLocationFix.lng } : null}
+          onIndexChange={setHospitalsSheetIndex}
+          highlight={hospitalHighlight}
+          onNavigate={(hospital) => {
+            hospitalsSheetRef.current?.close();
+            useNavStore.getState().openTransport({ lat: hospital.lat, lng: hospital.lng, label: hospital.name });
+          }}
+        />
+      ) : null}
 
       {/* Navigation feature: radial menu + transport/variants/editing/active overlays. */}
-      <NavRadialMenu
-        anchor={radialAnchor}
-        onNavigate={() => {
-          if (!radialAnchor) return;
-          useNavStore.getState().openTransport({
-            lat: radialAnchor.lat,
-            lng: radialAnchor.lng,
-            label: "Dropped pin",
-          });
-          setRadialAnchor(null);
-        }}
-        onMarkIncident={() => {
-          const at = radialAnchor ? { lat: radialAnchor.lat, lng: radialAnchor.lng } : undefined;
-          setRadialAnchor(null);
-          void startIncidentReport(at);
-        }}
-        onAddPoint={() => {
-          if (radialAnchor) setPendingPoi({ lat: radialAnchor.lat, lng: radialAnchor.lng });
-          setRadialAnchor(null);
-        }}
-        onCancel={() => setRadialAnchor(null)}
-      />
-      {activeTab === "map" && !selectedMarker ? <AssignedIncidentBanner /> : null}
-      <TransportSheet />
-      <RouteVariantsOverlay />
-      <RouteEditHelperBanner />
-      <RouteEditingSheet />
-      <ActiveNavOverlay />
-      <TrackNavOverlay />
+      {showEl("navRadial") ? (
+        <NavRadialMenu
+          anchor={radialAnchor}
+          onNavigate={() => {
+            if (!radialAnchor) return;
+            useNavStore.getState().openTransport({
+              lat: radialAnchor.lat,
+              lng: radialAnchor.lng,
+              label: "Dropped pin",
+            });
+            setRadialAnchor(null);
+          }}
+          onMarkIncident={() => {
+            const at = radialAnchor ? { lat: radialAnchor.lat, lng: radialAnchor.lng } : undefined;
+            setRadialAnchor(null);
+            void startIncidentReport(at);
+          }}
+          onAddPoint={() => {
+            if (radialAnchor) setPendingPoi({ lat: radialAnchor.lat, lng: radialAnchor.lng });
+            setRadialAnchor(null);
+          }}
+          onCancel={() => setRadialAnchor(null)}
+        />
+      ) : null}
+      {showEl("assignedBanner") && activeTab === "map" && !selectedMarker ? <AssignedIncidentBanner /> : null}
+      {showEl("transportSheet") ? <TransportSheet /> : null}
+      {showEl("routeVariants") ? <RouteVariantsOverlay /> : null}
+      {showEl("routeEditHelper") ? <RouteEditHelperBanner /> : null}
+      {showEl("routeEditingSheet") ? <RouteEditingSheet /> : null}
+      {showEl("activeNav") ? <ActiveNavOverlay /> : null}
+      {showEl("trackNav") ? <TrackNavOverlay /> : null}
 
-      <NewPoiSheet
-        pending={pendingPoi}
-        onClose={() => setPendingPoi(null)}
-        onCreated={(poi: PoiDto) => {
-          const existing = useMapStore.getState().markers;
-          setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
-          setPendingPoi(null);
-        }}
-      />
+      {showEl("newPoiSheet") ? (
+        <NewPoiSheet
+          pending={pendingPoi}
+          onClose={() => setPendingPoi(null)}
+          onCreated={(poi: PoiDto) => {
+            const existing = useMapStore.getState().markers;
+            setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+            setPendingPoi(null);
+          }}
+        />
+      ) : null}
 
-      <EditPoiSheet
-        poi={editingPoi}
-        onClose={() => setEditingPoi(null)}
-        onSaved={(poi: PoiDto) => {
-          // The broadcast lands too, but updating here means the point reads
-          // correctly the moment the sheet closes even on a flaky socket.
-          const existing = useMapStore.getState().markers;
-          setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
-          setEditingPoi(null);
-        }}
-      />
+      {showEl("editPoiSheet") ? (
+        <EditPoiSheet
+          poi={editingPoi}
+          onClose={() => setEditingPoi(null)}
+          onSaved={(poi: PoiDto) => {
+            // The broadcast lands too, but updating here means the point reads
+            // correctly the moment the sheet closes even on a flaky socket.
+            const existing = useMapStore.getState().markers;
+            setMarkers([...existing.filter((m) => m.id !== poi.id), poiToMarker(poi)]);
+            setEditingPoi(null);
+          }}
+        />
+      ) : null}
 
-      <Modal
-        visible={!!photoViewerUrl}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPhotoViewerUrl(null)}
-        statusBarTranslucent
-      >
-        <Pressable style={styles.photoViewerBackdrop} onPress={() => setPhotoViewerUrl(null)}>
-          {photoViewerUrl ? (
-            <Image source={{ uri: photoViewerUrl }} style={styles.photoViewerImage} resizeMode="contain" />
-          ) : null}
-          <Pressable style={styles.photoViewerClose} onPress={() => setPhotoViewerUrl(null)}>
-            <Feather name="x" size={26} color="#fff" />
+      {showEl("photoViewer") ? (
+        <Modal
+          visible={!!photoViewerUrl}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setPhotoViewerUrl(null)}
+          statusBarTranslucent
+        >
+          <Pressable style={styles.photoViewerBackdrop} onPress={() => setPhotoViewerUrl(null)}>
+            {photoViewerUrl ? (
+              <Image source={{ uri: photoViewerUrl }} style={styles.photoViewerImage} resizeMode="contain" />
+            ) : null}
+            <Pressable style={styles.photoViewerClose} onPress={() => setPhotoViewerUrl(null)}>
+              <Feather name="x" size={26} color="#fff" />
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+      ) : null}
 
       {activeTab === "location" ? (
         <View style={styles.tabOverlay}>
@@ -5453,48 +5474,50 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       ) : null}
       {/* Participants roster — bottom drawer over the map. Content mounts only
           while open so the roster is re-fetched fresh each time. */}
-      <BottomSheet
-        ref={participantsSheetRef}
-        index={-1}
-        snapPoints={PARTICIPANTS_SHEET_SNAP_POINTS}
-        enableDynamicSizing={false}
-        enablePanDownToClose
-        // Only the handle drags the sheet, so the roster list scrolls freely.
-        enableContentPanningGesture={false}
-        onChange={(i) => {
-          setParticipantsOpen(i >= 0);
-          setParticipantsSheetIndex(i);
-          if (i < 0) setParticipantHighlight(null);
-        }}
-        backgroundStyle={styles.markerSheetBg}
-        handleStyle={styles.sheetHandleContainer}
-        handleIndicatorStyle={styles.sheetHandle}
-      >
-        <BottomSheetView style={styles.markerSheetContent}>
-          {participantsOpen ? (
-            <ParticipantsScreen
-              variant="sheet"
-              onClose={() => participantsSheetRef.current?.close()}
-              highlight={participantHighlight}
-              onLocate={(p) => {
-                if (p.lat == null || p.lng == null) return;
-                // Make sure the participant dots layer is on so the focused runner
-                // is actually visible among the rest of the field.
-                setParticipantsMode("individual");
-                setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber, accuracy: p.accuracy });
-                setSelectedMarkerId(null);
-                participantsSheetRef.current?.close();
-                cameraRef.current?.easeTo({
-                  center: [p.lng, p.lat],
-                  zoom: 15.5,
-                  padding: { top: 0, bottom: 0, left: 0, right: 0 },
-                  duration: 600,
-                });
-              }}
-            />
-          ) : null}
-        </BottomSheetView>
-      </BottomSheet>
+      {showEl("participantsSheet") ? (
+        <BottomSheet
+          ref={participantsSheetRef}
+          index={-1}
+          snapPoints={PARTICIPANTS_SHEET_SNAP_POINTS}
+          enableDynamicSizing={false}
+          enablePanDownToClose
+          // Only the handle drags the sheet, so the roster list scrolls freely.
+          enableContentPanningGesture={false}
+          onChange={(i) => {
+            setParticipantsOpen(i >= 0);
+            setParticipantsSheetIndex(i);
+            if (i < 0) setParticipantHighlight(null);
+          }}
+          backgroundStyle={styles.markerSheetBg}
+          handleStyle={styles.sheetHandleContainer}
+          handleIndicatorStyle={styles.sheetHandle}
+        >
+          <BottomSheetView style={styles.markerSheetContent}>
+            {participantsOpen ? (
+              <ParticipantsScreen
+                variant="sheet"
+                onClose={() => participantsSheetRef.current?.close()}
+                highlight={participantHighlight}
+                onLocate={(p) => {
+                  if (p.lat == null || p.lng == null) return;
+                  // Make sure the participant dots layer is on so the focused runner
+                  // is actually visible among the rest of the field.
+                  setParticipantsMode("individual");
+                  setLocatedParticipant({ lng: p.lng, lat: p.lat, name: p.name, bibNumber: p.bibNumber, accuracy: p.accuracy });
+                  setSelectedMarkerId(null);
+                  participantsSheetRef.current?.close();
+                  cameraRef.current?.easeTo({
+                    center: [p.lng, p.lat],
+                    zoom: 15.5,
+                    padding: { top: 0, bottom: 0, left: 0, right: 0 },
+                    duration: 600,
+                  });
+                }}
+              />
+            ) : null}
+          </BottomSheetView>
+        </BottomSheet>
+      ) : null}
       {activeTab === "chat" ? (
         <View style={styles.tabOverlay}>
           <EventChatScreen
@@ -5515,21 +5538,33 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
         </View>
       ) : null}
 
-      <PendingIncidentsSheet visible={pendingSheetOpen} onClose={() => setPendingSheetOpen(false)} />
+      {showEl("pendingSheet") ? (
+        <PendingIncidentsSheet visible={pendingSheetOpen} onClose={() => setPendingSheetOpen(false)} />
+      ) : null}
 
       {/* Bottom navigation bar — hidden during active navigation, and while a
           marker detail sheet is open (the sheet covers it and Tracks isn't a
           useful destination from there). */}
-      {/* Map x-ray escape hatch. Rendered only while the bisect is running,
-          above every band it can lift the map into — otherwise level 5 would
-          bury the whole UI with no way back to the Debug tab. */}
-      {xrayLevel > 0 ? (
-        <Pressable style={styles.xrayChip} onPress={() => useMapXray.getState().cycle()}>
-          <Text style={styles.xrayChipText}>X-RAY {xrayLevel} · tap</Text>
+      {/* Escape hatch for the overlay bisect. Rendered above every band the map
+          can be lifted into, and above the bottom bar — which the bisect itself
+          can switch off, leaving no other way back to Debug. Tapping it puts
+          everything back to stock. */}
+      {mapDebugDirty > 0 ? (
+        <Pressable
+          style={styles.mapDebugChip}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            useMapDebug.getState().reset();
+          }}
+        >
+          <Feather name="rotate-ccw" size={12} color="#1c1207" />
+          <Text style={styles.mapDebugChipText}>
+            {mapDebugDirty} map change{mapDebugDirty === 1 ? "" : "s"} · tap to reset
+          </Text>
         </Pressable>
       ) : null}
 
-      {navPhase !== "active" && trackNavPhase === "idle" && !selectedMarker ? (
+      {showEl("bottomMenu") && navPhase !== "active" && trackNavPhase === "idle" && !selectedMarker ? (
         <View style={styles.bottomMenu}>
           {([
             { tab: "map", label: "Map", icon: "map" },
@@ -5557,17 +5592,20 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 }
 
 const styles = StyleSheet.create({
-  xrayChip: {
+  mapDebugChip: {
     position: "absolute",
     top: 8,
     alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     zIndex: 999,
     backgroundColor: "#f59e0b",
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  xrayChipText: { color: "#1c1207", fontSize: 12, fontWeight: "900", letterSpacing: 0.4 },
+  mapDebugChipText: { color: "#1c1207", fontSize: 12, fontWeight: "900", letterSpacing: 0.3 },
   // `overflow: hidden` is load-bearing on Android: RN views don't clip their
   // children by default, and MapLibre's <Marker> children are absolutely
   // positioned by pixel offset — a marker sitting near the top/bottom edge of
