@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useSettingsStore } from "../settings/settings-store";
 import {
   MAP_ELEMENTS,
   MAP_ELEMENT_GROUPS,
@@ -25,6 +26,10 @@ export function MapDebugSettings({ onClose }: { onClose?: () => void }) {
   const setAllHidden = useMapDebug((s) => s.setAllHidden);
   const setMapZIndex = useMapDebug((s) => s.setMapZIndex);
   const reset = useMapDebug((s) => s.reset);
+  // A real saved preference, not part of the bisect: it survives a restart
+  // and is deliberately excluded from the dirty count and Reset below.
+  const simpleReportButton = useSettingsStore((s) => s.simpleReportButton);
+  const setSimpleReportButton = useSettingsStore((s) => s.setSimpleReportButton);
 
   const hiddenCount = useMemo(() => Object.values(hidden).filter(Boolean).length, [hidden]);
   const dirty = mapDebugDirtyCount(hidden, mapZIndex) > 0;
@@ -55,10 +60,39 @@ export function MapDebugSettings({ onClose }: { onClose?: () => void }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
+        {/* First, because it is the answer for every device that has hit this
+            so far — and the only control here that is remembered. */}
+        <View style={[styles.fix, simpleReportButton && styles.fixOn]}>
+          <View style={styles.fixHead}>
+            <View style={styles.fixText}>
+              <Text style={styles.fixTitle}>Simple report buttons</Text>
+              <Text style={styles.fixHint}>
+                Replaces the round “+” button with two plain buttons.
+              </Text>
+            </View>
+            <Switch
+              value={simpleReportButton}
+              onValueChange={(next) => {
+                tap();
+                setSimpleReportButton(next);
+              }}
+              trackColor={{ false: "#1e293b", true: "#0f766e" }}
+              thumbColor={simpleReportButton ? "#34d399" : "#64748b"}
+            />
+          </View>
+          <Text style={styles.fixBody}>
+            <Text style={styles.strong}>Turn this on if the map will not move.</Text> The round
+            button sits on an invisible full-screen layer, and on some Android phones that layer
+            swallows dragging and pinching on the map while normal taps still work. The plain
+            buttons do the same two jobs without that layer.
+          </Text>
+          <Text style={styles.fixFoot}>This one is remembered, and survives a restart.</Text>
+        </View>
+
         <View style={styles.explainer}>
-          <Text style={styles.explainerTitle}>If the map won't move</Text>
+          <Text style={styles.explainerTitle}>Still not moving?</Text>
           <Text style={styles.explainerText}>
-            Something is probably sitting on top of it. Start with{" "}
+            Then something else is sitting on top of it. Start with{" "}
             <Text style={styles.strong}>Map layer → Top</Text> — if the map moves then, one of the
             overlays below is the problem. Put the layer back to Default and turn overlays off one
             at a time until it moves again. The last one you switched off is the culprit.
@@ -201,6 +235,25 @@ const styles = StyleSheet.create({
   resetBtnText: { color: "#1c1207", fontSize: 12, fontWeight: "900" },
 
   body: { padding: 16, paddingBottom: 48 },
+
+  fix: {
+    backgroundColor: "rgba(245,158,11,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.35)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+  fixOn: {
+    backgroundColor: "rgba(52,211,153,0.09)",
+    borderColor: "rgba(52,211,153,0.4)",
+  },
+  fixHead: { flexDirection: "row", alignItems: "center", gap: 12 },
+  fixText: { flex: 1 },
+  fixTitle: { color: "#eff6ff", fontSize: 15, fontWeight: "900" },
+  fixHint: { color: "#9fb3cc", fontSize: 12, marginTop: 2 },
+  fixBody: { color: "#c7d6e6", fontSize: 13, lineHeight: 20, marginTop: 10 },
+  fixFoot: { color: "#5f7da0", fontSize: 11, marginTop: 8 },
 
   explainer: {
     backgroundColor: "rgba(52,211,153,0.07)",

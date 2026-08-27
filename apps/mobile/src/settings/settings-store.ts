@@ -47,6 +47,20 @@ interface SettingsState {
    */
   androidAutoEnabled: boolean;
   /**
+   * Swap the floating "+" report button for two plain buttons.
+   *
+   * The FAB's root is a full-screen absolutely-positioned layer at zIndex 35
+   * carrying `pointerEvents="box-none"`, which is supposed to let touches
+   * fall through to the map beneath it. On some Android devices it does not:
+   * the layer swallows every drag and pinch, so the map cannot be panned or
+   * zoomed while taps on other controls keep working. Confirmed in the field
+   * on a ZenFone 9 (Android 14) by switching this very button off.
+   *
+   * The replacement occupies only its own footprint, so there is no
+   * full-screen layer left to intercept anything.
+   */
+  simpleReportButton: boolean;
+  /**
    * Mirrors my own medic status being "stationary". Not persisted — it is
    * re-derived from the live roster on every launch (see MedicStatusControl).
    */
@@ -61,6 +75,7 @@ interface SettingsState {
   setKmMarkerIntervalKm: (km: number) => void;
   setShowArchived: (enabled: boolean) => void;
   setAndroidAutoEnabled: (enabled: boolean) => void;
+  setSimpleReportButton: (enabled: boolean) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -76,6 +91,8 @@ const DEFAULTS = {
   kmMarkerIntervalKm: 5,
   showArchived: false,
   androidAutoEnabled: true,
+  // Off by default: the FAB is the better button where it works.
+  simpleReportButton: false,
 };
 
 function persist(
@@ -88,6 +105,7 @@ function persist(
     | "kmMarkerIntervalKm"
     | "showArchived"
     | "androidAutoEnabled"
+    | "simpleReportButton"
   >,
 ) {
   void AsyncStorage.setItem(
@@ -100,6 +118,7 @@ function persist(
       kmMarkerIntervalKm: state.kmMarkerIntervalKm,
       showArchived: state.showArchived,
       androidAutoEnabled: state.androidAutoEnabled,
+      simpleReportButton: state.simpleReportButton,
     }),
   );
 }
@@ -112,6 +131,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   kmMarkerIntervalKm: DEFAULTS.kmMarkerIntervalKm,
   showArchived: DEFAULTS.showArchived,
   androidAutoEnabled: DEFAULTS.androidAutoEnabled,
+  simpleReportButton: DEFAULTS.simpleReportButton,
   stationaryMode: false,
   hydrated: false,
 
@@ -144,6 +164,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ androidAutoEnabled });
     persist({ ...get(), androidAutoEnabled });
   },
+  setSimpleReportButton: (simpleReportButton) => {
+    set({ simpleReportButton });
+    persist({ ...get(), simpleReportButton });
+  },
 
   hydrate: async () => {
     try {
@@ -164,6 +188,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           showArchived: typeof parsed.showArchived === "boolean" ? parsed.showArchived : DEFAULTS.showArchived,
           androidAutoEnabled:
             typeof parsed.androidAutoEnabled === "boolean" ? parsed.androidAutoEnabled : DEFAULTS.androidAutoEnabled,
+          simpleReportButton:
+            typeof parsed.simpleReportButton === "boolean" ? parsed.simpleReportButton : DEFAULTS.simpleReportButton,
         });
       }
     } catch {

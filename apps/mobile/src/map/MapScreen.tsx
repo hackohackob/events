@@ -28,6 +28,7 @@ import {
 } from "@maplibre/maplibre-react-native";
 import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { IncidentFAB } from "../incidents/IncidentFAB";
+import { IncidentButtons } from "../incidents/IncidentButtons";
 import { ReportIncidentSheet } from "../incidents/ReportIncidentSheet";
 import { incidentQueue } from "../incidents/persistent-incident-queue";
 import { useIncidentStore } from "../incidents/incident-store";
@@ -1478,6 +1479,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   // Field bisect for "the map won't pan" (Debug ▸ Map settings). With nothing
   // switched off and the layer at Default, every branch below behaves exactly
   // as it did before this existed.
+  const simpleReportButton = useSettingsStore((state) => state.simpleReportButton);
   const mapDebugHidden = useMapDebug((state) => state.hidden);
   const mapDebugZIndex = useMapDebug((state) => state.mapZIndex);
   const showEl = useCallback((id: string) => mapDebugHidden[id] !== true, [mapDebugHidden]);
@@ -3157,6 +3159,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       return next;
     });
   };
+
+  /** Drop a new point where I am standing, falling back to the map centre. */
+  const addPointAtMyPosition = useCallback(() => {
+    const fix = useLocationStatus.getState().lastFix;
+    if (fix) {
+      setPendingPoi({ lat: fix.lat, lng: fix.lng });
+      return;
+    }
+    const center = mapCenterRef.current;
+    if (center) setPendingPoi({ lat: center[1], lng: center[0] });
+  }, []);
 
   const centerOnCurrentPosition = async () => {
     const permission = await ExpoLocation.requestForegroundPermissionsAsync();
@@ -5319,20 +5332,16 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Also hidden while a trail is open: the transport occupies the same
           corner, and the FAB sat directly on top of its LIVE button. */}
       {showEl("incidentFab") && !selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive && !trailOpen ? (
-        <IncidentFAB
-          // "Add point" from the FAB drops at my own position — the long-press
-          // menu is still the way to place one somewhere else on the map.
-          onAddPoint={() => {
-            const fix = useLocationStatus.getState().lastFix;
-            if (fix) {
-              setPendingPoi({ lat: fix.lat, lng: fix.lng });
-              return;
-            }
-            // No GPS fix yet — fall back to whatever the map is centred on.
-            const center = mapCenterRef.current;
-            if (center) setPendingPoi({ lat: center[1], lng: center[0] });
-          }}
-        />
+        // Both take the same "add point at my own position" action — the
+        // long-press menu is still the way to place one elsewhere on the map.
+        // Which one renders is a saved per-device setting: the FAB's
+        // full-screen root blocks map gestures outright on some Android
+        // devices (see settings-store's simpleReportButton).
+        simpleReportButton ? (
+          <IncidentButtons onAddPoint={addPointAtMyPosition} />
+        ) : (
+          <IncidentFAB onAddPoint={addPointAtMyPosition} />
+        )
       ) : null}
       {showEl("reportSheet") ? <ReportIncidentSheet /> : null}
 
