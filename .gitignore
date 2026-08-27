@@ -26,3 +26,7 @@ credentials.json
 *.jks
 *.keystore
 !apps/mobile/android/app/debug.keystore
+
+# Stray Expo scaffold that `expo export` drops when run from the repo root.
+# The mobile app is configured by apps/mobile/app.config.ts.
+/app.json
