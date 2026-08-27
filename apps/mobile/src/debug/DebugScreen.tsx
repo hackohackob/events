@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-nati
 import { Feather } from "@expo/vector-icons";
 import { type DebugCategory, type DebugLevel, useDebugLog } from "./debug-log";
 import { TouchTestScreen } from "./TouchTestScreen";
+import { MapTestScreen } from "./MapTestScreen";
 
 type Filter = DebugCategory | "all" | "errors";
 // "errors" is a cross-category filter (level === "error"), kept first after
@@ -35,7 +36,7 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
   const [filter, setFilter] = useState<Filter>("all");
   // Field diagnosis for "the map won't pan / the drawer ignores my finger":
   // a separate view, so nothing about the log screen changes when it is off.
-  const [touchTest, setTouchTest] = useState(false);
+  const [tool, setTool] = useState<"log" | "touch" | "map">("log");
 
   const visible = useMemo(() => {
     if (filter === "all") return entries;
@@ -54,7 +55,8 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
     await Share.share({ message: text || "(empty debug log)" });
   };
 
-  if (touchTest) return <TouchTestScreen onClose={() => setTouchTest(false)} />;
+  if (tool === "touch") return <TouchTestScreen onClose={() => setTool("log")} />;
+  if (tool === "map") return <MapTestScreen onClose={() => setTool("log")} />;
 
   return (
     <View style={styles.container}>
@@ -66,8 +68,11 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
         ) : null}
         <Text style={styles.heading}>Debug log</Text>
         <View style={styles.headerActions}>
-          <Pressable style={styles.smallBtn} onPress={() => setTouchTest(true)}>
+          <Pressable style={styles.smallBtn} onPress={() => setTool("touch")}>
             <Text style={styles.smallBtnText}>Touch</Text>
+          </Pressable>
+          <Pressable style={styles.smallBtn} onPress={() => setTool("map")}>
+            <Text style={styles.smallBtnText}>Map</Text>
           </Pressable>
           <Pressable style={styles.smallBtn} onPress={() => void copyAll()}>
             <Text style={styles.smallBtnText}>Share</Text>

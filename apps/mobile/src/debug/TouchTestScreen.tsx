@@ -89,12 +89,26 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
     [],
   );
 
+  // Pad C — two fingers. Her report was "move AND zoom", and a single-finger
+  // drag says nothing about whether a pinch ever reaches the map.
+  const [pinch, setPinch] = useState({ began: 0, activated: 0, updates: 0, scale: 1 });
+  const pinchGesture = useMemo(
+    () =>
+      Gesture.Pinch()
+        .runOnJS(true)
+        .onBegin(() => setPinch((s) => ({ ...s, began: s.began + 1 })))
+        .onStart(() => setPinch((s) => ({ ...s, activated: s.activated + 1 })))
+        .onUpdate((e) => setPinch((s) => ({ ...s, updates: s.updates + 1, scale: e.scale }))),
+    [],
+  );
+
   const reset = () => {
     setPlain({ down: 0, move: 0, up: 0, cancel: 0, maxPointers: 0, travel: 0 });
     setGh({ began: 0, activated: 0, updates: 0, ended: 0, failed: 0 });
+    setPinch({ began: 0, activated: 0, updates: 0, scale: 1 });
   };
 
-  const verdict = readVerdict(plain, gh);
+  const verdict = readVerdict(plain, gh, pinch);
 
   const share = async () => {
     await Share.share({
@@ -104,6 +118,8 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
         `maxPointers=${plain.maxPointers} travel=${Math.round(plain.travel)}px\n` +
         `gesture-handler: began=${gh.began} activated=${gh.activated} updates=${gh.updates} ` +
         `ended=${gh.ended} failed=${gh.failed}\n` +
+        `pinch: began=${pinch.began} activated=${pinch.activated} updates=${pinch.updates} ` +
+        `scale=${pinch.scale.toFixed(2)}\n` +
         `verdict: ${verdict.text}`,
     });
   };
@@ -129,8 +145,7 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
 
       <View style={styles.body}>
         <Text style={styles.intro}>
-          Drag a slow circle inside each box for a couple of seconds, then press Share and send
-          the numbers over.
+          Drag a slow circle in boxes 1 and 2, then pinch box 3 with two fingers. Press Share.
         </Text>
 
         <Text style={styles.padTitle}>1 · Plain touch</Text>
@@ -158,6 +173,19 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
           <Metric label="update" value={gh.updates} warnIfZero={gh.began > 0} />
           <Metric label="end" value={gh.ended} />
           <Metric label="fail" value={gh.failed} warnIfAny />
+        </View>
+
+        <Text style={styles.padTitle}>3 · Pinch (two fingers)</Text>
+        <GestureDetector gesture={pinchGesture}>
+          <View style={styles.pad}>
+            <Text style={styles.padHint}>pinch here</Text>
+          </View>
+        </GestureDetector>
+        <View style={styles.readout}>
+          <Metric label="began" value={pinch.began} />
+          <Metric label="active" value={pinch.activated} warnIfZero={pinch.began > 0} />
+          <Metric label="update" value={pinch.updates} warnIfZero={pinch.began > 0} />
+          <Metric label="scale" value={Number(pinch.scale.toFixed(2))} />
         </View>
 
         <View style={[styles.verdict, { borderColor: verdict.color }]}>
@@ -190,9 +218,16 @@ function Metric({
 
 type Plain = { down: number; move: number; up: number; cancel: number; maxPointers: number; travel: number };
 type Gh = { began: number; activated: number; updates: number; ended: number; failed: number };
+type Pinch = { began: number; activated: number; updates: number; scale: number };
 
 /** Turns the six counters into the one sentence that matters. */
-function readVerdict(plain: Plain, gh: Gh): { text: string; color: string } {
+function readVerdict(plain: Plain, gh: Gh, pinch: Pinch): { text: string; color: string } {
+  if (pinch.began > 0 && pinch.activated === 0) {
+    return {
+      text: "Two fingers are seen but the pinch never activates — that is the zoom half of the problem.",
+      color: "#f5c518",
+    };
+  }
   if (plain.down === 0 && gh.began === 0) {
     return { text: "Nothing recorded yet — drag inside both boxes.", color: "#5f7da0" };
   }
@@ -217,7 +252,13 @@ function readVerdict(plain: Plain, gh: Gh): { text: string; color: string } {
     };
   }
   if (plain.move > 0 && gh.updates > 0) {
-    return { text: "Both paths are healthy on this device.", color: "#22ff88" };
+    return {
+      text:
+        pinch.updates > 0
+          ? "One finger and two fingers are both healthy on this device."
+          : "One finger is healthy. Pinch box 3 to test the other half.",
+      color: pinch.updates > 0 ? "#22ff88" : "#5f7da0",
+    };
   }
   return { text: "Keep dragging — not enough samples yet.", color: "#5f7da0" };
 }
@@ -247,12 +288,12 @@ const styles = StyleSheet.create({
   // No ScrollView, on purpose — see onShouldBlockNativeResponder above. The
   // pads share whatever is left after the fixed rows so the screen still
   // fits without one.
-  body: { flex: 1, padding: 16, paddingBottom: 24, gap: 8 },
-  intro: { color: "#7c8a9c", fontSize: 13, lineHeight: 19, marginBottom: 4 },
-  padTitle: { color: "#9fb3cc", fontSize: 12, fontWeight: "800", letterSpacing: 0.6, marginTop: 6 },
+  body: { flex: 1, padding: 14, paddingBottom: 18, gap: 6 },
+  intro: { color: "#7c8a9c", fontSize: 12, lineHeight: 17 },
+  padTitle: { color: "#9fb3cc", fontSize: 11, fontWeight: "800", letterSpacing: 0.6, marginTop: 2 },
   pad: {
     flex: 1,
-    minHeight: 90,
+    minHeight: 64,
     borderRadius: 14,
     backgroundColor: "#0b1729",
     borderWidth: 1,
@@ -267,7 +308,7 @@ const styles = StyleSheet.create({
     minWidth: 52,
     backgroundColor: "#0b1729",
     borderRadius: 10,
-    paddingVertical: 8,
+    paddingVertical: 6,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.08)",
@@ -276,11 +317,11 @@ const styles = StyleSheet.create({
   metricValueBad: { color: "#ff6b6b" },
   metricLabel: { color: "#5f7da0", fontSize: 10, fontWeight: "700", marginTop: 2 },
   verdict: {
-    marginTop: 10,
+    marginTop: 4,
     borderRadius: 12,
     borderWidth: 1,
-    padding: 12,
+    padding: 10,
     backgroundColor: "rgba(11,23,41,0.7)",
   },
-  verdictText: { fontSize: 13, fontWeight: "700", lineHeight: 19 },
+  verdictText: { fontSize: 12, fontWeight: "700", lineHeight: 17 },
 });
