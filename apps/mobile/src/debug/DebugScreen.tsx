@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons";
 import { type DebugCategory, type DebugLevel, useDebugLog } from "./debug-log";
 import { TouchTestScreen } from "./TouchTestScreen";
 import { MapTestScreen } from "./MapTestScreen";
+import { XRAY_MAX, useMapXray } from "./map-xray";
 
 type Filter = DebugCategory | "all" | "errors";
 // "errors" is a cross-category filter (level === "error"), kept first after
@@ -37,6 +38,7 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
   // Field diagnosis for "the map won't pan / the drawer ignores my finger":
   // a separate view, so nothing about the log screen changes when it is off.
   const [tool, setTool] = useState<"log" | "touch" | "map">("log");
+  const xrayLevel = useMapXray((s) => s.level);
 
   const visible = useMemo(() => {
     if (filter === "all") return entries;
@@ -81,6 +83,26 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
             <Text style={styles.smallBtnText}>Clear</Text>
           </Pressable>
         </View>
+      </View>
+
+      {/* Map x-ray. Picking a level closes Debug so the real map is visible;
+          the orange chip on the map cycles from there. */}
+      <View style={styles.xrayRow}>
+        <Text style={styles.xrayLabel}>Map x-ray</Text>
+        {Array.from({ length: XRAY_MAX + 1 }, (_, level) => (
+          <Pressable
+            key={level}
+            style={[styles.xrayBtn, xrayLevel === level && styles.xrayBtnActive]}
+            onPress={() => {
+              useMapXray.getState().setLevel(level);
+              if (level > 0) onClose?.();
+            }}
+          >
+            <Text style={[styles.xrayBtnText, xrayLevel === level && styles.xrayBtnTextActive]}>
+              {level === 0 ? "off" : level}
+            </Text>
+          </Pressable>
+        ))}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterBar} contentContainerStyle={styles.filterBarContent}>
@@ -136,6 +158,12 @@ export function DebugScreen({ onClose }: { onClose?: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  xrayRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingBottom: 8 },
+  xrayLabel: { color: "#7c8a9c", fontSize: 12, fontWeight: "700", marginRight: 2 },
+  xrayBtn: { backgroundColor: "#0b1729", borderRadius: 8, paddingHorizontal: 11, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(148,163,184,0.12)" },
+  xrayBtnActive: { backgroundColor: "#f59e0b", borderColor: "#f59e0b" },
+  xrayBtnText: { color: "#9fb3cc", fontSize: 12, fontWeight: "800" },
+  xrayBtnTextActive: { color: "#1c1207" },
   container: { flex: 1, backgroundColor: "#020b18" },
   header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   backBtn: {

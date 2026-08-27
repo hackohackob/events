@@ -52,6 +52,7 @@ import { LocationScreen } from "../debug/LocationScreen";
 import { DebugScreen } from "../debug/DebugScreen";
 import { useLocationStatus } from "../debug/location-status";
 import { debugLog } from "../debug/debug-log";
+import { XRAY_Z, useMapXray } from "../debug/map-xray";
 import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
@@ -1474,6 +1475,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const markers = useMapStore((state) => state.markers);
   const tracks = useMapStore((state) => state.tracks);
   const centerOnUserRequestId = useMapStore((state) => state.centerOnUserRequestId);
+  // Debug bisect only. 0 (the default) changes nothing at all.
+  const xrayLevel = useMapXray((state) => state.level);
   const resetNorthRequestId = useMapStore((state) => state.resetNorthRequestId);
   const setMarkers = useMapStore((state) => state.setMarkers);
   const setTracks = useMapStore((state) => state.setTracks);
@@ -3235,7 +3238,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     <View style={styles.container}>
       <MapLibreMap
         ref={mapRef}
-        style={styles.map}
+        // Off by default, and deliberately the SAME object as before when off —
+        // see debug/map-xray for what the levels mean.
+        style={xrayLevel > 0 ? [styles.map, { zIndex: XRAY_Z[xrayLevel] }] : styles.map}
         mapStyle={{
           version: 8,
           sources: {},
@@ -5515,6 +5520,15 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Bottom navigation bar — hidden during active navigation, and while a
           marker detail sheet is open (the sheet covers it and Tracks isn't a
           useful destination from there). */}
+      {/* Map x-ray escape hatch. Rendered only while the bisect is running,
+          above every band it can lift the map into — otherwise level 5 would
+          bury the whole UI with no way back to the Debug tab. */}
+      {xrayLevel > 0 ? (
+        <Pressable style={styles.xrayChip} onPress={() => useMapXray.getState().cycle()}>
+          <Text style={styles.xrayChipText}>X-RAY {xrayLevel} · tap</Text>
+        </Pressable>
+      ) : null}
+
       {navPhase !== "active" && trackNavPhase === "idle" && !selectedMarker ? (
         <View style={styles.bottomMenu}>
           {([
@@ -5543,6 +5557,17 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 }
 
 const styles = StyleSheet.create({
+  xrayChip: {
+    position: "absolute",
+    top: 8,
+    alignSelf: "center",
+    zIndex: 999,
+    backgroundColor: "#f59e0b",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  xrayChipText: { color: "#1c1207", fontSize: 12, fontWeight: "900", letterSpacing: 0.4 },
   // `overflow: hidden` is load-bearing on Android: RN views don't clip their
   // children by default, and MapLibre's <Marker> children are absolutely
   // positioned by pixel offset — a marker sitting near the top/bottom edge of

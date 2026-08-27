@@ -91,11 +91,16 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
 
   // Pad C — two fingers. Her report was "move AND zoom", and a single-finger
   // drag says nothing about whether a pinch ever reaches the map.
-  const [pinch, setPinch] = useState({ began: 0, activated: 0, updates: 0, scale: 1 });
+  const [pinch, setPinch] = useState({ began: 0, activated: 0, updates: 0, scale: 1, fingers: 0 });
   const pinchGesture = useMemo(
     () =>
       Gesture.Pinch()
         .runOnJS(true)
+        // `began` fires on the FIRST finger down, so it says nothing about
+        // whether a second one ever landed. Without this the readout could
+        // claim "two fingers seen, pinch never activated" when the truth was
+        // one finger on the pad — which is exactly what it did claim.
+        .onTouchesDown((e) => setPinch((s) => ({ ...s, fingers: Math.max(s.fingers, e.numberOfTouches) })))
         .onBegin(() => setPinch((s) => ({ ...s, began: s.began + 1 })))
         .onStart(() => setPinch((s) => ({ ...s, activated: s.activated + 1 })))
         .onUpdate((e) => setPinch((s) => ({ ...s, updates: s.updates + 1, scale: e.scale }))),
@@ -105,7 +110,7 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
   const reset = () => {
     setPlain({ down: 0, move: 0, up: 0, cancel: 0, maxPointers: 0, travel: 0 });
     setGh({ began: 0, activated: 0, updates: 0, ended: 0, failed: 0 });
-    setPinch({ began: 0, activated: 0, updates: 0, scale: 1 });
+    setPinch({ began: 0, activated: 0, updates: 0, scale: 1, fingers: 0 });
   };
 
   const verdict = readVerdict(plain, gh, pinch);
@@ -119,7 +124,7 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
         `gesture-handler: began=${gh.began} activated=${gh.activated} updates=${gh.updates} ` +
         `ended=${gh.ended} failed=${gh.failed}\n` +
         `pinch: began=${pinch.began} activated=${pinch.activated} updates=${pinch.updates} ` +
-        `scale=${pinch.scale.toFixed(2)}\n` +
+        `scale=${pinch.scale.toFixed(2)} fingers=${pinch.fingers}\n` +
         `verdict: ${verdict.text}`,
     });
   };
@@ -186,6 +191,7 @@ export function TouchTestScreen({ onClose }: { onClose?: () => void }) {
           <Metric label="active" value={pinch.activated} warnIfZero={pinch.began > 0} />
           <Metric label="update" value={pinch.updates} warnIfZero={pinch.began > 0} />
           <Metric label="scale" value={Number(pinch.scale.toFixed(2))} />
+          <Metric label="fingers" value={pinch.fingers} />
         </View>
 
         <View style={[styles.verdict, { borderColor: verdict.color }]}>
@@ -218,7 +224,7 @@ function Metric({
 
 type Plain = { down: number; move: number; up: number; cancel: number; maxPointers: number; travel: number };
 type Gh = { began: number; activated: number; updates: number; ended: number; failed: number };
-type Pinch = { began: number; activated: number; updates: number; scale: number };
+type Pinch = { began: number; activated: number; updates: number; scale: number; fingers: number };
 
 /** Turns the six counters into the one sentence that matters. */
 function readVerdict(plain: Plain, gh: Gh, pinch: Pinch): { text: string; color: string } {
