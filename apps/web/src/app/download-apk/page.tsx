@@ -16,8 +16,13 @@ export const metadata: Metadata = {
     'Download the latest Extreme Medics responder app for Android, with release notes and install instructions.',
 }
 
-/** Re-check GitHub for a new build every 10 minutes. */
-export const revalidate = 600
+/** Re-check GitHub for a new build every two minutes.
+ *
+ *  Ten was too long for a page whose only job is to name the newest build: a
+ *  medic told "download 6.1.2" was still being offered 6.1.1 minutes after it
+ *  shipped. Two minutes is 30 API calls an hour, comfortably inside GitHub's
+ *  unauthenticated limit of 60. */
+export const revalidate = 120
 
 /**
  * Store listings, filled in once the apps are published. `null` renders the

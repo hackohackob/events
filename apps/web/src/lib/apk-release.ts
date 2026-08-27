@@ -58,7 +58,7 @@ export async function fetchLatestApkRelease(): Promise<ApkRelease | null> {
   try {
     const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' },
-      next: { revalidate: 600 },
+      next: { revalidate: 120 },
     })
     if (!res.ok) return null
     const release = (await res.json()) as GhRelease
