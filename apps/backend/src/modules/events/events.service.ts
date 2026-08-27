@@ -74,6 +74,16 @@ export interface StoredLocation {
   lat: number;
 }
 
+/** An event's own span, plus the day/hour slices that make it up. */
+export interface EventWindow {
+  from: string;
+  to: string;
+  /** The event's dates, "YYYY-MM-DD" in Europe/Sofia. */
+  dates: string[];
+  /** Daily window, or null when the event declares none (whole days). */
+  hours: { start: string; end: string } | null;
+}
+
 export interface EventRecord {
   id: string;
   title: string;
@@ -216,6 +226,12 @@ function sofiaWallTimeToInstant(dateISO: string, hhmm: string): Date {
   // re-checked, so a window that starts within a DST transition still lands.
   const first = new Date(naive.getTime() - sofiaOffsetMs(naive));
   return new Date(naive.getTime() - sofiaOffsetMs(first));
+}
+
+/** The Europe/Sofia calendar date of an instant, as "YYYY-MM-DD". */
+function sofiaDate(at: Date): string {
+  const parts = Object.fromEntries(SOFIA_PARTS.formatToParts(at).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 /** "2026-08-15" + 1 → "2026-08-16" (calendar days, no timezone involved). */
@@ -409,7 +425,23 @@ export class EventsService implements OnModuleInit {
   shouldRecordHistory(eventId: string, now: Date = new Date()): boolean {
     const event = this.events.find((e) => e.id === eventId);
     if (!event || event.status !== "active") return false;
-    return this.isWithinActiveHours(eventId, now);
+    if (!this.isWithinActiveHours(eventId, now)) return false;
+
+    // …and on one of the event's own DAYS. isWithinActiveHours only compares
+    // "HH:mm", so without this an event left active kept recording every day
+    // forever — a race in May was still collecting breadcrumbs in August, all
+    // filed under that event.
+    if (event.dates.length === 0) return true;
+    const today = sofiaDate(now);
+    if (event.dates.includes(today)) return true;
+
+    // An overnight window ("22:00"–"04:00") spills into the morning after the
+    // last day, and those fixes still belong to that day's session.
+    const hours = event.activeHours;
+    if (hours && hours.end < hours.start && SOFIA_HHMM.format(now) <= hours.end) {
+      return event.dates.includes(addDays(today, -1));
+    }
+    return false;
   }
 
   /**
@@ -420,7 +452,7 @@ export class EventsService implements OnModuleInit {
    *
    * Returns null for an event with no dates, which has no span to show.
    */
-  getEventWindow(eventId: string): { from: string; to: string } | null {
+  getEventWindow(eventId: string): EventWindow | null {
     const event = this.events.find((e) => e.id === eventId);
     if (!event || event.dates.length === 0) return null;
 
@@ -437,7 +469,16 @@ export class EventsService implements OnModuleInit {
     const to = sofiaWallTimeToInstant(lastDay, hours?.end ?? "23:59");
 
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
-    return { from: from.toISOString(), to: to.toISOString() };
+    // `from`/`to` bound the index scan; `dates` and `hours` narrow it to the
+    // event's ACTUAL sessions. Without them the span is one contiguous range,
+    // which swallows the nights between days and — for an event whose dates
+    // include today — the whole of today, last 12h included.
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      dates,
+      hours: hours ? { start: hours.start, end: hours.end } : null,
+    };
   }
 
   async remove(id: string): Promise<boolean> {

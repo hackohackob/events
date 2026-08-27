@@ -65,6 +65,19 @@ const ARCHIVE_CACHE_TTL_SECONDS = 10 * 60;
 /** Ceiling on a single multi-medic replay request. */
 const MAX_BUNDLE_MEDICS = 30;
 
+/** Event days and hours are written in local wall time; the store is UTC. */
+const EVENT_TIMEZONE = "Europe/Sofia";
+
+interface ResolvedWindow {
+  mode: TrailWindowMode;
+  from: Date;
+  to: Date;
+  /** Event mode only: the event's own dates. Null for a rolling window. */
+  dates: string[] | null;
+  /** Event mode only: the daily hours, when the event declares any. */
+  dailyHours: { start: string; end: string } | null;
+}
+
 @Injectable()
 export class TrailsService {
   constructor(
@@ -85,14 +98,60 @@ export class TrailsService {
   private resolveWindow(
     eventId: string,
     options: { mode?: TrailWindowMode; hours?: number },
-  ): { mode: TrailWindowMode; from: Date; to: Date } {
+  ): ResolvedWindow {
     if (options.mode === "event") {
       const span = this.events.getEventWindow(eventId);
-      if (span) return { mode: "event", from: new Date(span.from), to: new Date(span.to) };
+      if (span) {
+        return {
+          mode: "event",
+          from: new Date(span.from),
+          to: new Date(span.to),
+          dates: span.dates,
+          dailyHours: span.hours,
+        };
+      }
     }
     const hours = clamp(options.hours ?? TRAIL_MAX_HOURS, 0.25, TRAIL_MAX_HOURS);
     const to = new Date();
-    return { mode: "rolling", from: new Date(to.getTime() - hours * 3_600_000), to };
+    return {
+      mode: "rolling",
+      from: new Date(to.getTime() - hours * 3_600_000),
+      to,
+      dates: null,
+      dailyHours: null,
+    };
+  }
+
+  /**
+   * The `recorded_at` predicate for a window.
+   *
+   * The from/to range comes first so the primary-key index still drives the
+   * scan; the day and hour tests are filters layered on top. They are what make
+   * "Event" mean the event's actual sessions rather than one contiguous block —
+   * without them a two-day event includes the night between, and an event whose
+   * dates include today includes all of today.
+   */
+  private windowPredicate(w: ResolvedWindow, firstParam: number): { sql: string; params: unknown[] } {
+    const params: unknown[] = [w.from.toISOString(), w.to.toISOString()];
+    let sql = `recorded_at >= $${firstParam} AND recorded_at <= $${firstParam + 1}`;
+    let next = firstParam + 2;
+
+    if (w.dates && w.dates.length > 0) {
+      sql += ` AND (recorded_at AT TIME ZONE '${EVENT_TIMEZONE}')::date = ANY($${next}::date[])`;
+      params.push(w.dates);
+      next += 1;
+    }
+    if (w.dailyHours) {
+      const { start, end } = w.dailyHours;
+      const time = `(recorded_at AT TIME ZONE '${EVENT_TIMEZONE}')::time`;
+      // An overnight window ("22:00"–"04:00") is two open-ended slices, not a range.
+      sql +=
+        start <= end
+          ? ` AND ${time} BETWEEN $${next}::time AND $${next + 1}::time`
+          : ` AND (${time} >= $${next}::time OR ${time} <= $${next + 1}::time)`;
+      params.push(start, end);
+    }
+    return { sql, params };
   }
 
   /**
@@ -107,7 +166,8 @@ export class TrailsService {
     medicId: string,
     options: { hours?: number; maxPoints?: number; mode?: TrailWindowMode } = {},
   ): Promise<MedicTrail> {
-    const { mode, from, to } = this.resolveWindow(eventId, options);
+    const resolved = this.resolveWindow(eventId, options);
+    const { mode, from, to } = resolved;
     const maxPoints = clamp(Math.round(options.maxPoints ?? DEFAULT_MAX_POINTS), 50, MAX_POINTS_CEILING);
 
     // A finished event's archive never changes, so it is cached far longer
@@ -117,17 +177,17 @@ export class TrailsService {
     // Bucket the cache key to a 10s grid so a dashboard and a phone polling a
     // few hundred ms apart share one entry instead of thrashing it.
     const bucket = isPast ? "fixed" : Math.floor(Date.now() / (CACHE_TTL_SECONDS * 500));
-    const cacheKey = `trail:${eventId}:${medicId}:${mode}:${from.getTime()}:${to.getTime()}:${maxPoints}:${bucket}`;
+    const cacheKey = `trail:${eventId}:${medicId}:${mode}:${from.getTime()}:${to.getTime()}:${resolved.dates?.join('') ?? ''}:${resolved.dailyHours?.start ?? ''}-${resolved.dailyHours?.end ?? ''}:${maxPoints}:${bucket}`;
     const cached = await this.redis.getJson<MedicTrail>(cacheKey).catch(() => null);
     if (cached) return cached;
 
+    const where = this.windowPredicate(resolved, 3);
     const { rows } = await this.db.query<HistoryRow>(
       `SELECT recorded_at, lat, lng, speed, battery
          FROM medic_location_history
-        WHERE event_id = $1 AND medic_id = $2
-          AND recorded_at >= $3 AND recorded_at <= $4
+        WHERE event_id = $1 AND medic_id = $2 AND ${where.sql}
         ORDER BY recorded_at ASC`,
-      [eventId, medicId, from.toISOString(), to.toISOString()],
+      [eventId, medicId, ...where.params],
     );
 
     const raw = toRawPoints(rows);
@@ -179,9 +239,8 @@ export class TrailsService {
     eventId: string,
     options: { hours?: number; mode?: TrailWindowMode } = {},
   ): Promise<Array<{ medicId: string; name: string; points: number; firstAt: string; lastAt: string }>> {
-    const { from: windowFrom, to: windowTo } = this.resolveWindow(eventId, options);
-    const from = windowFrom.toISOString();
-    const to = windowTo.toISOString();
+    const resolved = this.resolveWindow(eventId, options);
+    const where = this.windowPredicate(resolved, 2);
 
     const { rows } = await this.db.query<{
       medic_id: string;
@@ -198,10 +257,10 @@ export class TrailsService {
          FROM medic_location_history h
          LEFT JOIN medic_last_location l ON l.event_id = h.event_id AND l.medic_id = h.medic_id
          LEFT JOIN event_medics em       ON em.event_id = h.event_id AND em.id::text = h.medic_id
-        WHERE h.event_id = $1 AND h.recorded_at >= $2 AND h.recorded_at <= $3
+        WHERE h.event_id = $1 AND ${where.sql.replace(/recorded_at/g, "h.recorded_at")}
         GROUP BY h.medic_id, COALESCE(l.name, em.name)
         ORDER BY 2 NULLS LAST`,
-      [eventId, from, to],
+      [eventId, ...where.params],
     );
 
     return rows.map((r) => ({
