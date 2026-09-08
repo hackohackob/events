@@ -108,6 +108,10 @@ jobs:
             cd ${{ env.DEPLOY_DIR }}
             cp docker-compose.prod.yml docker-compose.yml
             mkdir -p data uploads
+            # Radio gateway firmware. Bind-mounted read-only into the API;
+            # created here so release tarballs can be scp'd in as the deploy
+            # user rather than landing in a root-owned directory Docker made.
+            mkdir -p gateway
 
             # GraphHopper routing: config ships from the repo; the OSM extract is
             # downloaded once (159 MB) and the graph cache persists across deploys.

@@ -11,19 +11,39 @@ import type {
  * means writing one class here and registering it, with no changes upstream.
  */
 
-/** A message coming *in* from an external network, on its way to the team chat. */
-export type InboundPttMessage =
-  | { kind: "text"; from: string; text: string }
-  | { kind: "voice"; from: string; audio: Buffer; extension: string; durationMs: number }
-  | { kind: "image"; from: string; full: Buffer; thumbnail?: Buffer; extension: string }
-  | { kind: "location"; from: string; lat: number; lng: number; address?: string; accuracyM?: number };
+/**
+ * A message coming *in* from an external network, on its way to the team chat.
+ *
+ * `eventId` narrows delivery to one event. Zello leaves it unset — one account
+ * bridges every active event at once — while a radio gateway sets it, because a
+ * box is physically wired to one handset at one venue and its traffic belongs
+ * to that event alone.
+ */
+export type InboundPttBase = { from: string; eventId?: string };
+export type InboundPttMessage = InboundPttBase &
+  (
+    | { kind: "text"; text: string }
+    | { kind: "voice"; audio: Buffer; extension: string; durationMs: number }
+    | { kind: "image"; full: Buffer; thumbnail?: Buffer; extension: string }
+    | { kind: "location"; lat: number; lng: number; address?: string; accuracyM?: number }
+  );
 
-/** A message going *out* from the team chat to an external network. */
-export type OutboundPttMessage =
-  | { kind: "text"; author: string; text: string }
-  | { kind: "voice"; author: string; audioPath: string; transcript?: string }
-  | { kind: "image"; author: string; imagePath: string; caption?: string }
-  | { kind: "location"; author: string; lat: number; lng: number; address?: string; accuracyM?: number };
+/**
+ * A message going *out* from the team chat to an external network.
+ *
+ * `eventId` says which event it came from. Zello ignores it; the radio bridge
+ * uses it to pick the gateways bound to that event. `audioUrl` sits alongside
+ * `audioPath` for providers that hand the file to a remote client to fetch
+ * rather than reading it themselves.
+ */
+export type OutboundPttBase = { author: string; eventId?: string };
+export type OutboundPttMessage = OutboundPttBase &
+  (
+    | { kind: "text"; text: string }
+    | { kind: "voice"; audioPath: string; audioUrl?: string; transcript?: string }
+    | { kind: "image"; imagePath: string; caption?: string }
+    | { kind: "location"; lat: number; lng: number; address?: string; accuracyM?: number }
+  );
 
 export interface PttProviderRuntimeStatus {
   state: PttConnectionState;

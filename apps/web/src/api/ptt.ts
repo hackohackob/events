@@ -4,7 +4,11 @@ import type {
   PttEventRoutes,
   PttOverview,
   PttProviderStatus,
+  RadioGatewayCommandType,
+  RadioGatewayStatus,
+  RadioGatewayTransmission,
   UpdatePttProviderRequest,
+  UpdateRadioGatewayRequest,
 } from '@events/contracts'
 
 export interface PttActivityEntry {
@@ -53,4 +57,40 @@ export async function updatePttRoute(
 ): Promise<PttEventRoutes> {
   const res = await client.put<PttEventRoutes>('/ptt/routes', { eventId, kind, ...patch })
   return res.data
+}
+
+// ── Radio gateway appliances ─────────────────────────────────────────────────
+
+export async function fetchRadioGateways(): Promise<RadioGatewayStatus[]> {
+  const res = await client.get<RadioGatewayStatus[]>('/ptt/gateways')
+  return res.data
+}
+
+export async function fetchGatewayTransmissions(gatewayId?: string): Promise<RadioGatewayTransmission[]> {
+  const res = await client.get<RadioGatewayTransmission[]>('/ptt/gateways/transmissions', {
+    params: gatewayId ? { gatewayId } : undefined,
+  })
+  return res.data
+}
+
+export async function updateRadioGateway(
+  id: string,
+  patch: UpdateRadioGatewayRequest,
+): Promise<RadioGatewayStatus> {
+  const res = await client.put<RadioGatewayStatus>(`/ptt/gateways/${id}`, patch)
+  return res.data
+}
+
+/**
+ * Queue an instruction for a gateway. It is picked up on the box's next
+ * heartbeat rather than delivered now — the box is behind a venue's NAT and
+ * nothing can dial in to it, which is exactly why "bring the access point
+ * back" has to work this way.
+ */
+export async function commandRadioGateway(
+  id: string,
+  type: RadioGatewayCommandType,
+  arg?: string,
+): Promise<void> {
+  await client.post(`/ptt/gateways/${id}/command`, { type, arg })
 }

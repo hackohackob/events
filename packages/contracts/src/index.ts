@@ -794,6 +794,149 @@ export interface PttOverview {
   statuses: PttProviderStatus[];
 }
 
+// ─── Radio gateway appliance (the Orange Pi bridging a Hytera handset) ───────
+
+/**
+ * A gateway is a small Linux box wired to a digital handset: USB sound card to
+ * the radio's mic/speaker, a GPIO line (or VOX) to key the transmitter. It
+ * reaches the server outbound-only — venues never allow inbound ports — so the
+ * server never dials the box; the box dials the server and the server answers
+ * with work in the heartbeat response.
+ *
+ * Unlike Zello, which is one server-wide connection fanned into every active
+ * event, each gateway is bound to exactly ONE event: it sits on one physical
+ * talkgroup at one venue. That binding is what `eventId` carries.
+ */
+export type RadioGatewayNetMode = "boot" | "ap" | "client" | "ap+client" | "offline";
+
+/** Everything the box can be told to do from the dashboard. */
+export type RadioGatewayCommandType =
+  | "enter_ap"
+  | "leave_ap"
+  | "set_event"
+  | "test_tx"
+  | "restart"
+  | "reboot"
+  | "update";
+
+export interface RadioGatewayCommand {
+  id: string;
+  type: RadioGatewayCommandType;
+  /** `set_event` carries the event id; `test_tx` an optional phrase to speak. */
+  arg?: string;
+  issuedAt: string;
+  issuedBy?: string;
+}
+
+/** Live audio-path health, sampled by the box and pushed with each heartbeat. */
+export interface RadioGatewayAudio {
+  /** ALSA device names actually opened, so a wrong card is obvious. */
+  captureDevice?: string;
+  playbackDevice?: string;
+  /** 0–1 RMS over the last sampling window. */
+  rxLevel: number;
+  txLevel: number;
+  /** True while the squelch/VAD says the channel is busy. */
+  receiving: boolean;
+  transmitting: boolean;
+  /** How the transmitter is keyed on this unit. */
+  pttBackend: "vox" | "gpio" | "cm108" | "none";
+  /** Set when the PTT line could not be driven (missing GPIO export, etc). */
+  pttError?: string;
+}
+
+export interface RadioGatewayHealth {
+  uptimeS: number;
+  cpuTempC?: number;
+  loadAvg?: number;
+  diskFreeMb?: number;
+  /** Transmissions still waiting to be uploaded because the link was down. */
+  queued: number;
+}
+
+/** What the box reports about itself. Also the shape stored per device. */
+export interface RadioGatewayStatus {
+  id: string;
+  name: string;
+  version: string;
+  eventId?: string;
+  eventName?: string;
+  online: boolean;
+  lastSeenAt?: string;
+  netMode: RadioGatewayNetMode;
+  /** Venue WiFi it joined, when in client mode. */
+  ssid?: string;
+  /** RSSI as a 0–100 bar, the way nmcli reports it. */
+  signal?: number;
+  localIp?: string;
+  audio: RadioGatewayAudio;
+  health: RadioGatewayHealth;
+  counters: { inbound: number; outbound: number };
+  /** Commands issued from the dashboard the box has not picked up yet. */
+  pending: RadioGatewayCommand[];
+  /** Speak app text messages over the air. Off unless an operator turns it on. */
+  ttsEnabled: boolean;
+}
+
+/** Trimmed event list the box shows in its setup screen. */
+export interface RadioGatewayEventOption {
+  id: string;
+  name: string;
+  status: string;
+  startsAt?: string;
+}
+
+/** Box → server on connect and every heartbeat. */
+export interface RadioGatewayReportRequest {
+  id: string;
+  name: string;
+  version: string;
+  netMode: RadioGatewayNetMode;
+  ssid?: string;
+  signal?: number;
+  localIp?: string;
+  audio: RadioGatewayAudio;
+  health: RadioGatewayHealth;
+  counters: { inbound: number; outbound: number };
+}
+
+/** Server → box, the only channel through which the box receives work. */
+export interface RadioGatewayReportResponse {
+  ok: true;
+  serverTime: string;
+  /** The event this box is bound to, as the server sees it (authoritative). */
+  eventId?: string;
+  /** Chosen in the box's own setup screen, so it needs the live list. */
+  events: RadioGatewayEventOption[];
+  /** Whether the bound event currently wants traffic in each direction. */
+  routes: { inbound: boolean; outbound: boolean };
+  ttsEnabled: boolean;
+  commands: RadioGatewayCommand[];
+  /** Newest published firmware; the box self-updates when this is ahead. */
+  latestVersion?: string;
+}
+
+/** One thing that went over the air, as listed in the dashboard and on the box. */
+export interface RadioGatewayTransmission {
+  id: string;
+  gatewayId: string;
+  direction: "rx" | "tx";
+  at: string;
+  durationMs: number;
+  /** Present once the server has stored the audio. */
+  audioUrl?: string;
+  transcript?: string;
+  /** For tx: who in the app said it. For rx: the radio's call sign if known. */
+  party?: string;
+  peakLevel?: number;
+}
+
+export interface UpdateRadioGatewayRequest {
+  name?: string;
+  eventId?: string | null;
+  ttsEnabled?: boolean;
+}
+
 export type IncidentActionType = "going" | "arrived" | "need_backup" | "resolved" | "stand_down";
 
 export interface IncidentActionRequest {

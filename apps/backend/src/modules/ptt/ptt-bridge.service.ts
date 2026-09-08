@@ -15,6 +15,7 @@ import { RedisService } from "../infra/redis.service";
 import { TranscriptionService } from "../incidents/transcription.service";
 import { PttMediaService } from "./ptt-media.service";
 import { PttSettingsService } from "./ptt-settings.service";
+import { TtsService } from "./tts.service";
 import { RadioProvider } from "./providers/radio/radio.provider";
 import type { InboundPttMessage, PttProvider } from "./providers/ptt-provider";
 import { ZelloProvider } from "./providers/zello/zello.provider";
@@ -50,6 +51,7 @@ export class PttBridgeService implements OnModuleInit {
     private readonly transcription: TranscriptionService,
     private readonly bus: PttBusService,
     private readonly redis: RedisService,
+    private readonly tts: TtsService,
     zello: ZelloProvider,
     radio: RadioProvider,
   ) {
@@ -158,7 +160,14 @@ export class PttBridgeService implements OnModuleInit {
   // ── Inbound: external network → every active event ─────────────────────────
 
   private async handleInbound(kind: PttChannelKind, message: InboundPttMessage): Promise<void> {
-    const eventIds = await this.eventsAccepting(kind, "inbound");
+    // A message that names its own event goes only there — a radio gateway is
+    // wired to one venue, so fanning its traffic into every active event would
+    // put one race's chatter into another's log. It still has to pass that
+    // event's inbound switch.
+    const accepting = await this.eventsAccepting(kind, "inbound");
+    const eventIds = message.eventId
+      ? accepting.filter((id) => id === message.eventId)
+      : accepting;
     if (eventIds.length === 0) {
       this.note(kind, "info", `dropped ${message.kind} from ${message.from} — no active event is listening`);
       return;
@@ -222,6 +231,53 @@ export class PttBridgeService implements OnModuleInit {
     }
   }
 
+  /**
+   * A finished over-the-air transmission from a gateway box. Same treatment as
+   * any other inbound bridge voice — stored, transcribed, posted into the
+   * event's team chat — but scoped to the one event that box is bound to, and
+   * returning what was stored so the gateway's own transmission log can point
+   * at the same recording.
+   *
+   * Returns null when that event has radio traffic switched off, which is a
+   * normal state and not an error.
+   */
+  async ingestRadioVoice(input: {
+    eventId: string;
+    from: string;
+    audio: Buffer;
+    extension: string;
+    durationMs: number;
+  }): Promise<{ audioUrl?: string; transcript?: string } | null> {
+    const accepting = await this.eventsAccepting("radio", "inbound");
+    if (!accepting.includes(input.eventId)) {
+      this.note("radio", "info", `dropped ${Math.round(input.durationMs / 1000)}s from ${input.from} — event not listening`);
+      return null;
+    }
+    try {
+      const payload = await this.toChatPayload({
+        kind: "voice",
+        from: input.from,
+        audio: input.audio,
+        extension: input.extension,
+        durationMs: input.durationMs,
+      });
+      await this.chat.addFromBridge(input.eventId, "radio", input.from, payload);
+      this.countInbound("radio");
+      this.note("radio", "info", `${Math.round(input.durationMs / 1000)}s from ${input.from} → team chat`);
+      return payload.kind === "voice"
+        ? { audioUrl: payload.audioUrl, transcript: payload.transcript }
+        : {};
+    } catch (err) {
+      this.note("radio", "error", `inbound voice failed: ${(err as Error).message}`);
+      throw err;
+    }
+  }
+
+  /** Render text to speech for a gateway to transmit. Null when unavailable. */
+  speak(text: string): Promise<string | null> {
+    return this.tts.synthesize(text);
+  }
+
   // ── Outbound: app chat → external networks ─────────────────────────────────
 
   private async handleOutbound(message: EventMessage): Promise<void> {
@@ -241,6 +297,7 @@ export class PttBridgeService implements OnModuleInit {
 
       const outbound = this.toProviderMessage(message, route.kind);
       if (!outbound) continue;
+      outbound.eventId = message.eventId;
       try {
         await provider.send(outbound);
         this.countOutbound(route.kind);
@@ -300,6 +357,7 @@ export class PttBridgeService implements OnModuleInit {
           kind: "voice",
           author,
           audioPath: this.media.absolutePath(message.audioUrl),
+          audioUrl: message.audioUrl,
           transcript: message.transcript,
         };
 

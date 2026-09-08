@@ -1,0 +1,28 @@
+{
+  "name": "em-radio-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extreme Medics radio gateway \u2014 bridges a Hytera handset to the events platform.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && npm --prefix ui run build",
+    "build:daemon": "tsc -p tsconfig.json",
+    "build:ui": "npm --prefix ui run build",
+    "dev": "GATEWAY_STATE_DIR=./.dev-state GATEWAY_FAKE_HARDWARE=1 node --watch dist/index.js",
+    "dev:ui": "npm --prefix ui run dev",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bundle": "./scripts/build-bundle.sh"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

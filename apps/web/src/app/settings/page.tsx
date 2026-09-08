@@ -16,6 +16,7 @@ import {
 } from '@/api/ptt'
 import { fetchEvents } from '@/api/events'
 import BridgeFlow, { CHANNEL_THEME } from '@/components/ptt/BridgeFlow'
+import GatewayFleet from '@/components/ptt/GatewayFleet'
 
 const STATE_THEME: Record<PttConnectionState, { label: string; color: string; pulse: boolean }> = {
   online: { label: 'Connected', color: '#34d399', pulse: true },
@@ -90,6 +91,12 @@ export default function SettingsPage() {
               onSaved={invalidate}
             />
           ))}
+
+          {/* The appliances behind the "Digital radio" provider above. Placed
+              between the connection cards and the per-event routing because
+              that is the order the whole thing is set up in: connect, enrol a
+              box, then decide which event it carries. */}
+          <GatewayFleet events={activeEvents} />
 
           <RoutingSection
             events={activeEvents}

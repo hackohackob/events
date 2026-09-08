@@ -1,0 +1,9 @@
+# Let the gateway service key a CM108/CM119 USB sound card's PTT pin.
+#
+# Without this, /dev/hidraw* is root-only *and* unlabelled, so the box cannot
+# tell which hidraw node belongs to the audio dongle. The service runs as root
+# today, but the rule also survives a future move to an unprivileged user and
+# gives the device a stable name.
+#
+# Installed to /etc/udev/rules.d/99-em-gateway-hidraw.rules
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d8c", MODE="0660", GROUP="audio", SYMLINK+="em-ptt"

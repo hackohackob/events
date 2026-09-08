@@ -27,6 +27,11 @@ services:
       ZELLO_USERNAME: "${ZELLO_USERNAME:-}"
       ZELLO_PASSWORD: "${ZELLO_PASSWORD:-}"
       ZELLO_ISSUER: "${ZELLO_ISSUER:-}"
+      # Radio gateway appliances (orangepi/). The shared key the boxes present
+      # is stored in the database from the dashboard's Settings page, so nothing
+      # secret is needed here. This only points the server at the directory
+      # holding the firmware bundles the boxes update themselves from.
+      RADIO_GATEWAY_BUNDLE_DIR: "/app/gateway"
       ZELLO_DEV_TOKEN: "${ZELLO_DEV_TOKEN:-}"
       # Inline PEM (escaped newlines are accepted) rather than a file path —
       # a bind mount would make Docker create a stray directory on hosts that
@@ -50,6 +55,9 @@ services:
     volumes:
       - events_data:/app/apps/backend/data
       - events_uploads:/app/apps/backend/uploads
+      # Gateway releases are dropped here on the host with scp; the API serves
+      # the newest one to the boxes. Read-only: nothing in the app writes here.
+      - /opt/events/gateway:/app/gateway:ro
 
   web:
     image: hackohackob1/events-web:latest

@@ -1,0 +1,36 @@
+[Unit]
+Description=Extreme Medics radio gateway
+Documentation=https://github.com/ — see orangepi/README.md in the events repo
+After=network.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Root, for three specific reasons, all of which are hard to work around on a
+# single-purpose appliance: binding port 80 so the console needs no port in its
+# address, driving /sys/class/gpio for the PTT line, and nmcli's system-level
+# connection changes. The box does one job and has no other users.
+User=root
+WorkingDirectory=/opt/em-gateway/current
+ExecStart=/usr/bin/node /opt/em-gateway/current/dist/index.js
+Environment=NODE_ENV=production
+Environment=GATEWAY_STATE_DIR=/var/lib/em-gateway
+
+# The radio link is the point of the box; a crash must never leave it dead.
+Restart=always
+RestartSec=3
+# ...but a boot loop should be visible rather than silently retried forever.
+StartLimitIntervalSec=120
+StartLimitBurst=8
+
+# journald keeps its own copy; the app also writes /var/lib/em-gateway/gateway.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=em-gateway
+
+# ALSA and ffmpeg are happier with a real /dev; no sandboxing beyond the basics.
+PrivateTmp=yes
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target
