@@ -13,7 +13,7 @@ import {
   type DeepPartial,
   type GatewayConfig,
 } from "./config";
-import { decodeToPcm, decodeWithPreset, encodeToOpus } from "./audio/codec";
+import { decodeToPcm, decodeWithPreset, encodeToOpus, setOutgoingPreset } from "./audio/codec";
 import { findPreset, PRESETS } from "./audio/presets";
 import { bytesToMs } from "./audio/format";
 import { readHealth } from "./health";
@@ -60,6 +60,7 @@ export class GatewayDaemon extends EventEmitter {
   async start(): Promise<void> {
     log.info("system", `Extreme Medics radio gateway ${VERSION} starting`, { id: this.config.id });
 
+    setOutgoingPreset(this.config.audio.outgoingPreset);
     this.uplink.bindSnapshot(() => this.reportSnapshot());
     this.wireRadio();
     this.wireUplink();
@@ -271,6 +272,7 @@ export class GatewayDaemon extends EventEmitter {
   }
 
   private applyConfig(): void {
+    setOutgoingPreset(this.config.audio.outgoingPreset);
     this.network.applyConfig(this.config);
     this.recordings.applyConfig(this.config);
     this.uplink.applyConfig(this.config);
@@ -337,6 +339,10 @@ export class GatewayDaemon extends EventEmitter {
     return existsSync(AB_SAMPLE_PATH);
   }
 
+  abSamplePath(): string {
+    return AB_SAMPLE_PATH;
+  }
+
   /** Transmit the sample processed with one preset. */
   async sendAbPreset(id: string): Promise<{ ok: boolean; detail: string }> {
     const preset = findPreset(id);
@@ -351,7 +357,20 @@ export class GatewayDaemon extends EventEmitter {
   }
 
   listAbPresets() {
-    return PRESETS.map(({ id, label, detail }) => ({ id, label, detail }));
+    return PRESETS.map(({ id, label, detail }) => ({
+      id,
+      label,
+      detail,
+      active: id === this.config.audio.outgoingPreset,
+    }));
+  }
+
+  /** Adopt a preset as the box's actual outgoing processing. */
+  useAbPreset(id: string): { ok: boolean; detail: string } {
+    const preset = findPreset(id);
+    if (!preset) return { ok: false, detail: "Unknown preset." };
+    this.updateConfig({ audio: { ...this.config.audio, outgoingPreset: id } });
+    return { ok: true, detail: `${preset.label} is now what the box sends.` };
   }
 
   async update(): Promise<{ ok: boolean; detail: string }> {

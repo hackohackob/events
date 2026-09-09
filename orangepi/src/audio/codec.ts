@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { log } from "../logger";
 import { hasBinary } from "../util";
 import { CHANNELS, SAMPLE_RATE } from "./format";
-import { normalise, type AudioPreset } from "./presets";
+import { findPreset, normalise, type AudioPreset } from "./presets";
 
 /**
  * ffmpeg wrappers: everything arriving from the server (m4a voice notes, mp3
@@ -35,6 +35,16 @@ import { normalise, type AudioPreset } from "./presets";
  * radio's gate dropped part-way through a message.
  */
 const DEFAULT_RMS_TARGET = 0.16;
+
+/**
+ * The preset outgoing audio is put through, kept here so `decodeToPcm` needs no
+ * access to the config object. Set from the daemon whenever settings change.
+ */
+let outgoing: AudioPreset | null = null;
+
+export function setOutgoingPreset(id: string): void {
+  outgoing = findPreset(id) ?? null;
+}
 
 const VOICE_BAND = [
   // Two cascaded high-passes: 24 dB/octave rather than 12. A single one leaves
@@ -149,11 +159,13 @@ async function decodeFile(path: string, ogg: boolean): Promise<Buffer | null> {
       // its speaker: the input is built for a telephone band, and everything
       // below it arrives as boom rather than as bass. Then normalise, because a
       // radio channel has no headroom to spare and a quiet talker is a lost one.
-      "-af", VOICE_BAND,
+      ...(outgoing?.filter ?? VOICE_BAND ? ["-af", outgoing ? (outgoing.filter ?? "anull") : VOICE_BAND] : []),
       "pipe:1",
     ],
   );
-  if (pcm && pcm.length > 0) return normalise(pcm, "rms", DEFAULT_RMS_TARGET);
+  if (pcm && pcm.length > 0) {
+    return normalise(pcm, outgoing?.normalise ?? "rms", outgoing?.target ?? DEFAULT_RMS_TARGET);
+  }
 
   // Retry with no forced decoder at all. Reached when an Ogg turns out not to
   // be Opus, or when a file's extension lied about its contents.

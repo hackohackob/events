@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Request, type Response } from "express";
 import { log, type LogEntry } from "../logger";
@@ -280,6 +280,25 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
     res.json({ loaded: daemon.abSampleLoaded(), presets: daemon.listAbPresets() });
   });
 
+  /**
+   * The stored sample itself, so the console can play it. Served with a sniffed
+   * content type: what was downloaded is whatever the server had — Ogg from a
+   * radio or Zello, m4a from the app — and the browser needs to be told which.
+   */
+  app.get("/api/radio/ab/sample", (_req, res) => {
+    const path = daemon.abSamplePath();
+    if (!existsSync(path)) {
+      res.status(404).json({ error: "no sample loaded" });
+      return;
+    }
+    const head = readFileSync(path, { flag: "r" }).subarray(0, 4).toString("latin1");
+    res.set({
+      "Content-Type": head === "OggS" ? "audio/ogg" : "audio/mp4",
+      "Cache-Control": "no-store",
+    });
+    createReadStream(path).pipe(res);
+  });
+
   app.post("/api/radio/ab/sample", (req, res) => {
     const url = String((req.body as { url?: string }).url ?? "").trim();
     if (!url) {
@@ -290,6 +309,11 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
       .loadAbSample(url)
       .then((result) => res.json(result))
       .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
+  });
+
+  app.post("/api/radio/ab/use", (req, res) => {
+    const id = String((req.body as { preset?: string }).preset ?? "").trim();
+    res.json(daemon.useAbPreset(id));
   });
 
   app.post("/api/radio/ab/send", (req, res) => {

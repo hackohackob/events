@@ -102,7 +102,13 @@ export interface GatewayConfig {
   gatewayKeySet: boolean;
   eventId: string | null;
   ap: { ssid: string; password: string; countryCode: string; keepWithClient: boolean; onDemandMinutes: number };
-  audio: { capture: string; playback: string; inputGain: number; outputGain: number };
+  audio: {
+    capture: string;
+    playback: string;
+    inputGain: number;
+    outputGain: number;
+    outgoingPreset: string;
+  };
   squelch: {
     openLevel: number;
     closeLevel: number;
@@ -180,9 +186,11 @@ export const api = {
   wakeTone: () => post<{ ok: boolean; detail: string }>("/radio/wake-tone"),
 
   abInfo: () =>
-    request<{ loaded: boolean; presets: Array<{ id: string; label: string; detail: string }> }>(
-      "/radio/ab",
-    ),
+    request<{
+      loaded: boolean;
+      presets: Array<{ id: string; label: string; detail: string; active: boolean }>;
+    }>("/radio/ab"),
+  abUse: (preset: string) => post<{ ok: boolean; detail: string }>("/radio/ab/use", { preset }),
   abLoadSample: (url: string) => post<{ ok: boolean; detail: string }>("/radio/ab/sample", { url }),
   abSend: (preset: string) => post<{ ok: boolean; detail: string }>("/radio/ab/send", { preset }),
   verifyPtt: () => post<{ ok: boolean; detail: string }>("/radio/verify-ptt"),

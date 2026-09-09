@@ -57,6 +57,12 @@ export interface GatewayConfig {
     inputGain: number;
     /** Playback gain multiplier applied before aplay. */
     outputGain: number;
+    /**
+     * Which processing preset outgoing audio goes through, by id from
+     * `audio/presets.ts`. Chosen by ear on a real radio rather than set from
+     * theory — the presets exist to be compared, and this records the verdict.
+     */
+    outgoingPreset: string;
   };
 
   squelch: {
@@ -222,7 +228,10 @@ export function defaultConfig(): GatewayConfig {
       keepWithClient: false,
       onDemandMinutes: 30,
     },
-    audio: { capture: "", playback: "", inputGain: 1, outputGain: 1 },
+    // "gentle" — a single high-pass at 250 Hz and nothing else — was the one
+    // that sounded best out of a Hytera X1p in the first field comparison.
+    // Heavier filtering measured better and sounded worse.
+    audio: { capture: "", playback: "", inputGain: 1, outputGain: 1, outgoingPreset: "gentle" },
     squelch: {
       openLevel: 0.06,
       closeLevel: 0.035,

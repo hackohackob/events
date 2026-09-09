@@ -12,12 +12,17 @@ import { Banner, Card, Field } from "./ui";
  * be hearing is the difference between what was said.
  */
 export function AbTest() {
-  const [presets, setPresets] = useState<Array<{ id: string; label: string; detail: string }>>([]);
+  const [presets, setPresets] = useState<
+    Array<{ id: string; label: string; detail: string; active: boolean }>
+  >([]);
   const [loaded, setLoaded] = useState(false);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [sent, setSent] = useState<string[]>([]);
+  // Bumped whenever a new sample is stored, to defeat the browser's cache on
+  // an endpoint whose contents change behind the same URL.
+  const [sampleVersion, setSampleVersion] = useState(0);
 
   const refresh = useCallback(() => {
     api
@@ -35,7 +40,21 @@ export function AbTest() {
     try {
       const result = await api.abLoadSample(url.trim());
       setNotice({ ok: result.ok, text: result.detail });
-      if (result.ok) refresh();
+      if (result.ok) {
+        refresh();
+        setSampleVersion((v) => v + 1);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const use = async (id: string): Promise<void> => {
+    setBusy(id);
+    try {
+      const result = await api.abUse(id);
+      setNotice({ ok: result.ok, text: result.detail });
+      refresh();
     } finally {
       setBusy(null);
     }
@@ -83,6 +102,39 @@ export function AbTest() {
           No sample loaded yet.
         </p>
       ) : (
+        <>
+          {/* Hearing the source matters: half of judging "is it bassy" is
+              knowing how bassy it was before the box touched it. */}
+          <div style={{ marginTop: 14 }}>
+            <label
+              style={{
+                display: "block",
+                fontSize: 11.5,
+                fontWeight: 700,
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: "var(--text-faint)",
+                marginBottom: 7,
+              }}
+            >
+              The sample, unprocessed
+            </label>
+            <audio
+              key={sampleVersion}
+              controls
+              preload="metadata"
+              src={`/api/radio/ab/sample?v=${sampleVersion}`}
+              style={{ width: "100%", height: 36 }}
+            />
+            <p className="hint" style={{ marginTop: 6 }}>
+              This is what arrived, before any processing — the thing every preset below is trying
+              to improve on.
+            </p>
+          </div>
+        </>
+      )}
+
+      {loaded && (
         <div style={{ margin: "18px -16px 0" }}>
           {presets.map((preset) => (
             <div className="row" key={preset.id}>
@@ -92,19 +144,28 @@ export function AbTest() {
                 <strong style={{ whiteSpace: "normal" }}>{preset.label}</strong>
                 <span style={{ whiteSpace: "normal" }}>{preset.detail}</span>
               </div>
-              <button
-                className={`btn sm${sent.includes(preset.id) ? "" : " primary"}`}
-                disabled={busy !== null}
-                onClick={() => void send(preset.id)}
-                style={{ flexShrink: 0 }}
-              >
-                {busy === preset.id ? (
-                  <RefreshIcon size={13} className="spin" />
-                ) : (
-                  <ZapIcon size={13} />
-                )}
-                {sent.includes(preset.id) ? "Again" : "Send"}
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+                <button
+                  className={`btn sm${sent.includes(preset.id) ? "" : " primary"}`}
+                  disabled={busy !== null}
+                  onClick={() => void send(preset.id)}
+                >
+                  {busy === preset.id ? (
+                    <RefreshIcon size={13} className="spin" />
+                  ) : (
+                    <ZapIcon size={13} />
+                  )}
+                  {sent.includes(preset.id) ? "Again" : "Send"}
+                </button>
+                <button
+                  className="btn sm ghost"
+                  disabled={busy !== null || preset.active}
+                  onClick={() => void use(preset.id)}
+                  style={preset.active ? { color: "var(--green)", opacity: 1 } : undefined}
+                >
+                  {preset.active ? "In use" : "Use this"}
+                </button>
+              </div>
             </div>
           ))}
         </div>
