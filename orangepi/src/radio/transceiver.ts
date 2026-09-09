@@ -204,7 +204,10 @@ export class Transceiver extends EventEmitter {
       this.transmitting = false;
       this.abort = null;
       // The radio's own squelch tail would otherwise be recorded as an
-      // incoming transmission the instant we stop.
+      // incoming transmission the instant we stop. The deaf window covers the
+      // key-down tone that follows a beat later, past the point where the
+      // receiver has already been unmuted.
+      this.capture.deafFor(400 + Math.max(0, this.config.rogerBeep?.holdOffMs ?? 0));
       setTimeout(() => this.capture.setMuted(false), 400);
       this.emit("state");
     }
@@ -216,13 +219,17 @@ export class Transceiver extends EventEmitter {
    * more likely a stuck squelch than a long call, and the message still matters.
    */
   private async waitForClearChannel(): Promise<void> {
+    // Deliberately `carryingSpeech` and not `receiving`. The gate opens for the
+    // radio's own talk-permit and roger tones, which arrive on the receive path
+    // every time the box keys up; waiting for those would have the box politely
+    // deferring to itself before every transmission.
     const deadline = Date.now() + this.config.ptt.waitForClearMs;
-    if (!this.capture.receiving) return;
-    log.debug("radio", "channel busy — waiting for it to clear");
-    while (this.capture.receiving && Date.now() < deadline) {
+    if (!this.capture.carryingSpeech) return;
+    log.debug("radio", "somebody is talking — waiting for the channel to clear");
+    while (this.capture.carryingSpeech && Date.now() < deadline) {
       await sleep(120);
     }
-    if (this.capture.receiving) {
+    if (this.capture.carryingSpeech) {
       log.warn("radio", "channel still busy after the wait — transmitting anyway");
     }
   }
@@ -272,6 +279,7 @@ export class Transceiver extends EventEmitter {
     await sleep(this.config.ptt.tailMs);
     await this.ptt.unkey().catch((err: Error) => log.error("radio", `FAILED TO UNKEY: ${err.message}`));
     this.transmitting = false;
+    this.capture.deafFor(400 + Math.max(0, this.config.rogerBeep?.holdOffMs ?? 0));
     setTimeout(() => this.capture.setMuted(false), 400);
     this.emit("state");
     const durationMs = Date.now() - session.startedAt;

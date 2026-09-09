@@ -142,17 +142,37 @@ export async function encodeToOpus(pcm: Buffer): Promise<Buffer | null> {
  * two-tone chirp rather than a flat tone, because a flat tone tells you the
  * card works but not whether the audio path is clipping.
  */
-export function testTonePcm(durationMs = 1800): Buffer {
-  const samples = Math.round((durationMs / 1000) * SAMPLE_RATE);
-  const pcm = Buffer.alloc(samples * 2);
-  for (let i = 0; i < samples; i++) {
-    const t = i / SAMPLE_RATE;
-    const progress = i / samples;
-    // Fade in and out so the transmitter is never hit with a step edge.
-    const envelope = Math.min(1, progress * 12, (1 - progress) * 12);
-    const value =
-      Math.sin(2 * Math.PI * 700 * t) * 0.45 + Math.sin(2 * Math.PI * 1100 * t) * 0.25;
-    pcm.writeInt16LE(Math.round(value * envelope * 22000), i * 2);
+export function testTonePcm(): Buffer {
+  // A distinctive pattern rather than a single beep: three rising notes, a gap,
+  // then a long steady note. Long enough to judge whether the level and the
+  // tone of the link are right, and deliberately clear of 1600 Hz so the box
+  // never mistakes its own test for a radio's roger beep.
+  const notes: Array<{ hz: number; ms: number }> = [
+    { hz: 600, ms: 220 },
+    { hz: 900, ms: 220 },
+    { hz: 1200, ms: 220 },
+    { hz: 0, ms: 260 },
+    { hz: 900, ms: 1400 },
+  ];
+
+  const total = notes.reduce((sum, note) => sum + Math.round((note.ms / 1000) * SAMPLE_RATE), 0);
+  const pcm = Buffer.alloc(total * 2);
+  let at = 0;
+  for (const note of notes) {
+    const samples = Math.round((note.ms / 1000) * SAMPLE_RATE);
+    for (let i = 0; i < samples; i++) {
+      let value = 0;
+      if (note.hz > 0) {
+        // Fade each note in and out so the transmitter is never hit with a step
+        // edge, which clicks and can trip a radio's own noise gate.
+        const progress = i / samples;
+        const envelope = Math.min(1, progress * 20, (1 - progress) * 20);
+        value = Math.sin((2 * Math.PI * note.hz * i) / SAMPLE_RATE) * 0.5 * envelope;
+      }
+      pcm.writeInt16LE(Math.round(value * 22000), (at + i) * 2);
+    }
+    at += samples;
   }
   return pcm;
 }
+

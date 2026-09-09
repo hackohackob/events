@@ -58,6 +58,12 @@ const OPENING_TONE_WINDOW_MS = 700;
 const MIN_VOICED_MS = 300;
 
 /**
+ * Sound above the threshold before the channel counts as genuinely busy for the
+ * purpose of holding off a transmission. Comfortably longer than a beep.
+ */
+const SPEECH_EVIDENCE_MS = 250;
+
+/**
  * Corner frequency of the capture-path high-pass.
  *
  * A handset's speaker output carries a lot of energy below the voice band — DC
@@ -170,6 +176,20 @@ export class AudioCapture extends EventEmitter {
     return this.open;
   }
 
+  /**
+   * Whether the channel currently carries *speech*, as opposed to merely being
+   * open.
+   *
+   * This is the test that governs whether an outgoing transmission waits. A
+   * radio answers its own key-up with a talk-permit tone, and that tone comes
+   * straight back down the receive path — so treating "the gate is open" as
+   * "somebody is talking" would make the box defer to its own beep and delay
+   * every single transmission it makes.
+   */
+  get carryingSpeech(): boolean {
+    return this.open && this.voicedMs >= SPEECH_EVIDENCE_MS;
+  }
+
   applyConfig(config: GatewayConfig): void {
     const deviceChanged = config.audio.capture !== this.config.audio.capture;
     this.config = config;
@@ -177,6 +197,18 @@ export class AudioCapture extends EventEmitter {
       log.info("audio", "capture device changed — restarting the recorder");
       void this.restart();
     }
+  }
+
+  /**
+   * Ignore the channel for a while. Used after the box transmits: a radio
+   * answers its own key-up and key-down with tones, and those arrive on the
+   * receive path a moment after the transmitter drops — long enough to have
+   * unmuted, so without this they open the gate and land as a phantom
+   * transmission behind everything the box sends.
+   */
+  deafFor(ms: number): void {
+    if (ms <= 0) return;
+    this.deafUntil = Math.max(this.deafUntil, Date.now() + ms);
   }
 
   /** Suppress the squelch while transmitting, and drop anything half-captured. */

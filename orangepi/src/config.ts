@@ -131,6 +131,19 @@ export interface GatewayConfig {
   /** Speak app text over the air. Mirrored from the server, off by default. */
   ttsEnabled: boolean;
 
+  /**
+   * What the "test transmit" button says over the air.
+   *
+   * Spoken through the server's speech synthesis so the test exercises the same
+   * path a real message takes — download, decode, key, play — rather than only
+   * the sound card. A tone proves the wiring carries *something*; words prove
+   * it carries something intelligible, which is the actual question. Falls back
+   * to a tone when the server cannot be reached.
+   *
+   * In the language the people on the radio speak, not the console's.
+   */
+  testPhrase: string;
+
   storage: {
     /** Recordings are pruned oldest-first past either limit. */
     maxMb: number;
@@ -208,6 +221,9 @@ export function defaultConfig(): GatewayConfig {
       waitForClearMs: 8_000,
     },
     ttsEnabled: false,
+    testPhrase:
+      "Проверка на връзката от базата. Едно. Две. Три. Четири. Пет. " +
+      "Ако чувате това ясно, звуковият път работи. Край.",
     storage: { maxMb: 2048, maxDays: 14 },
     consolePin: "",
   };

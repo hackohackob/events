@@ -235,7 +235,7 @@ export class GatewayDaemon extends EventEmitter {
         break;
       }
       case "test_tx":
-        this.radio.transmitTestTone();
+        void this.transmitTest();
         break;
       case "restart":
         log.warn("system", "restarting the service on the dashboard's request");
@@ -278,6 +278,36 @@ export class GatewayDaemon extends EventEmitter {
     // visible rather than leaving the two quietly disagreeing.
     if (!ok) log.warn("server", "the event was set locally but the server has not confirmed it yet");
     return ok;
+  }
+
+  /**
+   * The "test transmit" button.
+   *
+   * Speaks a phrase rather than sounding a tone, because the question an
+   * operator is actually asking is "can the far end understand me", and a beep
+   * cannot answer it. It also exercises the whole outgoing path — fetch from
+   * the server, decode, queue, key, play — which is the path a real message
+   * takes. When the server is unreachable it falls back to a tone, which at
+   * least proves the cable and the keying.
+   */
+  async transmitTest(): Promise<{ ok: boolean; detail: string }> {
+    const phrase = this.config.testPhrase?.trim();
+    if (phrase && this.uplink.current().connected) {
+      const spoken = await this.uplink.speak(`${this.config.name}. ${phrase}`);
+      const pcm = spoken ? await decodeToPcm(spoken) : null;
+      if (pcm) {
+        this.radio.enqueue({ id: `test-${Date.now()}`, pcm, label: "spoken test", local: true });
+        return { ok: true, detail: "Speaking a test message over the air." };
+      }
+      log.warn("server", "speech is unavailable — falling back to a test tone");
+    }
+    this.radio.transmitTestTone();
+    return {
+      ok: true,
+      detail: phrase
+        ? "The server could not supply speech, so a test tone is on its way instead."
+        : "A test tone is on its way to the radio.",
+    };
   }
 
   async update(): Promise<{ ok: boolean; detail: string }> {

@@ -668,6 +668,7 @@ function KeyingCard({
   setNotice: Notice;
 }) {
   const [checking, setChecking] = useState(false);
+  const [testPhrase, setTestPhrase] = useState(config.testPhrase);
   const set = (change: Partial<GatewayConfig["ptt"]>): void => {
     void patch({ ptt: { ...config.ptt, ...change } });
   };
@@ -751,6 +752,18 @@ function KeyingCard({
         hint="Stops the last word being cut off by the transmitter dropping."
         onChange={(tailMs) => set({ tailMs })}
       />
+      <Field
+        label="What the test says"
+        hint="Spoken over the air by the Test transmit button, through the server's speech synthesis. Words rather than a beep, because the question is whether the far end can understand you. Falls back to a tone when the server is unreachable."
+      >
+        <input
+          value={testPhrase}
+          onChange={(e) => setTestPhrase(e.target.value)}
+          onBlur={() => testPhrase !== config.testPhrase && void patch({ testPhrase })}
+          placeholder="Radio check from the command centre."
+        />
+      </Field>
+
       <Slider
         label="Never transmit longer than"
         value={config.ptt.maxTxMs}

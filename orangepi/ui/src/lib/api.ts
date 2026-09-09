@@ -128,6 +128,7 @@ export interface GatewayConfig {
     fallbackHangMs: number;
   };
   ttsEnabled: boolean;
+  testPhrase: string;
   storage: { maxMb: number; maxDays: number };
 }
 

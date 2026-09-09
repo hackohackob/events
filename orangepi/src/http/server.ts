@@ -259,8 +259,10 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
   });
 
   app.post("/api/radio/test-tone", (_req, res) => {
-    daemon.radio.transmitTestTone();
-    res.json({ ok: true, detail: "A test tone is on its way to the radio." });
+    void daemon
+      .transmitTest()
+      .then((result) => res.json(result))
+      .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
   });
 
   app.post("/api/radio/verify-ptt", (_req, res) => {
