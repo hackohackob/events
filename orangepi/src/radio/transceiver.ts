@@ -341,19 +341,41 @@ export class Transceiver extends EventEmitter {
 function voxWakeTone(durationMs: number): Buffer {
   const samples = Math.max(1, Math.round((Math.max(200, durationMs) / 1000) * SAMPLE_RATE));
   const pcm = Buffer.alloc(samples * 2);
+
+  // 480 Hz rather than 700: it carries the same energy into a VOX detector but
+  // is far less piercing to sit next to, and a box that is unpleasant to be
+  // near gets turned down or unplugged.
+  const HZ = 480;
+  const ATTACK_MS = 40;
+  const DECAY_MS = 320;
+  const PEAK = 0.5;
+  const SUSTAIN = 0.13;
+
+  const attack = (ATTACK_MS / 1000) * SAMPLE_RATE;
+  const decay = (DECAY_MS / 1000) * SAMPLE_RATE;
+
   for (let i = 0; i < samples; i++) {
-    const progress = i / samples;
-    // Ramp in rather than starting at full amplitude: a step edge clicks, and
-    // some radios' noise gates react to the click instead of the tone.
-    const envelope = Math.min(1, progress * 8, (1 - progress) * 24);
-    // 700 Hz, squarely inside the band a VOX detector listens to, and loud.
-    // The first version was 420 Hz at 0.18 and a radio set to a low VOX
-    // sensitivity simply slept through it, taking the first word or two of
-    // every message with it.
-    const value = Math.sin((2 * Math.PI * 700 * i) / SAMPLE_RATE) * 0.45 * envelope;
-    pcm.writeInt16LE(Math.round(value * 32767), i * 2);
+    // VOX needs a firm onset to trigger and then very little to stay open, so
+    // the tone hits hard and immediately falls back to a murmur. Holding it at
+    // full level for the whole lead-in — which is what the first version did —
+    // is both unnecessary and horrible to listen to.
+    let amplitude: number;
+    if (i < attack) {
+      amplitude = PEAK * (i / attack);
+    } else if (i < attack + decay) {
+      amplitude = SUSTAIN + (PEAK - SUSTAIN) * (1 - (i - attack) / decay);
+    } else {
+      amplitude = SUSTAIN;
+    }
+    // Fade the last 60 ms so the tone hands over to speech without a click.
+    const remaining = samples - i;
+    const tail = (0.06 * SAMPLE_RATE);
+    if (remaining < tail) amplitude *= remaining / tail;
+
+    pcm.writeInt16LE(Math.round(Math.sin((2 * Math.PI * HZ * i) / SAMPLE_RATE) * amplitude * 32767), i * 2);
   }
   return pcm;
 }
+
 
 export { msToBytes };

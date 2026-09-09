@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { log } from "../logger";
 import { hasBinary } from "../util";
 import { CHANNELS, SAMPLE_RATE } from "./format";
@@ -85,13 +89,35 @@ function isOgg(data: Buffer): boolean {
  */
 export async function decodeToPcm(data: Buffer): Promise<Buffer | null> {
   if (!(await ensureFfmpeg())) return null;
-  const decoder = isOgg(data) ? ["-c:a", "libopus"] : [];
-  const pcm = await pipeThrough(
+
+  // Through a *file*, not a pipe. The app records voice notes as m4a, and
+  // phones write the MP4 index at the end of the file — so demuxing one from a
+  // non-seekable stream fails outright ("partial file"), yielding zero bytes
+  // and a silent transmission with nothing logged as wrong. A file gives
+  // ffmpeg the seeking it needs.
+  //
+  // This was invisible in testing because an m4a produced by ffmpeg itself
+  // carries its index at the front and pipes perfectly well.
+  const path = join(tmpdir(), `em-decode-${randomUUID().slice(0, 8)}`);
+  try {
+    await writeFile(path, data);
+    return await decodeFile(path, isOgg(data));
+  } catch (err) {
+    log.warn("audio", `could not stage audio for decoding: ${(err as Error).message}`);
+    return null;
+  } finally {
+    await unlink(path).catch(() => undefined);
+  }
+}
+
+async function decodeFile(path: string, ogg: boolean): Promise<Buffer | null> {
+  const decoder = ogg ? ["-c:a", "libopus"] : [];
+  const pcm = await runFfmpeg(
     [
       "-hide_banner", "-loglevel", "error",
       // Before -i, so it applies to the *decoder* rather than the output.
       ...decoder,
-      "-i", "pipe:0",
+      "-i", path,
       "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
       // Band-limit before levelling. Sending full-range audio into a radio's
       // microphone input is the same mistake as taking full-range audio out of
@@ -101,23 +127,24 @@ export async function decodeToPcm(data: Buffer): Promise<Buffer | null> {
       "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
       "pipe:1",
     ],
-    data,
   );
   if (pcm && pcm.length > 0) return pcm;
 
   // Retry with no forced decoder at all. Reached when an Ogg turns out not to
   // be Opus, or when a file's extension lied about its contents.
   log.warn("audio", "the first decode produced nothing — retrying without a forced decoder");
-  return pipeThrough(
-    [
-      "-hide_banner", "-loglevel", "error",
-      "-i", "pipe:0",
-      "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
-      "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
-      "pipe:1",
-    ],
-    data,
-  );
+  return runFfmpeg([
+    "-hide_banner", "-loglevel", "error",
+    "-i", path,
+    "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
+    "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
+    "pipe:1",
+  ]);
+}
+
+/** ffmpeg reading from a path, writing to stdout. */
+function runFfmpeg(args: string[]): Promise<Buffer | null> {
+  return pipeThrough(args);
 }
 
 
