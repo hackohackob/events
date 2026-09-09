@@ -176,16 +176,27 @@ export class Transceiver extends EventEmitter {
       await this.ptt.key();
       this.pttError = undefined;
 
-      // VOX has nothing to key it during the lead-in, so the lead is a quiet
-      // tone rather than silence: it opens the radio's VOX gate before the
-      // first word instead of the first word being what opens it.
-      const lead = this.config.ptt.backend === "vox" ? voxWakeTone(this.config.ptt.leadMs) : null;
-      if (lead) await this.playback.play(lead, abort.signal);
-      else await sleep(this.config.ptt.leadMs);
+      // VOX has nothing to key it during the lead-in, so the lead is a tone
+      // rather than silence: it opens the radio's VOX gate before the first
+      // word instead of the first word being what opens it.
+      //
+      // The tone and the message are played as ONE buffer, deliberately.
+      // Playing them as two calls spawned two `aplay` processes, and the gap
+      // between the first exiting and the second opening the sound card was
+      // long enough for VOX to drop again — which took the first word or two
+      // with it, however loud or long the tone was made. Continuous audio from
+      // the tone straight into the speech is what actually fixes it.
+      const vox = this.config.ptt.backend === "vox";
+      const payload = vox
+        ? Buffer.concat([voxWakeTone(this.config.ptt.leadMs), job.pcm])
+        : job.pcm;
+      // A wired key is already down; only VOX needs the lead-in to be audible.
+      if (!vox) await sleep(this.config.ptt.leadMs);
 
-      await this.playback.play(job.pcm, abort.signal);
+      await this.playback.play(payload, abort.signal);
       await sleep(this.config.ptt.tailMs);
 
+      // The wake tone is not part of the message, so it is not counted.
       const durationMs = bytesToMs(job.pcm.length);
       log.info("radio", `transmitted ${(durationMs / 1000).toFixed(1)}s — ${job.label}`);
       return { job, durationMs, ok: !abort.signal.aborted };
