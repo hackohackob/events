@@ -316,12 +316,35 @@ export class NetworkManager extends EventEmitter {
     }
     log.info("wifi", `joining ${ssid}`);
     await this.stopAp({ silent: true });
-    // The radio needs a moment after the AP goes down before it will associate.
-    await sleep(1200);
 
-    const args = ["device", "wifi", "connect", ssid, "ifname", this.iface];
-    if (password) args.push("password", password);
-    const res = await run("nmcli", args, { timeoutMs: 60_000 });
+    // A fixed pause here was not enough, and it is what produced
+    // "<ssid> is not in range" for a router in the same room: `nmcli device
+    // wifi connect` matches against the scan list, and after AP mode that list
+    // is empty until the radio has swept the air again. Wait for it to see
+    // something first.
+    await this.settleAfterModeChange();
+
+    // For a network already saved, bring the stored profile up instead of
+    // scanning for it. It does not depend on the SSID being in the current scan
+    // results at all, which makes rejoining a known network far more reliable
+    // — and it works for a hidden SSID.
+    const saved = await this.savedNetworks();
+    const useSavedProfile = saved.includes(ssid) && !password;
+    const args = useSavedProfile
+      ? ["connection", "up", ssid]
+      : ["device", "wifi", "connect", ssid, "ifname", this.iface];
+    if (!useSavedProfile && password) args.push("password", password);
+
+    let res = await run("nmcli", args, { timeoutMs: 60_000 });
+
+    // If the saved profile would not come up, fall back to a fresh association
+    // — the password may have changed on the router since it was stored.
+    if (res.code !== 0 && useSavedProfile) {
+      log.warn("wifi", `the saved profile for ${ssid} did not come up — trying a fresh join`);
+      res = await run("nmcli", ["device", "wifi", "connect", ssid, "ifname", this.iface], {
+        timeoutMs: 60_000,
+      });
+    }
 
     if (res.code === 0) {
       const joined = await this.waitForClient(25_000);
