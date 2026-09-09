@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, openSync, closeSync, writeSync, writeFileSync, readFileSync } from "node:fs";
 import { log } from "../logger";
-import { FAKE_HARDWARE, hasBinary, sleep } from "../util";
+import { FAKE_HARDWARE, hasBinary, run, sleep } from "../util";
 import type { GatewayConfig } from "../config";
 import type { PttBackendName } from "../types";
 
@@ -81,10 +81,39 @@ class GpioBackend implements PttBackend {
     return this.activeLow ? "1" : "0";
   }
 
+  /**
+   * Whether the kernel has already handed this line to a driver.
+   *
+   * Worth checking before touching it: on an Orange Pi Zero 3 several of the
+   * low numbers are the board's own status LEDs, the SD card-detect and a USB
+   * regulator. Driving one of those does not key a radio — it blinks a light,
+   * or worse, cuts power to a port.
+   */
+  private async claimedBy(): Promise<string | null> {
+    const res = await run("cat", ["/sys/kernel/debug/gpio"], { timeoutMs: 5000 });
+    if (res.code !== 0) return null;
+    const line = res.stdout
+      .split("\n")
+      .find((row: string) => new RegExp(`^\\s*gpio-${this.pin}\\b`).test(row));
+    if (!line) return null;
+    const consumer = /\|([^)]*?)\s*\)/.exec(line)?.[1]?.trim();
+    return consumer && consumer.length > 0 ? consumer : null;
+  }
+
   async init(): Promise<void> {
     if (FAKE_HARDWARE) {
       this.mode = "sysfs";
       this.valuePath = "";
+      return;
+    }
+
+    const claimed = await this.claimedBy();
+    if (claimed) {
+      this.mode = "unavailable";
+      this.lastError =
+        `GPIO ${this.pin} is already in use by the kernel as "${claimed}". ` +
+        "Pick a free pin — check /sys/kernel/debug/gpio.";
+      log.error("radio", this.lastError);
       return;
     }
 

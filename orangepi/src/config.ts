@@ -114,7 +114,14 @@ export interface GatewayConfig {
 
   ptt: {
     backend: PttBackendName;
-    /** sysfs GPIO number for the `gpio` backend. */
+    /**
+     * Kernel GPIO number for the `gpio` backend — not the header position.
+     *
+     * On an Orange Pi Zero 3 the main pin controller's sysfs base is 0, so the
+     * number is `bank * 32 + pin`: PC6 is 70, PH4 is 228, and so on. Check it
+     * against `/sys/kernel/debug/gpio` before wiring anything, and use the
+     * console's "Check keying" button, which reads the line back.
+     */
     gpioPin: number;
     /** True when pulling the line LOW keys the radio (opto-isolators usually do). */
     activeLow: boolean;
@@ -213,7 +220,10 @@ export function defaultConfig(): GatewayConfig {
     },
     ptt: {
       backend: "vox",
-      gpioPin: 76,
+      // PC6, header pin 11 on a Zero 3. The previous default of 76 is PC12,
+      // which that board wires to its red status LED — enabling GPIO keying
+      // without changing it blinked the LED instead of keying the radio.
+      gpioPin: 70,
       activeLow: true,
       leadMs: 350,
       tailMs: 250,
