@@ -222,6 +222,12 @@ function EventCard({ status, onChanged }: { status: Status; onChanged: () => voi
 
 function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) {
   const [networks, setNetworks] = useState<WifiNetwork[] | null>(null);
+  // The radio cannot scan while it is beaconing as an access point, so the list
+  // shown there was taken earlier. Say so rather than passing it off as live.
+  const [scanInfo, setScanInfo] = useState<{ cachedAt: string | null; live: boolean }>({
+    cachedAt: null,
+    live: true,
+  });
   const [scanning, setScanning] = useState(false);
   const [chosen, setChosen] = useState<WifiNetwork | null>(null);
   const [password, setPassword] = useState("");
@@ -230,7 +236,10 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
     setScanning(true);
     api
       .scanWifi()
-      .then(setNetworks)
+      .then((result) => {
+        setNetworks(result.networks);
+        setScanInfo({ cachedAt: result.cachedAt, live: result.live });
+      })
       .catch(() => setNetworks([]))
       .finally(() => setScanning(false));
   }, []);
@@ -264,6 +273,14 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
           <span>Address</span>
         </div>
       </div>
+
+      {!scanInfo.live && networks && networks.length > 0 && (
+        <Banner tone="info">
+          The radio cannot scan while it is running this access point, so this is the list from{" "}
+          {scanInfo.cachedAt ? relativeAge(scanInfo.cachedAt) : "the last scan"}. A network that has
+          appeared since will not be here.
+        </Banner>
+      )}
 
       {status.network.mode === "ap" && (
         <Banner tone="info" title="You are on the box's own network">
@@ -299,7 +316,9 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
             <p style={{ padding: "12px 16px", color: "var(--text-ghost)", fontSize: 13 }}>Scanning…</p>
           ) : networks.length === 0 ? (
             <p style={{ padding: "12px 16px", color: "var(--text-ghost)", fontSize: 13 }}>
-              No networks found. Move the box closer to the router and scan again.
+              {scanInfo.live
+                ? "No networks found. Move the box closer to the router and scan again."
+                : "This box has not scanned yet, so there is nothing to list while its own network is up. Join a WiFi once and the list will be remembered for next time."}
             </p>
           ) : (
             networks.map((network) => (
@@ -793,4 +812,13 @@ function MaintenanceCard({ status, setNotice }: { status: Status; setNotice: Not
       </div>
     </Card>
   );
+}
+
+/** "4 minutes ago" for the cached-scan note. */
+function relativeAge(iso: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (seconds < 90) return "a moment ago";
+  if (seconds < 3600) return `${Math.round(seconds / 60)} minutes ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)} hours ago`;
+  return `${Math.round(seconds / 86400)} days ago`;
 }

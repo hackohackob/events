@@ -70,6 +70,14 @@ export class NetworkManager extends EventEmitter {
   /** The AP daemons, alive only while the access point is up. */
   private hostapd: ChildProcess | null = null;
   private dnsmasq: ChildProcess | null = null;
+  /**
+   * The last successful scan, kept because the radio cannot do both jobs at
+   * once: while it is beaconing as an access point NetworkManager does not even
+   * see the device, and `iw scan` returns nothing. Since the one moment
+   * somebody needs the network list is precisely when they are connected to the
+   * box's own AP, the list has to have been taken earlier and remembered.
+   */
+  private lastScan: { at: string; networks: WifiNetwork[] } | null = null;
   private iface = process.env.GATEWAY_WIFI_IFACE?.trim() || "wlan0";
 
   constructor(private config: GatewayConfig) {
@@ -90,6 +98,10 @@ export class NetworkManager extends EventEmitter {
   }
 
   localIp(): string | undefined {
+    // In access-point mode the useful address is the one the phone reaches the
+    // console on, not whichever interface happens to enumerate first — a
+    // bench box on Ethernet was reporting its cabled address on the AP screen.
+    if (this.state.mode === "ap") return AP_ADDRESS;
     for (const [name, addresses] of Object.entries(networkInterfaces())) {
       if (name === "lo") continue;
       for (const address of addresses ?? []) {
@@ -111,6 +123,13 @@ export class NetworkManager extends EventEmitter {
       this.set({ mode: "client", ssid: "Development", signal: 88, online: true });
       return;
     }
+    // Normalise the radio first. A restart while the access point was up (an
+    // update, a crash, a power cut) leaves the interface in AP mode and
+    // unmanaged, so every client attempt is doomed and burns the full timeout
+    // before falling back. Put it back to station mode so boot is deterministic
+    // whatever state the last shutdown left behind.
+    await this.resetRadioToClient();
+
     const saved = await this.savedNetworks();
     if (saved.length === 0) {
       log.info("wifi", "no WiFi saved yet — starting the setup access point");
@@ -127,6 +146,26 @@ export class NetworkManager extends EventEmitter {
 
   // ── Client mode ────────────────────────────────────────────────────────────
 
+  /**
+   * Put the radio back into station mode under NetworkManager, whatever it was
+   * doing before. Safe to call when it is already there.
+   */
+  private async resetRadioToClient(): Promise<void> {
+    this.stopApDaemons();
+    const info = await run("iw", ["dev", this.iface, "info"], { timeoutMs: 8000 });
+    if (!info.stdout.includes("type AP")) return;
+
+    log.warn("wifi", "the radio was left in access-point mode — returning it to client mode");
+    await run("ip", ["addr", "flush", "dev", this.iface], { timeoutMs: 8000 });
+    await run("ip", ["link", "set", this.iface, "down"], { timeoutMs: 8000 });
+    await sleep(800);
+    await run("iw", ["dev", this.iface, "set", "type", "managed"], { timeoutMs: 10_000 });
+    await run("ip", ["link", "set", this.iface, "up"], { timeoutMs: 8000 });
+    await sleep(800);
+    await run("nmcli", ["device", "set", this.iface, "managed", "yes"], { timeoutMs: 10_000 });
+    await sleep(2000);
+  }
+
   async scan(): Promise<WifiNetwork[]> {
     if (FAKE_HARDWARE) {
       return [
@@ -135,12 +174,17 @@ export class NetworkManager extends EventEmitter {
         { ssid: "Open Guest", signal: 44, security: "", known: false, active: false },
       ];
     }
-    // A rescan while in AP mode kills the AP on some drivers, so the cached
-    // list is used there — it is populated at boot, before the AP comes up.
-    const rescan = this.state.mode === "ap" ? "no" : "yes";
+    // In access-point mode the radio is busy beaconing: NetworkManager has
+    // handed the device back, `nmcli` returns an empty list and `iw scan`
+    // returns nothing. Serve what was seen last time instead of an empty list,
+    // which is what made the setup screen look broken.
+    if (this.state.mode === "ap") {
+      return this.lastScan?.networks ?? [];
+    }
+
     const res = await run(
       "nmcli",
-      ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", rescan],
+      ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"],
       { timeoutMs: 20_000 },
     );
     const known = new Set(await this.savedNetworks());
@@ -161,7 +205,19 @@ export class NetworkManager extends EventEmitter {
       // The same SSID appears once per band and per AP; keep the strongest.
       if (!existing || entry.signal > existing.signal) seen.set(ssid, entry);
     }
-    return [...seen.values()].sort((a, b) => b.signal - a.signal);
+    const networks = [...seen.values()].sort((a, b) => b.signal - a.signal);
+    // Only remember a scan that actually found something: overwriting a good
+    // list with an empty one leaves the AP-mode screen blank again.
+    if (networks.length > 0) {
+      this.lastScan = { at: new Date().toISOString(), networks };
+    }
+    return networks;
+  }
+
+  /** When the served list was taken, or null if it is live. */
+  scanAge(): { cachedAt: string | null; live: boolean } {
+    if (this.state.mode !== "ap") return { cachedAt: null, live: true };
+    return { cachedAt: this.lastScan?.at ?? null, live: false };
   }
 
   async savedNetworks(): Promise<string[]> {
@@ -282,6 +338,14 @@ export class NetworkManager extends EventEmitter {
     }
 
     log.info("wifi", `starting the setup access point "${ssid}"`);
+    // Last chance to see the neighbourhood: once the AP is up the radio cannot
+    // scan, and the network list is exactly what the operator has come to the
+    // setup screen to use.
+    try {
+      await this.scan();
+    } catch {
+      // A failed scan must not stop the access point from coming up.
+    }
     await this.writeApConfigs();
 
     // Take the radio away from NetworkManager and put it into AP mode. Every

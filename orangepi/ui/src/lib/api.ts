@@ -147,7 +147,9 @@ export const api = {
   setup: (body: { serverUrl?: string; gatewayKey?: string; name?: string }) =>
     post<{ ok: boolean; status: Status }>("/setup", body),
 
-  scanWifi: () => request<WifiNetwork[]>("/wifi/scan"),
+  /** Returns `live: false` with a `cachedAt` when served from the AP-mode cache. */
+  scanWifi: () =>
+    request<{ networks: WifiNetwork[]; cachedAt: string | null; live: boolean }>("/wifi/scan"),
   joinWifi: (ssid: string, password?: string) => post<{ ok: boolean; detail: string }>("/wifi/connect", { ssid, password }),
   forgetWifi: (ssid: string) => post<{ ok: boolean }>("/wifi/forget", { ssid }),
   startAp: (minutes: number) => post<{ ok: boolean; detail: string }>("/wifi/ap", { minutes }),

@@ -17,11 +17,14 @@ const FALLBACK_PORT = 8080;
 async function main(): Promise<void> {
   const daemon = new GatewayDaemon();
   await daemon.refreshHealth();
-  await daemon.start();
 
   const health = setInterval(() => void daemon.refreshHealth(), 30_000);
   health.unref?.();
 
+  // The console comes up before the network does, deliberately. Bringing up
+  // WiFi can take the best part of a minute — longer when it goes wrong — and
+  // the console is exactly what somebody needs during that minute. Starting it
+  // second meant the box looked dead precisely when it was worth looking at.
   const app = createConsoleServer(daemon);
   const listen = (port: number): void => {
     const server = app.listen(port, "0.0.0.0", () => {
@@ -41,6 +44,12 @@ async function main(): Promise<void> {
     server.requestTimeout = 0;
   };
   listen(PORT);
+
+  // Radio, audio and the uplink start after the console is listening; failures
+  // in here are logged and visible there rather than preventing a boot.
+  await daemon.start().catch((err: Error) => {
+    log.error("system", `startup failed: ${err.message}`);
+  });
 
   const shutdown = (signal: string): void => {
     log.warn("system", `${signal} — shutting down`);

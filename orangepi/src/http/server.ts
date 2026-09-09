@@ -144,10 +144,15 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
 
   // ── WiFi ───────────────────────────────────────────────────────────────────
 
+  /**
+   * The network list, plus whether it is live. In access-point mode the radio
+   * cannot scan, so this serves the last list taken before the AP came up — the
+   * console says so rather than presenting stale results as current.
+   */
   app.get("/api/wifi/scan", (_req, res) => {
     void daemon.network
       .scan()
-      .then((networks) => res.json(networks))
+      .then((networks) => res.json({ networks, ...daemon.network.scanAge() }))
       .catch((err: Error) => res.status(500).json({ error: err.message }));
   });
 
