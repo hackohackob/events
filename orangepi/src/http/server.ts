@@ -156,6 +156,45 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
       .catch((err: Error) => res.status(500).json({ error: err.message }));
   });
 
+  /**
+   * A genuinely fresh scan while the access point is up. The radio cannot
+   * beacon and scan at once, so the AP is dropped, the air is scanned, and the
+   * AP comes back — about twenty seconds during which the phone loses this
+   * network and then reconnects.
+   *
+   * It answers immediately and does the work detached, because the request
+   * cannot survive its own client disconnecting. The console polls
+   * /api/wifi/scan afterwards for the result.
+   */
+  app.post("/api/wifi/rescan", (_req, res) => {
+    if (daemon.network.current().mode !== "ap") {
+      void daemon.network
+        .scan()
+        .then((networks) => res.json({ ok: true, immediate: true, count: networks.length }))
+        .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
+      return;
+    }
+    res.json({
+      ok: true,
+      immediate: false,
+      detail: "Rescanning. This network will disappear for about 20 seconds and then come back.",
+    });
+    void daemon.network.rescanFromAp();
+  });
+
+  /** The stored passphrase for a saved network, so the form can prefill it. */
+  app.get("/api/wifi/saved-password", (req, res) => {
+    const ssid = String(req.query.ssid ?? "").trim();
+    if (!ssid) {
+      res.status(400).json({ password: null });
+      return;
+    }
+    void daemon.network
+      .savedPassword(ssid)
+      .then((password) => res.json({ password }))
+      .catch(() => res.json({ password: null }));
+  });
+
   app.post("/api/wifi/connect", (req, res) => {
     const { ssid, password } = req.body as { ssid?: string; password?: string };
     if (!ssid) {

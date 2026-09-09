@@ -231,6 +231,8 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
   const [scanning, setScanning] = useState(false);
   const [chosen, setChosen] = useState<WifiNetwork | null>(null);
   const [password, setPassword] = useState("");
+  const [rescanning, setRescanning] = useState(false);
+  const [prefilled, setPrefilled] = useState(false);
 
   const scan = useCallback(() => {
     setScanning(true);
@@ -242,6 +244,56 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
       })
       .catch(() => setNetworks([]))
       .finally(() => setScanning(false));
+  }, []);
+
+  /**
+   * A real scan while the access point is up means giving the radio back for a
+   * moment, so this network goes away and returns. The page cannot be told when
+   * that has happened — it is disconnected at the time — so it polls until a
+   * list newer than the one on screen appears.
+   */
+  const rescan = useCallback(async () => {
+    const before = scanInfo.cachedAt;
+    setRescanning(true);
+    try {
+      const result = await api.rescanWifi();
+      if (result.immediate) {
+        scan();
+        return;
+      }
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        try {
+          const fresh = await api.scanWifi();
+          if (fresh.cachedAt && fresh.cachedAt !== before) {
+            setNetworks(fresh.networks);
+            setScanInfo({ cachedAt: fresh.cachedAt, live: fresh.live });
+            return;
+          }
+        } catch {
+          // Expected while the access point is down and the phone is off it.
+        }
+      }
+    } finally {
+      setRescanning(false);
+    }
+  }, [scan, scanInfo.cachedAt]);
+
+  /** Prefill the passphrase NetworkManager already has for a saved network. */
+  const choose = useCallback((network: WifiNetwork) => {
+    setChosen(network);
+    setPassword("");
+    setPrefilled(false);
+    if (!network.known) return;
+    void api
+      .savedPassword(network.ssid)
+      .then(({ password: saved }) => {
+        if (saved) {
+          setPassword(saved);
+          setPrefilled(true);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(scan, [scan]);
@@ -258,8 +310,13 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
     <Card
       title="WiFi"
       action={
-        <button className="btn sm ghost" onClick={scan} disabled={scanning}>
-          <RefreshIcon size={13} className={scanning ? "spin" : undefined} /> Scan
+        <button
+          className="btn sm ghost"
+          onClick={() => void rescan()}
+          disabled={scanning || rescanning}
+        >
+          <RefreshIcon size={13} className={scanning || rescanning ? "spin" : undefined} />
+          {rescanning ? "Scanning…" : "Scan"}
         </button>
       }
     >
@@ -273,6 +330,14 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
           <span>Address</span>
         </div>
       </div>
+
+      {rescanning && (
+        <Banner tone="warn" title="Scanning — this network is about to disappear">
+          The radio cannot beacon and scan at the same time, so the access point goes down for about
+          twenty seconds. Your phone should rejoin it by itself; this page will pick up the new list
+          when it does.
+        </Banner>
+      )}
 
       {!scanInfo.live && networks && networks.length > 0 && (
         <Banner tone="info">
@@ -292,7 +357,10 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
 
       {chosen ? (
         <>
-          <Field label={`Password for ${chosen.ssid}`}>
+          <Field
+            label={`Password for ${chosen.ssid}`}
+            hint={prefilled ? "Filled in from the password this box already has saved." : undefined}
+          >
             <input
               type="password"
               value={password}
@@ -325,10 +393,7 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
               <button
                 className="row"
                 key={network.ssid}
-                onClick={() => {
-                  setChosen(network);
-                  setPassword("");
-                }}
+                onClick={() => choose(network)}
               >
                 <div className="row-icon">
                   <SignalBars signal={network.signal} />

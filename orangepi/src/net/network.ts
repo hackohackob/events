@@ -214,6 +214,81 @@ export class NetworkManager extends EventEmitter {
     return networks;
   }
 
+  /**
+   * Wait until the radio is scanning again after a mode change. Polls for any
+   * visible network rather than sleeping a fixed amount: on a good day this
+   * returns in a couple of seconds, and it does not give up early on a bad one.
+   */
+  private async settleAfterModeChange(timeoutMs = 20_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      const res = await run(
+        "nmcli",
+        ["-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes"],
+        { timeoutMs: 15_000 },
+      );
+      if (res.code === 0 && res.stdout.split("\n").some((line) => line.trim())) return;
+    }
+    log.warn("wifi", "the radio still sees no networks after a mode change");
+  }
+
+  /**
+   * Drop the access point, take a fresh scan, and put the access point back.
+   *
+   * The radio cannot beacon and scan at the same time, so a genuinely current
+   * list can only be had by giving up the AP for a moment. The phone loses the
+   * network for roughly twenty seconds and reconnects on its own — which is
+   * why this runs detached and the console polls for the result rather than
+   * holding a request open across its own disconnection.
+   */
+  async rescanFromAp(): Promise<WifiNetwork[]> {
+    if (this.state.mode !== "ap") return this.scan();
+
+    // Put the AP back with the time it had left, not a fresh full window. A
+    // scan should not silently extend how long the box stays off the venue
+    // network — that is the operator's choice, made when they opened the AP.
+    const remaining = this.state.apUntil
+      ? Math.ceil((Date.parse(this.state.apUntil) - Date.now()) / 60_000)
+      : 0;
+    const apMinutes = remaining > 0 ? remaining : this.config.ap.onDemandMinutes || 30;
+    log.info("wifi", `dropping the access point for a fresh scan (${apMinutes} min left on it)`);
+    await this.stopAp({ silent: true });
+    await this.settleAfterModeChange();
+
+    let networks: WifiNetwork[] = [];
+    try {
+      // `scan()` refuses to scan in AP mode; the state has already moved off it
+      // by this point, but set it explicitly so there is no ordering doubt.
+      this.set({ mode: "client" });
+      networks = await this.scan();
+      log.info("wifi", `fresh scan found ${networks.length} network(s)`);
+    } catch (err) {
+      log.warn("wifi", `the fresh scan failed: ${(err as Error).message}`);
+    }
+
+    await this.startAp(apMinutes);
+    return networks;
+  }
+
+  /**
+   * The passphrase NetworkManager already stores for a saved network, so the
+   * console can prefill it. Nothing new is kept here: this is the same secret
+   * NM wrote to /etc/NetworkManager/system-connections when the network was
+   * first joined.
+   */
+  async savedPassword(ssid: string): Promise<string | null> {
+    if (FAKE_HARDWARE) return null;
+    const res = await run(
+      "nmcli",
+      ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", ssid],
+      { timeoutMs: 8000 },
+    );
+    if (res.code !== 0) return null;
+    const psk = res.stdout.trim();
+    return psk.length > 0 ? psk : null;
+  }
+
   /** When the served list was taken, or null if it is live. */
   scanAge(): { cachedAt: string | null; live: boolean } {
     if (this.state.mode !== "ap") return { cachedAt: null, live: true };
@@ -571,7 +646,12 @@ export class NetworkManager extends EventEmitter {
       this.set({ mode: "client", ssid: "Development", online: true });
       return true;
     }
-    await sleep(1000);
+    // Give the radio time to come back as a station and actually see the air.
+    // Joining immediately after the AP goes down is what produced
+    // "<ssid> is not in range" for a network sitting right next to the box:
+    // NetworkManager had simply not scanned yet.
+    await this.settleAfterModeChange();
+
     const saved = await this.savedNetworks();
     if (saved.length === 0) {
       log.warn("wifi", "asked to leave the access point, but no WiFi is saved — staying up");

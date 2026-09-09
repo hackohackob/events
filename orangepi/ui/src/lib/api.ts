@@ -150,6 +150,11 @@ export const api = {
   /** Returns `live: false` with a `cachedAt` when served from the AP-mode cache. */
   scanWifi: () =>
     request<{ networks: WifiNetwork[]; cachedAt: string | null; live: boolean }>("/wifi/scan"),
+  rescanWifi: () =>
+    post<{ ok: boolean; immediate: boolean; detail?: string; count?: number }>("/wifi/rescan"),
+  savedPassword: (ssid: string) =>
+    request<{ password: string | null }>(`/wifi/saved-password?ssid=${encodeURIComponent(ssid)}`),
+
   joinWifi: (ssid: string, password?: string) => post<{ ok: boolean; detail: string }>("/wifi/connect", { ssid, password }),
   forgetWifi: (ssid: string) => post<{ ok: boolean }>("/wifi/forget", { ssid }),
   startAp: (minutes: number) => post<{ ok: boolean; detail: string }>("/wifi/ap", { minutes }),
