@@ -72,6 +72,37 @@ export interface GatewayConfig {
     maxDurationMs: number;
   };
 
+  /**
+   * End-of-transmission tone ("roger beep") detection.
+   *
+   * A handset emits a short pure tone when the far end unkeys. It is a far
+   * better end-of-message signal than silence: a speaker pausing for breath
+   * looks exactly like the end of a transmission to a silence-based gate, which
+   * is what splits one call into several. The tone does not.
+   *
+   * Measured on a Hytera X1p: 1604 Hz, 115 ms, and 124x stronger at that
+   * frequency than speech ever is — so this is a reliable discriminator rather
+   * than a heuristic.
+   */
+  rogerBeep: {
+    enabled: boolean;
+    /** Centre frequency of the tone, in Hz. */
+    frequencyHz: number;
+    /**
+     * How much of a frame's energy must sit at that frequency, 0-1. Measured
+     * separation: beep frames 0.70, the loudest speech frame 0.16.
+     */
+    minRatio: number;
+    /** Consecutive 20 ms frames required, to reject a passing harmonic. */
+    minFrames: number;
+    /**
+     * Silence fallback while tone detection is on. Longer than the plain hang
+     * time on purpose: with a reliable end signal the gate can afford to sit
+     * through long pauses, and only falls back to silence if no tone arrives.
+     */
+    fallbackHangMs: number;
+  };
+
   ptt: {
     backend: PttBackendName;
     /** sysfs GPIO number for the `gpio` backend. */
@@ -150,6 +181,13 @@ export function defaultConfig(): GatewayConfig {
       minDurationMs: 400,
       maxDurationMs: 120_000,
     },
+    rogerBeep: {
+      enabled: true,
+      frequencyHz: 1600,
+      minRatio: 0.45,
+      minFrames: 3,
+      fallbackHangMs: 5000,
+    },
     ptt: {
       backend: "vox",
       gpioPin: 76,
@@ -182,6 +220,7 @@ export function loadConfig(): GatewayConfig {
         ap: { ...base.ap, ...stored.ap },
         audio: { ...base.audio, ...stored.audio },
         squelch: clampSquelch({ ...base.squelch, ...stored.squelch }),
+        rogerBeep: { ...base.rogerBeep, ...stored.rogerBeep },
         ptt: { ...base.ptt, ...stored.ptt },
         storage: { ...base.storage, ...stored.storage },
         // The id is derived, never restored: a cloned SD card must not produce
@@ -230,6 +269,7 @@ export function patchConfig(patch: DeepPartial<GatewayConfig>): GatewayConfig {
     ap: { ...current.ap, ...patch.ap },
     audio: { ...current.audio, ...patch.audio },
     squelch: clampSquelch({ ...current.squelch, ...patch.squelch }),
+    rogerBeep: { ...current.rogerBeep, ...patch.rogerBeep },
     ptt: { ...current.ptt, ...patch.ptt },
     storage: { ...current.storage, ...patch.storage },
     id: current.id,

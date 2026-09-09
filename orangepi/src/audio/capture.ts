@@ -37,6 +37,19 @@ import {
 const TAIL_KEEP_MS = 180;
 
 /**
+ * Audio kept from before the squelch opened, so the first syllable — the one
+ * that crossed the threshold — is not clipped off.
+ */
+const PREROLL_MS = 400;
+
+/**
+ * A tone found within this much of the start is treated as the radio's opening
+ * beep rather than an end-of-transmission one: closing on it would discard the
+ * call that is only just beginning.
+ */
+const OPENING_TONE_WINDOW_MS = 700;
+
+/**
  * Corner frequency of the capture-path high-pass.
  *
  * A handset's speaker output carries a lot of energy below the voice band — DC
@@ -48,6 +61,36 @@ const TAIL_KEEP_MS = 180;
  * Filtering here means the level actually tracks speech.
  */
 const HIGHPASS_HZ = 250;
+
+/**
+ * Goertzel: the energy at one frequency in one frame, normalised by the frame's
+ * own RMS so the result is "how much of this frame is that tone", 0-1,
+ * independent of how loud the transmission is.
+ *
+ * A whole DFT would be wasted here — only one frequency is ever of interest,
+ * and this is a handful of multiply-adds per sample.
+ */
+function toneRatio(frame: Buffer, frequencyHz: number): number {
+  const samples = Math.floor(frame.length / 2);
+  if (samples === 0) return 0;
+
+  const k = 2 * Math.cos((2 * Math.PI * frequencyHz) / SAMPLE_RATE);
+  let s1 = 0;
+  let s2 = 0;
+  let energy = 0;
+  for (let i = 0; i < samples; i++) {
+    const x = frame.readInt16LE(i * 2);
+    const s0 = x + k * s1 - s2;
+    s2 = s1;
+    s1 = s0;
+    energy += x * x;
+  }
+  const rms = Math.sqrt(energy / samples);
+  // Silence has no meaningful ratio; anything this quiet is not a beep.
+  if (rms < 50) return 0;
+  const magnitude = Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - k * s1 * s2)) / samples;
+  return magnitude / rms;
+}
 
 export interface Transmission {
   pcm: Buffer;
@@ -92,6 +135,11 @@ export class AudioCapture extends EventEmitter {
   /** One-pole high-pass state, carried across frames. */
   private hpPrevIn = 0;
   private hpPrevOut = 0;
+
+  /** Consecutive frames currently matching the end-of-transmission tone. */
+  private toneFrames = 0;
+  /** How many chunks were captured when the current tone run began. */
+  private toneRunStart = 0;
 
   constructor(private config: GatewayConfig) {
     super();
@@ -253,7 +301,44 @@ export class AudioCapture extends EventEmitter {
     if (level > this.peak) this.peak = level;
     this.quietMs = level < closeLevel ? this.quietMs + bytesToMs(frame.length) : 0;
 
-    if (this.quietMs >= hangMs) {
+    // The radio's end-of-transmission tone is the authoritative "they let go of
+    // the button" signal. Silence is not: a speaker pausing for breath looks
+    // identical to the end of a call, which is what chops one transmission into
+    // several. When the tone arrives, close on it and cut it off the recording.
+    const beep = this.config.rogerBeep;
+    if (beep?.enabled) {
+      const ratio = toneRatio(frame, beep.frequencyHz);
+      if (ratio >= beep.minRatio && level >= closeLevel) {
+        if (this.toneFrames === 0) this.toneRunStart = this.chunks.length - 1;
+        this.toneFrames++;
+        if (this.toneFrames >= beep.minFrames) {
+          // Drop the tone itself, and the frame before it where it faded in.
+          const beforeTone = bytesToMs(this.capturedBytes) - bytesToMs(this.toneFrames * frame.length);
+          this.chunks.length = Math.max(0, this.toneRunStart - 1);
+          this.capturedBytes = this.chunks.reduce((total, chunk) => total + chunk.length, 0);
+          this.toneFrames = 0;
+
+          // A tone at the very start of a transmission is the radio opening,
+          // not closing. Closing on it would throw away the call that is about
+          // to happen, so cut the beep and keep listening.
+          if (beforeTone < OPENING_TONE_WINDOW_MS) {
+            log.debug("radio", "opening tone — trimmed, still listening");
+            this.quietMs = 0;
+            return;
+          }
+          log.debug("radio", "end-of-transmission tone detected", { ratio: ratio.toFixed(2) });
+          this.finish({ closedByTone: true });
+          return;
+        }
+      } else {
+        this.toneFrames = 0;
+      }
+    }
+
+    // Silence is the fallback, and is given a longer leash when the tone is
+    // doing the real work.
+    const silenceLimit = beep?.enabled ? Math.max(hangMs, beep.fallbackHangMs) : hangMs;
+    if (this.quietMs >= silenceLimit) {
       this.finish();
     } else if (bytesToMs(this.capturedBytes) >= maxDurationMs) {
       log.warn("radio", "transmission hit the length limit — closing it off");
@@ -262,7 +347,12 @@ export class AudioCapture extends EventEmitter {
   }
 
   private keepPreroll(frame: Buffer): void {
-    const budget = msToBytes(Math.max(200, this.config.squelch.hangMs / 2));
+    // A fixed budget, not a fraction of the hang time. Deriving it from hangMs
+    // meant raising the hang time to sit through pauses also pushed a second of
+    // silence onto the front of every recording — 2.4 s of hang produced a
+    // 1.2 s lead-in. All this needs to do is catch the syllable that crossed
+    // the threshold.
+    const budget = msToBytes(PREROLL_MS);
     this.preroll.push(frame);
     this.prerollBytes += frame.length;
     while (this.prerollBytes > budget && this.preroll.length > 1) {
@@ -270,9 +360,11 @@ export class AudioCapture extends EventEmitter {
     }
   }
 
-  private finish(): void {
+  private finish(opts: { closedByTone?: boolean } = {}): void {
     const pcm = Buffer.concat(this.chunks);
-    const trimmed = this.trimTrailingSilence(pcm);
+    // A tone-closed transmission has already had its dead air removed with the
+    // beep; trimming again would eat the final word.
+    const trimmed = opts.closedByTone ? pcm : this.trimTrailingSilence(pcm);
     const durationMs = bytesToMs(trimmed.length);
     const peak = this.peak;
     const startedAt = this.startedAt;
@@ -285,6 +377,7 @@ export class AudioCapture extends EventEmitter {
     }
     log.info("radio", `received ${(durationMs / 1000).toFixed(1)}s from the radio`, {
       peak: peak.toFixed(2),
+      ended: opts.closedByTone ? "roger beep" : "silence",
     });
     this.emit("transmission", {
       pcm: trimmed,
@@ -333,6 +426,8 @@ export class AudioCapture extends EventEmitter {
     this.capturedBytes = 0;
     this.peak = 0;
     this.quietMs = 0;
+    this.toneFrames = 0;
+    this.toneRunStart = 0;
     this.preroll = [];
     this.prerollBytes = 0;
   }
