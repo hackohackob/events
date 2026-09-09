@@ -328,10 +328,18 @@ export class Transceiver extends EventEmitter {
  * attack time.
  */
 function voxWakeTone(durationMs: number): Buffer {
-  const samples = Math.max(1, Math.round((Math.max(120, durationMs) / 1000) * SAMPLE_RATE));
+  const samples = Math.max(1, Math.round((Math.max(200, durationMs) / 1000) * SAMPLE_RATE));
   const pcm = Buffer.alloc(samples * 2);
   for (let i = 0; i < samples; i++) {
-    const value = Math.sin((2 * Math.PI * 420 * i) / SAMPLE_RATE) * 0.18;
+    const progress = i / samples;
+    // Ramp in rather than starting at full amplitude: a step edge clicks, and
+    // some radios' noise gates react to the click instead of the tone.
+    const envelope = Math.min(1, progress * 8, (1 - progress) * 24);
+    // 700 Hz, squarely inside the band a VOX detector listens to, and loud.
+    // The first version was 420 Hz at 0.18 and a radio set to a low VOX
+    // sensitivity simply slept through it, taking the first word or two of
+    // every message with it.
+    const value = Math.sin((2 * Math.PI * 700 * i) / SAMPLE_RATE) * 0.45 * envelope;
     pcm.writeInt16LE(Math.round(value * 32767), i * 2);
   }
   return pcm;

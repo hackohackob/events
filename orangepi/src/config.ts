@@ -125,7 +125,11 @@ export interface GatewayConfig {
     gpioPin: number;
     /** True when pulling the line LOW keys the radio (opto-isolators usually do). */
     activeLow: boolean;
-    /** Delay between keying up and starting audio, so the repeater opens. */
+    /**
+     * Delay between keying up and starting audio, so the transmitter — and any
+     * repeater — is up before the first word. On VOX this is also how long the
+     * wake tone plays, and VOX needs noticeably longer than a wired key.
+     */
     leadMs: number;
     /** Delay between the audio ending and unkeying, so the tail is not clipped. */
     tailMs: number;
@@ -225,7 +229,7 @@ export function defaultConfig(): GatewayConfig {
       // without changing it blinked the LED instead of keying the radio.
       gpioPin: 70,
       activeLow: true,
-      leadMs: 350,
+      leadMs: 600,
       tailMs: 250,
       maxTxMs: 90_000,
       waitForClearMs: 8_000,

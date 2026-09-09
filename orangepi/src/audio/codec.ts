@@ -12,6 +12,18 @@ import { CHANNELS, SAMPLE_RATE } from "./format";
  * ffmpeg's native Opus decoder mangles the SILK frames a handset produces.
  */
 
+/**
+ * The voice band a radio actually carries. Everything below ~300 Hz coming out
+ * of a handset's speaker jack is rumble and DC offset rather than speech: it
+ * makes the audio sound bass-heavy and muddy, and because the squelch measures
+ * RMS it also inflates the level and holds the gate open on nothing. Rolling it
+ * off is the single biggest intelligibility win on this path.
+ *
+ * The top end is trimmed at 3.4 kHz for the same reason a radio does it —
+ * above that there is only hiss to spend bitrate on.
+ */
+const VOICE_BAND = "highpass=f=300,lowpass=f=3400";
+
 let warned = false;
 
 async function ensureFfmpeg(): Promise<boolean> {
@@ -81,10 +93,12 @@ export async function decodeToPcm(data: Buffer): Promise<Buffer | null> {
       ...decoder,
       "-i", "pipe:0",
       "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
-      // A radio channel has no headroom to spare; normalising to a consistent
-      // level is the difference between a quiet caller being unintelligible and
-      // being heard.
-      "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+      // Band-limit before levelling. Sending full-range audio into a radio's
+      // microphone input is the same mistake as taking full-range audio out of
+      // its speaker: the input is built for a telephone band, and everything
+      // below it arrives as boom rather than as bass. Then normalise, because a
+      // radio channel has no headroom to spare and a quiet talker is a lost one.
+      "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
       "pipe:1",
     ],
     data,
@@ -99,24 +113,13 @@ export async function decodeToPcm(data: Buffer): Promise<Buffer | null> {
       "-hide_banner", "-loglevel", "error",
       "-i", "pipe:0",
       "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
-      "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+      "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
       "pipe:1",
     ],
     data,
   );
 }
 
-/**
- * The voice band a radio actually carries. Everything below ~300 Hz coming out
- * of a handset's speaker jack is rumble and DC offset rather than speech: it
- * makes the audio sound bass-heavy and muddy, and because the squelch measures
- * RMS it also inflates the level and holds the gate open on nothing. Rolling it
- * off is the single biggest intelligibility win on this path.
- *
- * The top end is trimmed at 3.4 kHz for the same reason a radio does it —
- * above that there is only hiss to spend bitrate on.
- */
-const VOICE_BAND = "highpass=f=300,lowpass=f=3400";
 
 /** The box's PCM → Ogg Opus, the format the platform's chat stores. */
 export async function encodeToOpus(pcm: Buffer): Promise<Buffer | null> {
