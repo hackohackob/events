@@ -75,9 +75,12 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
     const onStatus = (): void => send("status", daemon.status());
     const onLog = (entry: LogEntry): void => send("log", entry);
     const onRecording = (row: unknown): void => send("recording", row);
+    const onTone = (kind: "open" | "close"): void =>
+      send("tone", { kind, at: Date.now() });
 
     daemon.on("state", onStatus);
     daemon.on("recording", onRecording);
+    daemon.on("tone", onTone);
     log.on("entry", onLog);
 
     // The meters are sampled here rather than emitted from the audio path:
@@ -100,6 +103,7 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
       clearInterval(ping);
       daemon.off("state", onStatus);
       daemon.off("recording", onRecording);
+      daemon.off("tone", onTone);
       log.off("entry", onLog);
     });
   });

@@ -42,6 +42,7 @@ export interface TxResult {
 export declare interface Transceiver {
   on(event: "transmission", listener: (tx: Transmission) => void): this;
   on(event: "transmitted", listener: (result: TxResult) => void): this;
+  on(event: "tone", listener: (kind: "open" | "close") => void): this;
   on(event: "state", listener: () => void): this;
   on(event: string, listener: (...args: never[]) => void): this;
 }
@@ -66,6 +67,9 @@ export class Transceiver extends EventEmitter {
     this.ptt = createPttBackend(config);
 
     this.capture.on("transmission", (tx) => this.emit("transmission", tx));
+    // Surfaced so the console can mark the beeps on its scope, which is how an
+    // operator can see at a glance whether tone detection is actually firing.
+    this.capture.on("tone", (kind: "open" | "close") => this.emit("tone", kind));
     this.capture.on("open", () => this.emit("state"));
     this.capture.on("close", () => this.emit("state"));
   }

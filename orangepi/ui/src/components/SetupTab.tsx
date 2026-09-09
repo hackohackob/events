@@ -59,6 +59,7 @@ export function SetupTab({ status, onChanged }: { status: Status; onChanged: () 
       <WifiCard status={status} setNotice={setNotice} />
       <AudioCard config={config} patch={patch} />
       <SquelchCard config={config} patch={patch} />
+      <BeepCard config={config} patch={patch} />
       <KeyingCard config={config} patch={patch} setNotice={setNotice} />
       <AccessPointCard config={config} status={status} patch={patch} setNotice={setNotice} />
       <StorageCard config={config} patch={patch} />
@@ -551,6 +552,83 @@ function SquelchCard({
         hint="Squelch crashes and accidental key-ups are shorter than this and never reach the chat."
         onChange={(minDurationMs) => set({ minDurationMs })}
       />
+    </Card>
+  );
+}
+
+// ── End-of-transmission tone ─────────────────────────────────────────────────
+
+function BeepCard({
+  config,
+  patch,
+}: {
+  config: GatewayConfig;
+  patch: (change: Record<string, unknown>) => Promise<void>;
+}) {
+  const beep = config.rogerBeep;
+  const set = (change: Partial<GatewayConfig["rogerBeep"]>): void => {
+    void patch({ rogerBeep: { ...beep, ...change } });
+  };
+
+  return (
+    <Card title="End-of-transmission tone">
+      <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>
+        Most radios play a short tone when the other side lets go of the button. It is a far better
+        end-of-message signal than silence, which cannot tell the end of a call from someone pausing
+        for breath — that is what splits one transmission into several.
+      </p>
+
+      <Toggle
+        label="Listen for the tone"
+        hint="When it is heard, the recording ends there and the tone is cut off. Silence is only the fallback."
+        on={beep.enabled}
+        onChange={(enabled) => set({ enabled })}
+      />
+
+      {beep.enabled && (
+        <>
+          <Slider
+            label="Tone frequency"
+            value={beep.frequencyHz}
+            min={400}
+            max={3000}
+            step={10}
+            format={(v) => `${v} Hz`}
+            hint="1600 Hz on a Hytera X1p. If your radio uses a different tone, the Traffic tab is the place to check whether transmissions are ending where they should."
+            onChange={(frequencyHz) => set({ frequencyHz })}
+          />
+          <Slider
+            label="How pure the tone must be"
+            value={beep.minRatio}
+            min={0.2}
+            max={0.9}
+            step={0.05}
+            format={(v) => v.toFixed(2)}
+            hint="How much of a moment's sound must sit at that one frequency. Measured on a real handset: 0.70 during the beep, never above 0.16 during speech — so 0.45 sits comfortably between them. Lower it if beeps are missed, raise it if speech is being cut short."
+            onChange={(minRatio) => set({ minRatio })}
+          />
+          <Slider
+            label="Ignore the channel after a beep for"
+            value={beep.holdOffMs}
+            min={0}
+            max={5000}
+            step={250}
+            format={(v) => (v === 0 ? "off" : `${(v / 1000).toFixed(2)} s`)}
+            hint="Radios often send a second tone a second or two after the roger beep. Without this, that beep opens the gate again and lands as an empty transmission behind every real one."
+            onChange={(holdOffMs) => set({ holdOffMs })}
+          />
+          <Slider
+            label="Give up and close after"
+            value={beep.fallbackHangMs}
+            min={1000}
+            max={15000}
+            step={500}
+            format={(v) => `${(v / 1000).toFixed(1)} s`}
+            hint="Silence long enough to end a transmission when no tone arrives. It can be generous, because the tone is doing the real work."
+            onChange={(fallbackHangMs) => set({ fallbackHangMs })}
+          />
+        </>
+      )}
     </Card>
   );
 }

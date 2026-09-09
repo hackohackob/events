@@ -96,6 +96,15 @@ export interface GatewayConfig {
     /** Consecutive 20 ms frames required, to reject a passing harmonic. */
     minFrames: number;
     /**
+     * How long to ignore the channel after closing on a tone.
+     *
+     * Radios commonly emit a second tone a second or two after the roger beep —
+     * a channel-free or end-of-call confirmation. Without a hold-off that beep
+     * opens the gate again and arrives as a second, empty transmission right
+     * behind the real one.
+     */
+    holdOffMs: number;
+    /**
      * Silence fallback while tone detection is on. Longer than the plain hang
      * time on purpose: with a reliable end signal the gate can afford to sit
      * through long pauses, and only falls back to silence if no tone arrives.
@@ -186,6 +195,7 @@ export function defaultConfig(): GatewayConfig {
       frequencyHz: 1600,
       minRatio: 0.45,
       minFrames: 3,
+      holdOffMs: 2000,
       fallbackHangMs: 5000,
     },
     ptt: {

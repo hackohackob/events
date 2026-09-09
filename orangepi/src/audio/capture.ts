@@ -50,6 +50,14 @@ const PREROLL_MS = 400;
 const OPENING_TONE_WINDOW_MS = 700;
 
 /**
+ * How much genuine sound a capture must contain to be worth keeping, as opposed
+ * to how long it lasted. Anything under this is squelch noise rather than
+ * speech — and passing it on means a junk recording and, worse, a recogniser
+ * inventing a transcript for it.
+ */
+const MIN_VOICED_MS = 300;
+
+/**
  * Corner frequency of the capture-path high-pass.
  *
  * A handset's speaker output carries a lot of energy below the voice band — DC
@@ -101,6 +109,7 @@ export interface Transmission {
 
 export declare interface AudioCapture {
   on(event: "pcm", listener: (frame: Buffer) => void): this;
+  on(event: "tone", listener: (kind: "open" | "close") => void): this;
   on(event: "level", listener: (level: number, receiving: boolean) => void): this;
   on(event: "transmission", listener: (tx: Transmission) => void): this;
   on(event: "open", listener: () => void): this;
@@ -125,6 +134,8 @@ export class AudioCapture extends EventEmitter {
   private capturedBytes = 0;
   private peak = 0;
   private quietMs = 0;
+  /** How much of the current capture was actually above the closing threshold. */
+  private voicedMs = 0;
   private startedAt = "";
 
   /** Set while the box is transmitting; the radio cannot receive then anyway. */
@@ -140,6 +151,8 @@ export class AudioCapture extends EventEmitter {
   private toneFrames = 0;
   /** How many chunks were captured when the current tone run began. */
   private toneRunStart = 0;
+  /** Wall-clock time until which the channel is ignored after a closing tone. */
+  private deafUntil = 0;
 
   constructor(private config: GatewayConfig) {
     super();
@@ -283,12 +296,17 @@ export class AudioCapture extends EventEmitter {
     if (!this.open) {
       this.keepPreroll(frame);
       if (level < openLevel) return;
+      // The radio's own trailing beep, a second or two after the roger beep,
+      // would otherwise open the gate again and arrive as an empty second
+      // transmission behind every real one.
+      if (Date.now() < this.deafUntil) return;
       this.open = true;
       this.startedAt = new Date().toISOString();
       this.chunks = [...this.preroll];
       this.capturedBytes = this.prerollBytes;
       this.peak = level;
       this.quietMs = 0;
+      this.voicedMs = 0;
       this.preroll = [];
       this.prerollBytes = 0;
       log.debug("radio", "squelch opened", { level: level.toFixed(3) });
@@ -299,7 +317,12 @@ export class AudioCapture extends EventEmitter {
     this.chunks.push(frame);
     this.capturedBytes += frame.length;
     if (level > this.peak) this.peak = level;
-    this.quietMs = level < closeLevel ? this.quietMs + bytesToMs(frame.length) : 0;
+    if (level < closeLevel) {
+      this.quietMs += bytesToMs(frame.length);
+    } else {
+      this.quietMs = 0;
+      this.voicedMs += bytesToMs(frame.length);
+    }
 
     // The radio's end-of-transmission tone is the authoritative "they let go of
     // the button" signal. Silence is not: a speaker pausing for breath looks
@@ -323,10 +346,13 @@ export class AudioCapture extends EventEmitter {
           // to happen, so cut the beep and keep listening.
           if (beforeTone < OPENING_TONE_WINDOW_MS) {
             log.debug("radio", "opening tone — trimmed, still listening");
+            this.emit("tone", "open");
             this.quietMs = 0;
             return;
           }
           log.debug("radio", "end-of-transmission tone detected", { ratio: ratio.toFixed(2) });
+          this.emit("tone", "close");
+          this.deafUntil = Date.now() + Math.max(0, beep.holdOffMs);
           this.finish({ closedByTone: true });
           return;
         }
@@ -367,12 +393,21 @@ export class AudioCapture extends EventEmitter {
     const trimmed = opts.closedByTone ? pcm : this.trimTrailingSilence(pcm);
     const durationMs = bytesToMs(trimmed.length);
     const peak = this.peak;
+    const voicedMs = this.voicedMs;
     const startedAt = this.startedAt;
     this.reset();
     this.emit("close");
 
     if (durationMs < this.config.squelch.minDurationMs) {
       log.debug("radio", `ignored a ${Math.round(durationMs)} ms blip`, { peak: peak.toFixed(3) });
+      return;
+    }
+    // Length alone is not enough. A radio's squelch crashing open and shut
+    // scatters a handful of 20 ms clicks across several seconds of silence,
+    // which passes any duration test while containing nothing anybody said.
+    // Measured on one: 3.8 s long, under 200 ms of it above the threshold.
+    if (voicedMs < MIN_VOICED_MS) {
+      log.debug("radio", `ignored ${Math.round(durationMs)} ms containing only ${Math.round(voicedMs)} ms of sound`);
       return;
     }
     log.info("radio", `received ${(durationMs / 1000).toFixed(1)}s from the radio`, {
@@ -426,6 +461,7 @@ export class AudioCapture extends EventEmitter {
     this.capturedBytes = 0;
     this.peak = 0;
     this.quietMs = 0;
+    this.voicedMs = 0;
     this.toneFrames = 0;
     this.toneRunStart = 0;
     this.preroll = [];

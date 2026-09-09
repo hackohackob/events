@@ -336,7 +336,9 @@ button {
 /* The live scope: a scrolling history of the channel, drawn on canvas. */
 .scope {
   position: relative;
-  height: 92px;
+  /* Tall enough to read as an instrument, and to leave the time labels room
+     below the trace rather than crowding it. */
+  height: 118px;
   margin: 16px -18px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);

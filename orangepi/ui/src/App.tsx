@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGateway } from "./lib/useGateway";
 import { CloudIcon, ListIcon, RadioIcon, SettingsIcon, TerminalIcon, WifiIcon } from "./lib/icons";
 import { LiveTab } from "./components/LiveTab";
@@ -25,8 +25,22 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof RadioIcon }> = [
  */
 export default function App() {
   const [tab, setTab] = useState<Tab>("live");
-  const { status, logs, connected, subscribeLevels, refresh, recordingBump } = useGateway();
+  const { status, logs, connected, subscribeLevels, subscribeTones, refresh, recordingBump } =
+    useGateway();
+  // Mirrored from the box so the scope can draw the thresholds and know whether
+  // to show beep markers at all.
   const [squelch, setSquelch] = useState({ openLevel: 0.06, closeLevel: 0.035 });
+  const [beepsEnabled, setBeepsEnabled] = useState(true);
+
+  useEffect(() => {
+    void fetch("/api/config")
+      .then((r) => r.json())
+      .then((config: { squelch: { openLevel: number; closeLevel: number }; rogerBeep?: { enabled: boolean } }) => {
+        setSquelch(config.squelch);
+        setBeepsEnabled(config.rogerBeep?.enabled ?? false);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const errorCount = logs.filter((entry) => entry.level === "error").length;
 
@@ -99,7 +113,9 @@ export default function App() {
           <LiveTab
             status={status}
             subscribeLevels={subscribeLevels}
+            subscribeTones={subscribeTones}
             squelch={squelch}
+            beepsEnabled={beepsEnabled}
             onNavigate={setTab}
           />
         ) : tab === "traffic" ? (
@@ -115,8 +131,14 @@ export default function App() {
               // about a change made on this screen.
               void fetch("/api/config")
                 .then((r) => r.json())
-                .then((config: { squelch: { openLevel: number; closeLevel: number } }) =>
-                  setSquelch(config.squelch),
+                .then(
+                  (config: {
+                    squelch: { openLevel: number; closeLevel: number };
+                    rogerBeep?: { enabled: boolean };
+                  }) => {
+                    setSquelch(config.squelch);
+                    setBeepsEnabled(config.rogerBeep?.enabled ?? false);
+                  },
                 )
                 .catch(() => undefined);
             }}

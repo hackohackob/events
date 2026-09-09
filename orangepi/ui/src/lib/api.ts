@@ -119,6 +119,14 @@ export interface GatewayConfig {
     maxTxMs: number;
     waitForClearMs: number;
   };
+  rogerBeep: {
+    enabled: boolean;
+    frequencyHz: number;
+    minRatio: number;
+    minFrames: number;
+    holdOffMs: number;
+    fallbackHangMs: number;
+  };
   ttsEnabled: boolean;
   storage: { maxMb: number; maxDays: number };
 }

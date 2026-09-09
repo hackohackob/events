@@ -147,6 +147,7 @@ export class GatewayDaemon extends EventEmitter {
     });
 
     this.radio.on("state", () => this.emit("state"));
+    this.radio.on("tone", (kind: "open" | "close") => this.emit("tone", kind));
   }
 
   private wireUplink(): void {

@@ -8,6 +8,12 @@ export interface Levels {
   transmitting: boolean;
 }
 
+/** A beep the box recognised, for the scope to mark. */
+export interface ToneEvent {
+  kind: "open" | "close";
+  at: number;
+}
+
 /**
  * The console's connection to the box: one EventSource carrying status changes,
  * log lines and level samples.
@@ -26,11 +32,19 @@ export function useGateway() {
 
   const levels = useRef<Levels>({ rx: 0, tx: 0, receiving: false, transmitting: false });
   const levelListeners = useRef(new Set<(l: Levels) => void>());
+  const toneListeners = useRef(new Set<(t: ToneEvent) => void>());
 
   const subscribeLevels = useCallback((fn: (l: Levels) => void) => {
     levelListeners.current.add(fn);
     return () => {
       levelListeners.current.delete(fn);
+    };
+  }, []);
+
+  const subscribeTones = useCallback((fn: (t: ToneEvent) => void) => {
+    toneListeners.current.add(fn);
+    return () => {
+      toneListeners.current.delete(fn);
     };
   }, []);
 
@@ -67,6 +81,14 @@ export function useGateway() {
 
       source.addEventListener("recording", () => setRecordingBump((n) => n + 1));
 
+      source.addEventListener("tone", (event) => {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as { kind: "open" | "close" };
+        // Stamped on arrival rather than trusting the box's clock: the scope
+        // positions everything on the browser's own timeline.
+        const tone: ToneEvent = { kind: payload.kind, at: performance.now() };
+        for (const listener of toneListeners.current) listener(tone);
+      });
+
       source.addEventListener("error", () => {
         setConnected(false);
         source?.close();
@@ -89,7 +111,17 @@ export function useGateway() {
     setStatus(await api.status());
   }, []);
 
-  return { status, logs, connected, levels, subscribeLevels, refresh, recordingBump, setLogs };
+  return {
+    status,
+    logs,
+    connected,
+    levels,
+    subscribeLevels,
+    subscribeTones,
+    refresh,
+    recordingBump,
+    setLogs,
+  };
 }
 
 /** Recordings list, refreshed whenever the box says there is a new one. */

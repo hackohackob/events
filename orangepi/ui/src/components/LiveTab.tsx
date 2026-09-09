@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, formatBytes, formatUptime, type Status } from "../lib/api";
-import type { Levels } from "../lib/useGateway";
+import type { Levels, ToneEvent } from "../lib/useGateway";
 import { HeadphonesIcon, RadioIcon, ZapIcon } from "../lib/icons";
 import { Banner, Card } from "./ui";
 import { Meters } from "./Meters";
@@ -14,12 +14,16 @@ import { Scope } from "./Scope";
 export function LiveTab({
   status,
   subscribeLevels,
+  subscribeTones,
   squelch,
+  beepsEnabled,
   onNavigate,
 }: {
   status: Status;
   subscribeLevels: (fn: (l: Levels) => void) => () => void;
+  subscribeTones: (fn: (t: ToneEvent) => void) => () => void;
   squelch: { openLevel: number; closeLevel: number };
+  beepsEnabled: boolean;
   onNavigate: (tab: "setup") => void;
 }) {
   const [monitoring, setMonitoring] = useState(false);
@@ -107,7 +111,13 @@ export function LiveTab({
           {status.queueLength > 0 && ` · ${status.queueLength} waiting to go out`}
         </div>
 
-        <Scope subscribe={subscribeLevels} openLevel={squelch.openLevel} closeLevel={squelch.closeLevel} />
+        <Scope
+          subscribe={subscribeLevels}
+          subscribeTones={subscribeTones}
+          openLevel={squelch.openLevel}
+          closeLevel={squelch.closeLevel}
+          beepsEnabled={beepsEnabled}
+        />
         <Meters subscribe={subscribeLevels} />
 
         <div className="ptt-zone">
