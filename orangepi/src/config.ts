@@ -181,7 +181,7 @@ export function loadConfig(): GatewayConfig {
         ...stored,
         ap: { ...base.ap, ...stored.ap },
         audio: { ...base.audio, ...stored.audio },
-        squelch: { ...base.squelch, ...stored.squelch },
+        squelch: clampSquelch({ ...base.squelch, ...stored.squelch }),
         ptt: { ...base.ptt, ...stored.ptt },
         storage: { ...base.storage, ...stored.storage },
         // The id is derived, never restored: a cloned SD card must not produce
@@ -205,6 +205,22 @@ export function saveConfig(next: GatewayConfig): GatewayConfig {
   return next;
 }
 
+/**
+ * Keep the squelch thresholds sane. The closing threshold must sit *below* the
+ * opening one — that hysteresis is the whole point of having two. Set the other
+ * way round the gate closes the moment it opens and chops speech to pieces, and
+ * nothing in the console prevented an operator from dragging the sliders past
+ * each other.
+ */
+function clampSquelch(squelch: GatewayConfig["squelch"]): GatewayConfig["squelch"] {
+  const openLevel = Math.max(0.005, squelch.openLevel);
+  return {
+    ...squelch,
+    openLevel,
+    closeLevel: Math.min(squelch.closeLevel, openLevel * 0.85),
+  };
+}
+
 /** Apply a partial patch, one level deep, and persist. */
 export function patchConfig(patch: DeepPartial<GatewayConfig>): GatewayConfig {
   const current = loadConfig();
@@ -213,7 +229,7 @@ export function patchConfig(patch: DeepPartial<GatewayConfig>): GatewayConfig {
     ...(patch as Partial<GatewayConfig>),
     ap: { ...current.ap, ...patch.ap },
     audio: { ...current.audio, ...patch.audio },
-    squelch: { ...current.squelch, ...patch.squelch },
+    squelch: clampSquelch({ ...current.squelch, ...patch.squelch }),
     ptt: { ...current.ptt, ...patch.ptt },
     storage: { ...current.storage, ...patch.storage },
     id: current.id,

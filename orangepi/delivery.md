@@ -110,6 +110,48 @@ way, so a bad publish costs nothing but a retry.
 
 ---
 
+## Setting the audio levels
+
+Do this once per box, with the radio and cabling it will actually be used with.
+It takes five minutes and it is the difference between a log full of speech and
+a log full of mush.
+
+**Set the radio's volume knob low — around a quarter of its range — and leave
+it there.** This is counter-intuitive and it is the single most important
+setting. A handset's speaker output is volts; a sound card's microphone input
+expects millivolts. Turned up, the input is overloaded hundreds of times over,
+which does not sound like distortion so much as *boominess*: overload produces
+intermodulation and emphasises the low end. The giveaway is that a second
+handset listening to the same transmission sounds fine — proof the problem is
+in the cable into the box, not on the air.
+
+Turning the radio up does not give the box more signal. It gives it more
+distortion, and distortion cannot be undone anywhere downstream.
+
+**Then make up the level in the capture gain**, not on the radio:
+
+```bash
+amixer -c 1 sset 'Mic' 9 cap    # +13 dB on a PCM2902; 0-16 scale
+amixer -c 1 sset 'Auto Gain Control' off
+alsactl store                    # survives a reboot
+```
+
+AGC must be off. It continuously rides the level, which makes a fixed squelch
+threshold meaningless.
+
+**Check it with the console's meters** while somebody talks. Aim for peaks
+around **0.35–0.55**. A worked example from the first box, radio at 4–5 of 16,
+capture gain 9: live peak 0.363, and across 13 recordings zero clipped. Peaks
+of 1.0 mean the converter clipped and that audio is already lost — headroom
+matters far more than loudness, because the encoder evens the level out anyway.
+
+**If it is still too quiet with the gain near maximum**, the fix is a resistor
+divider in the cable rather than more gain: 10 kΩ in series with 2.2 kΩ to
+ground lets the radio run at a comfortable setting without overloading the
+input. `WIRING.md` has the detail.
+
+---
+
 ## Handing a box to somebody
 
 What the person receiving it needs to know, and nothing more:

@@ -36,6 +36,19 @@ import {
  */
 const TAIL_KEEP_MS = 180;
 
+/**
+ * Corner frequency of the capture-path high-pass.
+ *
+ * A handset's speaker output carries a lot of energy below the voice band — DC
+ * offset from the sound card's mic bias, mains hum, and the low-frequency
+ * rumble that makes an overdriven radio sound boomy. Filtering it only at
+ * encode time was too late: `frameLevel` measures RMS, so all that energy was
+ * inflating the level the squelch thresholds are compared against, which is
+ * why the thresholds behaved unpredictably as the radio's volume changed.
+ * Filtering here means the level actually tracks speech.
+ */
+const HIGHPASS_HZ = 250;
+
 export interface Transmission {
   pcm: Buffer;
   durationMs: number;
@@ -75,6 +88,10 @@ export class AudioCapture extends EventEmitter {
   private muted = false;
 
   private smoothedLevel = 0;
+
+  /** One-pole high-pass state, carried across frames. */
+  private hpPrevIn = 0;
+  private hpPrevOut = 0;
 
   constructor(private config: GatewayConfig) {
     super();
@@ -172,8 +189,29 @@ export class AudioCapture extends EventEmitter {
     while (this.pending.length >= FRAME_BYTES) {
       const frame = this.pending.subarray(0, FRAME_BYTES);
       this.pending = this.pending.subarray(FRAME_BYTES);
-      this.handleFrame(applyGain(frame, this.config.audio.inputGain));
+      this.handleFrame(this.highPass(applyGain(frame, this.config.audio.inputGain)));
     }
+  }
+
+  /**
+   * A one-pole high-pass, cheap enough to run on every sample on this board.
+   * `y[n] = a * (y[n-1] + x[n] - x[n-1])`, the standard RC form.
+   */
+  private highPass(frame: Buffer): Buffer {
+    const dt = 1 / SAMPLE_RATE;
+    const rc = 1 / (2 * Math.PI * HIGHPASS_HZ);
+    const a = rc / (rc + dt);
+    const out: Buffer = Buffer.allocUnsafe(frame.length - (frame.length % 2));
+
+    for (let i = 0; i < out.length; i += 2) {
+      const x = frame.readInt16LE(i);
+      const y = a * (this.hpPrevOut + x - this.hpPrevIn);
+      this.hpPrevIn = x;
+      this.hpPrevOut = y;
+      const rounded = Math.round(y);
+      out.writeInt16LE(rounded > 32767 ? 32767 : rounded < -32768 ? -32768 : rounded, i);
+    }
+    return out;
   }
 
   private handleFrame(frame: Buffer): void {
