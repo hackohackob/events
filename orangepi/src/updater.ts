@@ -121,11 +121,20 @@ export async function applyUpdate(config: GatewayConfig, latestVersion?: string)
   }
 }
 
-/** Keep the running release and the one before it; delete the rest. */
+/**
+ * Keep the incoming release and the one being replaced; delete everything else.
+ *
+ * The previous version of this filtered out both of those and *then* sliced the
+ * first entry off what was left, so in the ordinary case there was nothing to
+ * delete and old releases accumulated forever. Found on the first box with
+ * three releases and 25 MB sitting in /opt.
+ */
 async function pruneOldReleases(keep: string): Promise<void> {
   const res = await run("sh", ["-c", `ls -1t ${RELEASES_DIR} 2>/dev/null`], { timeoutMs: 8000 });
   const versions = res.stdout.split("\n").map((v) => v.trim()).filter(Boolean);
-  for (const version of versions.filter((v) => v !== keep && v !== VERSION).slice(1)) {
+  const protect = new Set([keep, VERSION]);
+  for (const version of versions) {
+    if (protect.has(version)) continue;
     rmSync(join(RELEASES_DIR, version), { recursive: true, force: true });
     log.info("update", `removed old release ${version}`);
   }

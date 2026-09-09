@@ -30,7 +30,10 @@ echo "▸ Bundling production dependencies"
 (cd "$STAGE" && npm install --omit=dev --no-audit --no-fund --silent)
 
 echo "▸ Packing"
-tar -czf "$OUT/em-gateway-$VERSION.tar.gz" -C "$OUT" "em-gateway-$VERSION"
+# COPYFILE_DISABLE stops macOS tar embedding an AppleDouble "._name" file
+# beside every real one. Without it a bundle built on a Mac unpacks 800-odd
+# junk files onto the box and carries them in every release directory.
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$OUT/em-gateway-$VERSION.tar.gz" -C "$OUT" "em-gateway-$VERSION"
 rm -rf "$STAGE"
 
 SHA="$(shasum -a 256 "$OUT/em-gateway-$VERSION.tar.gz" | cut -d' ' -f1)"
