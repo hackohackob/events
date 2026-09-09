@@ -101,7 +101,7 @@ export interface GatewayConfig {
   serverUrl: string;
   gatewayKeySet: boolean;
   eventId: string | null;
-  ap: { ssid: string; password: string; keepWithClient: boolean; onDemandMinutes: number };
+  ap: { ssid: string; password: string; countryCode: string; keepWithClient: boolean; onDemandMinutes: number };
   audio: { capture: string; playback: string; inputGain: number; outputGain: number };
   squelch: {
     openLevel: number;

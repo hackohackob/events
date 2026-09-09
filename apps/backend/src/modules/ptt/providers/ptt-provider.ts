@@ -68,6 +68,14 @@ export interface PttProvider {
   readonly capabilities: PttCapabilities;
   /** Drives the connection form in the dashboard. */
   readonly fields: PttConfigField[];
+  /**
+   * Whether one message has to be sent once per event, or once for the whole
+   * network. Zello is a single account on a single channel, so a message goes
+   * out once no matter how many events are bridged; the radio fleet is the
+   * opposite — each box is bound to one event and has to be addressed
+   * individually. Only the relay path needs to know the difference.
+   */
+  readonly fanOutPerEvent: boolean;
 
   bind(events: PttProviderEvents): void;
   /** Whether the given config has every required field. */

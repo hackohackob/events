@@ -106,6 +106,18 @@ export async function decodeToPcm(data: Buffer): Promise<Buffer | null> {
   );
 }
 
+/**
+ * The voice band a radio actually carries. Everything below ~300 Hz coming out
+ * of a handset's speaker jack is rumble and DC offset rather than speech: it
+ * makes the audio sound bass-heavy and muddy, and because the squelch measures
+ * RMS it also inflates the level and holds the gate open on nothing. Rolling it
+ * off is the single biggest intelligibility win on this path.
+ *
+ * The top end is trimmed at 3.4 kHz for the same reason a radio does it —
+ * above that there is only hiss to spend bitrate on.
+ */
+const VOICE_BAND = "highpass=f=300,lowpass=f=3400";
+
 /** The box's PCM → Ogg Opus, the format the platform's chat stores. */
 export async function encodeToOpus(pcm: Buffer): Promise<Buffer | null> {
   if (!(await ensureFfmpeg())) return null;
@@ -114,6 +126,10 @@ export async function encodeToOpus(pcm: Buffer): Promise<Buffer | null> {
       "-hide_banner", "-loglevel", "error",
       "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
       "-i", "pipe:0",
+      // Band-limit first, then even out the level. dynaudnorm rather than
+      // loudnorm here: it works in one pass on a short clip, where loudnorm's
+      // single-pass mode needs the whole file's statistics to do its job.
+      "-af", `${VOICE_BAND},dynaudnorm=f=200:g=5:p=0.7`,
       "-c:a", "libopus", "-b:a", "24k", "-application", "voip",
       "-f", "ogg", "pipe:1",
     ],

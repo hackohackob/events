@@ -30,6 +30,12 @@ import {
  * biggest difference between "usable" and "what did they say?".
  */
 
+/**
+ * How much audio to keep after the last sound, so a trailing consonant is not
+ * clipped. Short enough that nobody perceives it as dead air.
+ */
+const TAIL_KEEP_MS = 180;
+
 export interface Transmission {
   pcm: Buffer;
   durationMs: number;
@@ -228,9 +234,7 @@ export class AudioCapture extends EventEmitter {
 
   private finish(): void {
     const pcm = Buffer.concat(this.chunks);
-    const hang = msToBytes(this.config.squelch.hangMs);
-    // Trim the trailing silence the hang time deliberately captured.
-    const trimmed = pcm.length > hang ? pcm.subarray(0, pcm.length - hang) : pcm;
+    const trimmed = this.trimTrailingSilence(pcm);
     const durationMs = bytesToMs(trimmed.length);
     const peak = this.peak;
     const startedAt = this.startedAt;
@@ -250,6 +254,34 @@ export class AudioCapture extends EventEmitter {
       peakLevel: peak,
       startedAt,
     } satisfies Transmission);
+  }
+
+  /**
+   * Cut the dead air off the end of a transmission.
+   *
+   * The hang time deliberately keeps recording through pauses so a breath does
+   * not split one call into two, which means every clip ends with roughly
+   * `hangMs` of nothing. Subtracting `hangMs` blindly is not enough: the gate
+   * only closes once the level has been *below* `closeLevel` for that long, so
+   * quiet-but-not-silent tails — squelch hiss, a radio's own noise floor — sail
+   * through and are still there at the end.
+   *
+   * So find where audio actually stopped and cut there, keeping a short tail so
+   * the last word is not clipped.
+   */
+  private trimTrailingSilence(pcm: Buffer): Buffer {
+    const tail = msToBytes(TAIL_KEEP_MS);
+    const { closeLevel } = this.config.squelch;
+
+    for (let end = pcm.length - FRAME_BYTES; end >= 0; end -= FRAME_BYTES) {
+      if (frameLevel(pcm.subarray(end, end + FRAME_BYTES)) >= closeLevel) {
+        const cut = Math.min(pcm.length, end + FRAME_BYTES + tail);
+        return pcm.subarray(0, cut);
+      }
+    }
+    // Nothing anywhere reached the closing threshold — the caller's duration
+    // check will drop it as a blip.
+    return pcm.subarray(0, Math.min(pcm.length, tail));
   }
 
   private abort(): void {

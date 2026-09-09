@@ -181,6 +181,9 @@ export class PttBridgeService implements OnModuleInit {
       }
       this.countInbound(kind);
       this.note(kind, "info", `${message.kind} from ${message.from} → ${eventIds.length} event(s)`);
+      // ...and on to the other networks, so a call on the radio is heard on
+      // Zello and the other way round.
+      await this.relayAcrossNetworks(kind, message.from, payload, eventIds);
     } catch (err) {
       this.note(kind, "error", `inbound ${message.kind} failed: ${(err as Error).message}`);
     }
@@ -219,7 +222,14 @@ export class PttBridgeService implements OnModuleInit {
         // Transcribing radio traffic is the difference between a wall of voice
         // notes and a readable log, so it is worth the round trip.
         const transcript = await this.transcription
-          .transcribe(this.media.absolutePath(audioUrl), message.extension === "m4a" ? "audio/m4a" : "audio/ogg")
+          .transcribe(
+            this.media.absolutePath(audioUrl),
+            message.extension === "m4a" ? "audio/m4a" : "audio/ogg",
+            // Radio bursts that are too short to contain speech are dropped
+            // before they reach a recogniser, which otherwise turns roger beeps
+            // into confident nonsense in an unrelated language.
+            { durationMs: message.durationMs },
+          )
           .catch(() => null);
         return {
           kind: "voice",
@@ -229,6 +239,100 @@ export class PttBridgeService implements OnModuleInit {
         };
       }
     }
+  }
+
+  /**
+   * Pass traffic that arrived on one external network out to the others.
+   *
+   * This is what makes Zello and the handsets one conversation rather than two.
+   * Loop prevention is structural, as everywhere else in this bridge: a relayed
+   * message is handed straight to the *other* providers and is never fed back
+   * through `handleInbound`, so it cannot come round again. The origin network
+   * is skipped, which is what stops a message echoing back to where it came
+   * from.
+   *
+   * The per-event `outbound` switch still governs each destination: a
+   * coordinator who has turned the radio off for their event does not get radio
+   * traffic just because it arrived via Zello.
+   */
+  private async relayAcrossNetworks(
+    origin: PttChannelKind,
+    from: string,
+    payload: InboundChatPayload,
+    eventIds: string[],
+  ): Promise<void> {
+    const routes = await this.settings.routesFor(eventIds);
+
+    for (const kind of PTT_CHANNEL_KINDS) {
+      if (kind === origin) continue;
+      const provider = this.providers.get(kind);
+      if (!provider?.available) continue;
+      const raw = await this.settings.raw(kind);
+      if (!raw.enabled) continue;
+
+      const allowed = eventIds.filter((id) => {
+        const route = routes.get(id)?.find((r) => r.kind === kind);
+        return route ? route.outbound : true;
+      });
+      if (allowed.length === 0) continue;
+
+      // A network that carries one message for the whole account is addressed
+      // once; a fleet of boxes is addressed per event.
+      const targets = provider.fanOutPerEvent ? allowed : allowed.slice(0, 1);
+      for (const eventId of targets) {
+        const outbound = this.toRelayMessage(provider, origin, from, payload, eventId);
+        if (!outbound) continue;
+        try {
+          await provider.send(outbound);
+          this.countOutbound(kind);
+          this.note(kind, "info", `relayed ${payload.kind} from ${origin} (${from})`);
+        } catch (err) {
+          this.note(kind, "warn", `relay from ${origin} failed: ${(err as Error).message}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Shape a stored inbound message for a different network, honouring what that
+   * network can actually carry. The speaker is named with their origin so a
+   * Zello user can tell a handset apart from someone in the app.
+   */
+  private toRelayMessage(
+    provider: PttProvider,
+    origin: PttChannelKind,
+    from: string,
+    payload: InboundChatPayload,
+    eventId: string,
+  ): OutboundForProvider | null {
+    const author = `${originLabel(origin)} ${from}`.trim();
+
+    if (payload.kind === "voice" && payload.audioUrl) {
+      if (provider.capabilities.voice) {
+        return {
+          kind: "voice",
+          author,
+          eventId,
+          audioPath: this.media.absolutePath(payload.audioUrl),
+          audioUrl: payload.audioUrl,
+          transcript: payload.transcript,
+        };
+      }
+      // No voice path: relay what was said, if anything was understood.
+      return provider.capabilities.text && payload.transcript
+        ? { kind: "text", author, eventId, text: payload.transcript }
+        : null;
+    }
+
+    if (payload.kind === "text" && payload.text?.trim()) {
+      return provider.capabilities.text
+        ? { kind: "text", author, eventId, text: payload.text.trim() }
+        : null;
+    }
+
+    // Images and locations are not relayed between networks: the radio cannot
+    // carry either, and a bare "sent a photo" on a talkgroup is noise.
+    return null;
   }
 
   /**
@@ -264,6 +368,10 @@ export class PttBridgeService implements OnModuleInit {
       await this.chat.addFromBridge(input.eventId, "radio", input.from, payload);
       this.countInbound("radio");
       this.note("radio", "info", `${Math.round(input.durationMs / 1000)}s from ${input.from} → team chat`);
+      // Gateway traffic arrives here rather than through `handleInbound`, so
+      // the relay has to be invoked explicitly — otherwise everything said on
+      // a handset would reach the app but never Zello.
+      await this.relayAcrossNetworks("radio", input.from, payload, [input.eventId]);
       return payload.kind === "voice"
         ? { audioUrl: payload.audioUrl, transcript: payload.transcript }
         : {};
@@ -415,3 +523,8 @@ export class PttBridgeService implements OnModuleInit {
 
 type InboundChatPayload = Parameters<EventChatService["addFromBridge"]>[3];
 type OutboundForProvider = Parameters<PttProvider["send"]>[0];
+
+/** How a relayed speaker is announced on the destination network. */
+function originLabel(origin: PttChannelKind): string {
+  return origin === "radio" ? "[Radio]" : "[Zello]";
+}

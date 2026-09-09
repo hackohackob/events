@@ -30,6 +30,7 @@ export class RadioProvider implements PttProvider {
   // No path over the air for images, and position reports would need the
   // handset's data channel rather than its audio jack.
   readonly capabilities: PttCapabilities = { text: true, voice: true, image: false, location: false };
+  readonly fanOutPerEvent = true;
   readonly fields: PttConfigField[] = [
     {
       key: "gatewayKey",

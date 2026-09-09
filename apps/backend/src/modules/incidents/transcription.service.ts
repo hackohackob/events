@@ -19,6 +19,31 @@ import { basename } from "node:path";
 const SONIOX_POLL_INTERVAL_MS = 1000;
 const SONIOX_POLL_ATTEMPTS = 90;
 
+/** Below this there is not enough audio to transcribe anything meaningful. */
+const MIN_TRANSCRIBE_MS = 1000;
+
+/**
+ * Whether a transcript is plausibly something a person said on this platform.
+ *
+ * Everything here is spoken in Bulgarian, occasionally with English words, so
+ * the alphabet is Cyrillic and Latin. When a recogniser is handed a beep or a
+ * burst of static it does not return nothing — it returns fluent-looking text
+ * in Chinese, Hindi, Korean or Thai, which then lands in the team chat as if
+ * somebody had said it. Judging the script is a crude test, but it is exactly
+ * the failure being guarded against, and it cannot reject a real Bulgarian
+ * transcript.
+ */
+export function isPlausibleTranscript(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 2) return false;
+
+  const letters = [...trimmed].filter((c) => /\p{L}/u.test(c));
+  if (letters.length === 0) return false;
+
+  const expected = letters.filter((c) => /[\p{Script=Cyrillic}\p{Script=Latin}]/u.test(c)).length;
+  return expected / letters.length >= 0.7;
+}
+
 @Injectable()
 export class TranscriptionService {
   private readonly logger = new Logger(TranscriptionService.name);
@@ -49,9 +74,24 @@ export class TranscriptionService {
    * Transcribe an audio file. Returns the transcript, or `null` when no provider
    * is configured or every configured provider fails. Never throws.
    */
-  async transcribe(audioPath: string, mimetype?: string): Promise<string | null> {
+  async transcribe(
+    audioPath: string,
+    mimetype?: string,
+    options: { durationMs?: number } = {},
+  ): Promise<string | null> {
     const providers = this.providers();
     if (providers.length === 0) return null;
+
+    // Radio traffic is full of things that are not speech: squelch crashes,
+    // roger beeps, a keyed mic with nobody talking. Sent to a recogniser these
+    // do not come back empty — they come back as confident nonsense in
+    // whatever language the acoustics happened to resemble. Below about a
+    // second there is not enough audio to say anything worth logging, so do
+    // not ask.
+    if (options.durationMs !== undefined && options.durationMs < MIN_TRANSCRIBE_MS) {
+      this.logger.debug(`skipping transcription of a ${Math.round(options.durationMs)} ms clip`);
+      return null;
+    }
 
     for (const provider of providers) {
       try {
@@ -64,6 +104,13 @@ export class TranscriptionService {
           // instead of by re-deriving it from the audio: a suspiciously short
           // transcript for a long note shows up here as a low word count.
           const trimmed = text.trim();
+          if (!isPlausibleTranscript(trimmed)) {
+            this.logger.warn(
+              `discarded an implausible transcript from ${provider} for ${basename(audioPath)}: ` +
+                JSON.stringify(trimmed.slice(0, 60)),
+            );
+            return null;
+          }
           this.logger.log(
             `STT ok via ${provider}: ${trimmed.split(/\s+/).length} words, ${trimmed.length} chars ` +
               `from ${basename(audioPath)}`,

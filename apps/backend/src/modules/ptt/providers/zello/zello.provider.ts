@@ -30,6 +30,7 @@ export class ZelloProvider implements PttProvider {
     "Bridges the team chat to a Zello channel over the Channel API. One bot account holds the connection for the whole server.";
   readonly available = true;
   readonly capabilities: PttCapabilities = { text: true, voice: true, image: true, location: true };
+  readonly fanOutPerEvent = false;
   readonly fields: PttConfigField[] = [
     {
       key: "wsUrl",

@@ -1,8 +1,8 @@
 {
   "name": "em-radio-gateway",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
-  "description": "Extreme Medics radio gateway \u2014 bridges a Hytera handset to the events platform.",
+  "description": "Extreme Medics radio gateway — bridges a Hytera handset to the events platform.",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

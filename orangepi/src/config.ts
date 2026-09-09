@@ -38,6 +38,8 @@ export interface GatewayConfig {
   ap: {
     ssid: string;
     password: string;
+    /** Regulatory domain for the access point; hostapd requires one. */
+    countryCode: string;
     /**
      * Keep the AP up after joining a network. The Zero 3's AIC8800 usually
      * cannot, which is why the dashboard can summon the AP back instead.
@@ -136,6 +138,7 @@ export function defaultConfig(): GatewayConfig {
     ap: {
       ssid: `EM-Radio-${id.slice(0, 4).toUpperCase()}`,
       password: "12345687",
+      countryCode: "BG",
       keepWithClient: false,
       onDemandMinutes: 30,
     },
