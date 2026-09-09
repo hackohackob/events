@@ -265,6 +265,11 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
       .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
   });
 
+  app.post("/api/radio/wake-tone", (_req, res) => {
+    daemon.radio.transmitWakeToneOnly();
+    res.json({ ok: true, detail: "Sending the wake tone on its own." });
+  });
+
   app.post("/api/radio/verify-ptt", (_req, res) => {
     void daemon.radio.verifyKeying().then((result) => res.json(result));
   });

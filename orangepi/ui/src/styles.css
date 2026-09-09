@@ -595,14 +595,20 @@ button {
   margin-bottom: 7px;
 }
 
-.field .hint {
+/* Explanatory small print. Scoped to `.field` originally, which meant every
+   standalone `<p class="hint">` in a card silently rendered as full-size body
+   text — five of them, all of them explanations nobody needed shouted. */
+.hint {
   font-size: 12px;
   color: var(--text-ghost);
-  margin-top: 6px;
   line-height: 1.45;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
+}
+
+.field .hint {
+  margin-top: 6px;
 }
 
 /* Every text-like input, however it was declared. Matching on `type` alone

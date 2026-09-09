@@ -15,6 +15,7 @@ import {
   RefreshIcon,
   SettingsIcon,
   WifiIcon,
+  ZapIcon,
 } from "../lib/icons";
 import { Banner, Card, Field, SignalBars, Slider, Toggle } from "./ui";
 
@@ -733,15 +734,57 @@ function KeyingCard({
       )}
 
       <Slider
-        label="Wait after keying"
+        label={config.ptt.backend === "vox" ? "Wake tone length" : "Wait after keying"}
         value={config.ptt.leadMs}
         min={0}
-        max={1500}
+        max={3000}
         step={50}
         format={(v) => `${v} ms`}
-        hint="Gives the transmitter — and any repeater — time to come up before the first word."
+        hint={
+          config.ptt.backend === "vox"
+            ? "How long the tone plays before the message, to open the radio's VOX. Too short and the first word or two is lost while the gate is still opening."
+            : "Gives the transmitter — and any repeater — time to come up before the first word."
+        }
         onChange={(leadMs) => set({ leadMs })}
       />
+
+      {config.ptt.backend === "vox" && (
+        <>
+          <Slider
+            label="Wake tone pitch"
+            value={config.ptt.voxToneHz}
+            min={200}
+            max={2000}
+            step={20}
+            format={(v) => `${v} Hz`}
+            hint="Higher carries better into some VOX circuits but is more piercing to sit next to. 480 Hz suits most radios."
+            onChange={(voxToneHz) => set({ voxToneHz })}
+          />
+          <Slider
+            label="Wake tone level"
+            value={config.ptt.voxToneLevel}
+            min={0.05}
+            max={1}
+            step={0.05}
+            format={(v) => `${Math.round(v * 100)}%`}
+            hint="Must be loud enough to HOLD the gate open, not merely to trigger it — a tone that trails off below the VOX threshold lets the gate relax, and the speech has to reopen it, which costs the first word. Raise this before raising the length."
+            onChange={(voxToneLevel) => set({ voxToneLevel })}
+          />
+          <button
+            className="btn block"
+            style={{ marginBottom: 14 }}
+            onClick={() =>
+              void api.wakeTone().then((r) => setNotice({ tone: "info", text: r.detail }))
+            }
+          >
+            <ZapIcon size={15} /> Send the wake tone on its own
+          </button>
+          <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+            Tuning VOX means change, listen, change again. This sends just the tone, so the loop is
+            quick and the channel stays clear of whole test messages.
+          </p>
+        </>
+      )}
       <Slider
         label="Hold before unkeying"
         value={config.ptt.tailMs}

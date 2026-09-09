@@ -118,6 +118,8 @@ export interface GatewayConfig {
     tailMs: number;
     maxTxMs: number;
     waitForClearMs: number;
+    voxToneHz: number;
+    voxToneLevel: number;
   };
   rogerBeep: {
     enabled: boolean;
@@ -175,6 +177,7 @@ export const api = {
 
   audioDevices: () => request<{ capture: AudioDevice[]; playback: AudioDevice[] }>("/audio/devices"),
   testTone: () => post<{ ok: boolean; detail: string }>("/radio/test-tone"),
+  wakeTone: () => post<{ ok: boolean; detail: string }>("/radio/wake-tone"),
   verifyPtt: () => post<{ ok: boolean; detail: string }>("/radio/verify-ptt"),
   cancelTx: () => post<{ ok: boolean }>("/radio/cancel"),
 

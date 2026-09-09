@@ -137,6 +137,22 @@ export interface GatewayConfig {
     maxTxMs: number;
     /** Wait for the channel to go quiet before transmitting. */
     waitForClearMs: number;
+
+    /**
+     * The tone played ahead of the audio on VOX, to open the radio's gate
+     * before the first word rather than letting the first word open it.
+     *
+     * Both are things that need adjusting against a particular radio at a
+     * particular VOX sensitivity, in the field, without a laptop — hence
+     * sliders rather than constants. `leadMs` above is how long it plays.
+     *
+     * The level must be high enough to *hold* the gate, not merely to trigger
+     * it: a tone that trails off below the VOX threshold lets the gate relax
+     * and the speech re-opens it, which costs the first word.
+     */
+    voxToneHz: number;
+    /** 0-1. */
+    voxToneLevel: number;
   };
 
   /** Speak app text over the air. Mirrored from the server, off by default. */
@@ -233,6 +249,8 @@ export function defaultConfig(): GatewayConfig {
       tailMs: 250,
       maxTxMs: 90_000,
       waitForClearMs: 8_000,
+      voxToneHz: 480,
+      voxToneLevel: 0.35,
     },
     ttsEnabled: false,
     testPhrase:

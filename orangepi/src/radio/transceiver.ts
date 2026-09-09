@@ -188,7 +188,14 @@ export class Transceiver extends EventEmitter {
       // the tone straight into the speech is what actually fixes it.
       const vox = this.config.ptt.backend === "vox";
       const payload = vox
-        ? Buffer.concat([voxWakeTone(this.config.ptt.leadMs), job.pcm])
+        ? Buffer.concat([
+            voxWakeTone(
+              this.config.ptt.leadMs,
+              this.config.ptt.voxToneHz,
+              this.config.ptt.voxToneLevel,
+            ),
+            job.pcm,
+          ])
         : job.pcm;
       // A wired key is already down; only VOX needs the lead-in to be audible.
       if (!vox) await sleep(this.config.ptt.leadMs);
@@ -309,6 +316,24 @@ export class Transceiver extends EventEmitter {
     return this.ptt.verify();
   }
 
+  /**
+   * Play just the VOX wake tone, with nothing behind it.
+   *
+   * Tuning the tone against a real radio means changing a number, listening,
+   * and changing it again; sending a whole spoken message each time makes that
+   * loop slow and clogs the channel. This sends the tone alone.
+   */
+  transmitWakeToneOnly(): void {
+    this.enqueue({
+      id: `waketone-${Date.now()}`,
+      // The lead-in is prepended by `transmit` for VOX, so the job itself only
+      // needs a moment of silence to hang the tone on.
+      pcm: Buffer.alloc(msToBytes(150)),
+      label: "wake tone only",
+      local: true,
+    });
+  }
+
   /** Put a test chirp on the air so the cabling can be confirmed by ear. */
   transmitTestTone(): void {
     this.enqueue({
@@ -338,44 +363,40 @@ export class Transceiver extends EventEmitter {
  * audio starts. Quiet enough not to be annoying, long enough to beat the VOX
  * attack time.
  */
-function voxWakeTone(durationMs: number): Buffer {
+function voxWakeTone(durationMs: number, hz: number, level: number): Buffer {
   const samples = Math.max(1, Math.round((Math.max(200, durationMs) / 1000) * SAMPLE_RATE));
   const pcm = Buffer.alloc(samples * 2);
 
-  // 480 Hz rather than 700: it carries the same energy into a VOX detector but
-  // is far less piercing to sit next to, and a box that is unpleasant to be
-  // near gets turned down or unplugged.
-  const HZ = 480;
+  // 480 Hz: enough energy for a VOX detector without being piercing to sit
+  // beside. A box that is unpleasant to be near gets turned down or unplugged.
+  const HZ = hz > 0 ? hz : 480;
+  const LEVEL = Math.min(1, Math.max(0, level));
   const ATTACK_MS = 40;
-  const DECAY_MS = 320;
-  const PEAK = 0.5;
-  const SUSTAIN = 0.13;
+  const RELEASE_MS = 50;
 
   const attack = (ATTACK_MS / 1000) * SAMPLE_RATE;
-  const decay = (DECAY_MS / 1000) * SAMPLE_RATE;
+  const release = (RELEASE_MS / 1000) * SAMPLE_RATE;
 
   for (let i = 0; i < samples; i++) {
-    // VOX needs a firm onset to trigger and then very little to stay open, so
-    // the tone hits hard and immediately falls back to a murmur. Holding it at
-    // full level for the whole lead-in — which is what the first version did —
-    // is both unnecessary and horrible to listen to.
-    let amplitude: number;
-    if (i < attack) {
-      amplitude = PEAK * (i / attack);
-    } else if (i < attack + decay) {
-      amplitude = SUSTAIN + (PEAK - SUSTAIN) * (1 - (i - attack) / decay);
-    } else {
-      amplitude = SUSTAIN;
-    }
-    // Fade the last 60 ms so the tone hands over to speech without a click.
+    // Held at one steady level rather than peaking and decaying.
+    //
+    // The decaying version was an attempt to be easier on the ear: hit hard to
+    // trigger VOX, then fall back to a murmur to hold it. It did not hold it.
+    // At a low VOX sensitivity the quiet tail sat under the threshold, so the
+    // gate opened on the onset, relaxed through the tail, and had to be
+    // re-triggered by the speech itself — taking the first word with it. The
+    // level that keeps VOX open is the level it has to stay at.
+    let amplitude = LEVEL;
+    if (i < attack) amplitude *= i / attack;
     const remaining = samples - i;
-    const tail = (0.06 * SAMPLE_RATE);
-    if (remaining < tail) amplitude *= remaining / tail;
+    // Fade out at the very end so the handover to speech does not click.
+    if (remaining < release) amplitude *= remaining / release;
 
     pcm.writeInt16LE(Math.round(Math.sin((2 * Math.PI * HZ * i) / SAMPLE_RATE) * amplitude * 32767), i * 2);
   }
   return pcm;
 }
+
 
 
 export { msToBytes };
