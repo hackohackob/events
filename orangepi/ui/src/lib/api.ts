@@ -178,6 +178,13 @@ export const api = {
   audioDevices: () => request<{ capture: AudioDevice[]; playback: AudioDevice[] }>("/audio/devices"),
   testTone: () => post<{ ok: boolean; detail: string }>("/radio/test-tone"),
   wakeTone: () => post<{ ok: boolean; detail: string }>("/radio/wake-tone"),
+
+  abInfo: () =>
+    request<{ loaded: boolean; presets: Array<{ id: string; label: string; detail: string }> }>(
+      "/radio/ab",
+    ),
+  abLoadSample: (url: string) => post<{ ok: boolean; detail: string }>("/radio/ab/sample", { url }),
+  abSend: (preset: string) => post<{ ok: boolean; detail: string }>("/radio/ab/send", { preset }),
   verifyPtt: () => post<{ ok: boolean; detail: string }>("/radio/verify-ptt"),
   cancelTx: () => post<{ ok: boolean }>("/radio/cancel"),
 

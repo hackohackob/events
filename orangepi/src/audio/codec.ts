@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { log } from "../logger";
 import { hasBinary } from "../util";
-import { applyGain, CHANNELS, SAMPLE_RATE } from "./format";
+import { CHANNELS, SAMPLE_RATE } from "./format";
+import { normalise, type AudioPreset } from "./presets";
 
 /**
  * ffmpeg wrappers: everything arriving from the server (m4a voice notes, mp3
@@ -26,6 +27,15 @@ import { applyGain, CHANNELS, SAMPLE_RATE } from "./format";
  * The top end is trimmed at 3.4 kHz for the same reason a radio does it —
  * above that there is only hiss to spend bitrate on.
  */
+/**
+ * Average level the outgoing audio is brought to.
+ *
+ * By average and not peak: speech has a wide gap between the two, and VOX
+ * responds to the average — pinning the peak left the average so low that the
+ * radio's gate dropped part-way through a message.
+ */
+const DEFAULT_RMS_TARGET = 0.16;
+
 const VOICE_BAND = [
   // Two cascaded high-passes: 24 dB/octave rather than 12. A single one leaves
   // roughly 8 dB of a source's energy at 200 Hz, and handset audio is heavily
@@ -41,37 +51,7 @@ const VOICE_BAND = [
   "lowpass=f=3400",
 ].join(",");
 
-/**
- * Peak the audio lands at after normalisation. Below full scale on purpose:
- * the wake tone and the radio's own input stage both need headroom.
- */
-const TARGET_PEAK = 0.6;
-/** Bounds on the correction, so near-silence is not amplified into hiss. */
-const MIN_GAIN = 0.2;
-const MAX_GAIN = 12;
 
-/**
- * Bring a clip to a consistent level with one fixed gain.
- *
- * Deliberately not ffmpeg's `loudnorm`. In its single-pass form that filter
- * measures as it goes and adapts, so the opening of every clip is attenuated
- * while it converges — measured here, the first 100 ms came out at a third of
- * its true level before jumping up. Against speech that begins immediately,
- * which is what a relayed Zello message does, that swallows the first word.
- * A gain computed from the whole clip and applied evenly has no such ramp.
- */
-function normalisePeak(pcm: Buffer): Buffer {
-  let peak = 0;
-  for (let i = 0; i + 1 < pcm.length; i += 2) {
-    const value = Math.abs(pcm.readInt16LE(i));
-    if (value > peak) peak = value;
-  }
-  if (peak === 0) return pcm;
-
-  const gain = Math.min(MAX_GAIN, Math.max(MIN_GAIN, (TARGET_PEAK * 32767) / peak));
-  if (Math.abs(gain - 1) < 0.05) return pcm;
-  return applyGain(pcm, gain);
-}
 
 let warned = false;
 
@@ -173,7 +153,7 @@ async function decodeFile(path: string, ogg: boolean): Promise<Buffer | null> {
       "pipe:1",
     ],
   );
-  if (pcm && pcm.length > 0) return normalisePeak(pcm);
+  if (pcm && pcm.length > 0) return normalise(pcm, "rms", DEFAULT_RMS_TARGET);
 
   // Retry with no forced decoder at all. Reached when an Ogg turns out not to
   // be Opus, or when a file's extension lied about its contents.
@@ -184,7 +164,7 @@ async function decodeFile(path: string, ogg: boolean): Promise<Buffer | null> {
     "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
     "-af", VOICE_BAND,
     "pipe:1",
-  ]).then((pcm) => (pcm && pcm.length > 0 ? normalisePeak(pcm) : pcm));
+  ]).then((pcm) => (pcm && pcm.length > 0 ? normalise(pcm, "rms", DEFAULT_RMS_TARGET) : pcm));
 }
 
 /** ffmpeg reading from a path, writing to stdout. */
@@ -210,6 +190,34 @@ export async function encodeToOpus(pcm: Buffer): Promise<Buffer | null> {
     ],
     pcm,
   );
+}
+
+/**
+ * Decode a clip with one named preset instead of the box's own settings, for
+ * A/B comparison on a real radio.
+ */
+export async function decodeWithPreset(data: Buffer, preset: AudioPreset): Promise<Buffer | null> {
+  if (!(await ensureFfmpeg())) return null;
+  const path = join(tmpdir(), `em-ab-${randomUUID().slice(0, 8)}`);
+  try {
+    await writeFile(path, data);
+    const args = [
+      "-hide_banner", "-loglevel", "error",
+      ...(isOgg(data) ? ["-c:a", "libopus"] : []),
+      "-i", path,
+      "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
+      ...(preset.filter ? ["-af", preset.filter] : []),
+      "pipe:1",
+    ];
+    const pcm = await pipeThrough(args);
+    if (!pcm || pcm.length === 0) return null;
+    return normalise(pcm, preset.normalise, preset.target);
+  } catch (err) {
+    log.warn("audio", `preset decode failed: ${(err as Error).message}`);
+    return null;
+  } finally {
+    await unlink(path).catch(() => undefined);
+  }
 }
 
 /**

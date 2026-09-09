@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { log } from "./logger";
 import { run, sleep } from "./util";
 import {
+  STATE_DIR,
   VERSION,
   isProvisioned,
   loadConfig,
@@ -9,7 +13,8 @@ import {
   type DeepPartial,
   type GatewayConfig,
 } from "./config";
-import { decodeToPcm, encodeToOpus } from "./audio/codec";
+import { decodeToPcm, decodeWithPreset, encodeToOpus } from "./audio/codec";
+import { findPreset, PRESETS } from "./audio/presets";
 import { bytesToMs } from "./audio/format";
 import { readHealth } from "./health";
 import { NetworkManager } from "./net/network";
@@ -30,6 +35,9 @@ import { applyUpdate } from "./updater";
  * Everything the console shows is read off this object, so the phone screen and
  * the server's dashboard can never disagree about what the box is doing.
  */
+/** Where the A/B comparison clip lives between restarts. */
+const AB_SAMPLE_PATH = join(STATE_DIR, "ab-sample.bin");
+
 export class GatewayDaemon extends EventEmitter {
   config: GatewayConfig;
   readonly network: NetworkManager;
@@ -308,6 +316,42 @@ export class GatewayDaemon extends EventEmitter {
         ? "The server could not supply speech, so a test tone is on its way instead."
         : "A test tone is on its way to the radio.",
     };
+  }
+
+  /**
+   * The A/B sample: one real clip, kept on the box, sent repeatedly through
+   * different processing so the same words can be judged against each other on
+   * the far radio. Comparing two different recordings tells you nothing.
+   */
+  async loadAbSample(url: string): Promise<{ ok: boolean; detail: string }> {
+    const data = await this.uplink.download(url);
+    if (!data || data.length === 0) {
+      return { ok: false, detail: "Could not fetch that audio." };
+    }
+    await writeFile(AB_SAMPLE_PATH, data);
+    log.info("console", `A/B sample loaded (${Math.round(data.length / 1024)} KB)`);
+    return { ok: true, detail: `Sample loaded, ${Math.round(data.length / 1024)} KB.` };
+  }
+
+  abSampleLoaded(): boolean {
+    return existsSync(AB_SAMPLE_PATH);
+  }
+
+  /** Transmit the sample processed with one preset. */
+  async sendAbPreset(id: string): Promise<{ ok: boolean; detail: string }> {
+    const preset = findPreset(id);
+    if (!preset) return { ok: false, detail: "Unknown preset." };
+    if (!existsSync(AB_SAMPLE_PATH)) {
+      return { ok: false, detail: "No sample loaded yet." };
+    }
+    const pcm = await decodeWithPreset(await readFile(AB_SAMPLE_PATH), preset);
+    if (!pcm) return { ok: false, detail: "Could not decode the sample with that preset." };
+    this.radio.enqueue({ id: `ab-${id}-${Date.now()}`, pcm, label: `A/B ${preset.label}`, local: true });
+    return { ok: true, detail: `Sending ${preset.label}.` };
+  }
+
+  listAbPresets() {
+    return PRESETS.map(({ id, label, detail }) => ({ id, label, detail }));
   }
 
   async update(): Promise<{ ok: boolean; detail: string }> {

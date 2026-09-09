@@ -17,6 +17,7 @@ import {
   WifiIcon,
   ZapIcon,
 } from "../lib/icons";
+import { AbTest } from "./AbTest";
 import { Banner, Card, Field, SignalBars, Slider, Toggle } from "./ui";
 
 /**
@@ -61,6 +62,7 @@ export function SetupTab({ status, onChanged }: { status: Status; onChanged: () 
       <AudioCard config={config} patch={patch} />
       <SquelchCard config={config} patch={patch} />
       <BeepCard config={config} patch={patch} />
+      <AbTest />
       <KeyingCard config={config} patch={patch} setNotice={setNotice} />
       <AccessPointCard config={config} status={status} patch={patch} setNotice={setNotice} />
       <StorageCard config={config} patch={patch} />

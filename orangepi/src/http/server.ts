@@ -270,6 +270,36 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
     res.json({ ok: true, detail: "Sending the wake tone on its own." });
   });
 
+  // ── A/B comparison ─────────────────────────────────────────────────────────
+  // One real clip, sent through different processing, so the same words can be
+  // judged against each other coming out of a handset. Every question worth
+  // answering here — bassy, intelligible, does VOX hold — is a question about
+  // a particular radio in a particular hand, not one a spectrum plot settles.
+
+  app.get("/api/radio/ab", (_req, res) => {
+    res.json({ loaded: daemon.abSampleLoaded(), presets: daemon.listAbPresets() });
+  });
+
+  app.post("/api/radio/ab/sample", (req, res) => {
+    const url = String((req.body as { url?: string }).url ?? "").trim();
+    if (!url) {
+      res.status(400).json({ ok: false, detail: "No audio URL given." });
+      return;
+    }
+    void daemon
+      .loadAbSample(url)
+      .then((result) => res.json(result))
+      .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
+  });
+
+  app.post("/api/radio/ab/send", (req, res) => {
+    const id = String((req.body as { preset?: string }).preset ?? "").trim();
+    void daemon
+      .sendAbPreset(id)
+      .then((result) => res.json(result))
+      .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
+  });
+
   app.post("/api/radio/verify-ptt", (_req, res) => {
     void daemon.radio.verifyKeying().then((result) => res.json(result));
   });
