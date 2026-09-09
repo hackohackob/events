@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { dirname } from "node:path";
 import { log } from "../logger";
-import { FAKE_HARDWARE, run, sleep } from "../util";
+import { FAKE_HARDWARE, run, sleep, type RunResult } from "../util";
 import { patchConfig, type GatewayConfig } from "../config";
 import type { NetMode } from "../types";
 
@@ -219,7 +219,7 @@ export class NetworkManager extends EventEmitter {
    * visible network rather than sleeping a fixed amount: on a good day this
    * returns in a couple of seconds, and it does not give up early on a bad one.
    */
-  private async settleAfterModeChange(timeoutMs = 20_000): Promise<void> {
+  private async settleAfterModeChange(wantSsid?: string, timeoutMs = 25_000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await sleep(1500);
@@ -228,9 +228,18 @@ export class NetworkManager extends EventEmitter {
         ["-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes"],
         { timeoutMs: 15_000 },
       );
-      if (res.code === 0 && res.stdout.split("\n").some((line) => line.trim())) return;
+      if (res.code !== 0) continue;
+      const seen = res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+      if (seen.length === 0) continue;
+      // Waiting for "any network" was not enough: the first sweep after a mode
+      // change often returns a handful of the strongest APs, and if the one we
+      // are about to join is not among them nmcli cannot tell what security it
+      // uses — which surfaces as "key-mgmt: property is missing" rather than
+      // anything about scanning.
+      if (!wantSsid || seen.includes(wantSsid)) return true;
     }
-    log.warn("wifi", "the radio still sees no networks after a mode change");
+    log.warn("wifi", wantSsid ? `${wantSsid} did not appear in a scan` : "the radio sees no networks");
+    return false;
   }
 
   /**
@@ -322,28 +331,37 @@ export class NetworkManager extends EventEmitter {
     // wifi connect` matches against the scan list, and after AP mode that list
     // is empty until the radio has swept the air again. Wait for it to see
     // something first.
-    await this.settleAfterModeChange();
+    await this.settleAfterModeChange(ssid);
 
-    // For a network already saved, bring the stored profile up instead of
-    // scanning for it. It does not depend on the SSID being in the current scan
-    // results at all, which makes rejoining a known network far more reliable
-    // — and it works for a hidden SSID.
     const saved = await this.savedNetworks();
-    const useSavedProfile = saved.includes(ssid) && !password;
-    const args = useSavedProfile
-      ? ["connection", "up", ssid]
-      : ["device", "wifi", "connect", ssid, "ifname", this.iface];
-    if (!useSavedProfile && password) args.push("password", password);
+    let res: RunResult | null = null;
 
-    let res = await run("nmcli", args, { timeoutMs: 60_000 });
+    // A saved network is brought up from its stored profile, regardless of
+    // whether a password came with the request. `connection up` does not depend
+    // on the SSID being in the current scan results, which is what makes
+    // rejoining reliable; requiring an empty password to take this path meant
+    // the console's own prefill quietly disabled it.
+    if (saved.includes(ssid)) {
+      if (password) {
+        // The operator may be correcting a password that has changed on the
+        // router, so store what they typed before bringing the profile up.
+        await run(
+          "nmcli",
+          ["connection", "modify", ssid, "802-11-wireless-security.psk", password],
+          { timeoutMs: 15_000 },
+        );
+      }
+      res = await run("nmcli", ["connection", "up", ssid], { timeoutMs: 60_000 });
+      if (res.code !== 0) {
+        log.warn("wifi", `the saved profile for ${ssid} did not come up — trying a fresh join`);
+        res = null;
+      }
+    }
 
-    // If the saved profile would not come up, fall back to a fresh association
-    // — the password may have changed on the router since it was stored.
-    if (res.code !== 0 && useSavedProfile) {
-      log.warn("wifi", `the saved profile for ${ssid} did not come up — trying a fresh join`);
-      res = await run("nmcli", ["device", "wifi", "connect", ssid, "ifname", this.iface], {
-        timeoutMs: 60_000,
-      });
+    if (!res) {
+      const args = ["device", "wifi", "connect", ssid, "ifname", this.iface];
+      if (password) args.push("password", password);
+      res = await run("nmcli", args, { timeoutMs: 60_000 });
     }
 
     if (res.code === 0) {
