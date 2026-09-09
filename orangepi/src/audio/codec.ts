@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { log } from "../logger";
 import { hasBinary } from "../util";
-import { CHANNELS, SAMPLE_RATE } from "./format";
+import { applyGain, CHANNELS, SAMPLE_RATE } from "./format";
 
 /**
  * ffmpeg wrappers: everything arriving from the server (m4a voice notes, mp3
@@ -26,7 +26,52 @@ import { CHANNELS, SAMPLE_RATE } from "./format";
  * The top end is trimmed at 3.4 kHz for the same reason a radio does it —
  * above that there is only hiss to spend bitrate on.
  */
-const VOICE_BAND = "highpass=f=300,lowpass=f=3400";
+const VOICE_BAND = [
+  // Two cascaded high-passes: 24 dB/octave rather than 12. A single one leaves
+  // roughly 8 dB of a source's energy at 200 Hz, and handset audio is heavily
+  // weighted there — measured on a real Zello clip, the peak of the whole
+  // spectrum sat at 200-300 Hz with almost nothing above 800. One pole was not
+  // going to move that.
+  "highpass=f=300:poles=2",
+  "highpass=f=300:poles=2",
+  // Lift the presence region back up. Intelligibility lives around 2 kHz, and
+  // after taking the bottom out of a muffled source there is little left there
+  // to hear; this is what radio audio processing does for the same reason.
+  "equalizer=f=2000:t=h:width=1400:g=6",
+  "lowpass=f=3400",
+].join(",");
+
+/**
+ * Peak the audio lands at after normalisation. Below full scale on purpose:
+ * the wake tone and the radio's own input stage both need headroom.
+ */
+const TARGET_PEAK = 0.6;
+/** Bounds on the correction, so near-silence is not amplified into hiss. */
+const MIN_GAIN = 0.2;
+const MAX_GAIN = 12;
+
+/**
+ * Bring a clip to a consistent level with one fixed gain.
+ *
+ * Deliberately not ffmpeg's `loudnorm`. In its single-pass form that filter
+ * measures as it goes and adapts, so the opening of every clip is attenuated
+ * while it converges — measured here, the first 100 ms came out at a third of
+ * its true level before jumping up. Against speech that begins immediately,
+ * which is what a relayed Zello message does, that swallows the first word.
+ * A gain computed from the whole clip and applied evenly has no such ramp.
+ */
+function normalisePeak(pcm: Buffer): Buffer {
+  let peak = 0;
+  for (let i = 0; i + 1 < pcm.length; i += 2) {
+    const value = Math.abs(pcm.readInt16LE(i));
+    if (value > peak) peak = value;
+  }
+  if (peak === 0) return pcm;
+
+  const gain = Math.min(MAX_GAIN, Math.max(MIN_GAIN, (TARGET_PEAK * 32767) / peak));
+  if (Math.abs(gain - 1) < 0.05) return pcm;
+  return applyGain(pcm, gain);
+}
 
 let warned = false;
 
@@ -124,11 +169,11 @@ async function decodeFile(path: string, ogg: boolean): Promise<Buffer | null> {
       // its speaker: the input is built for a telephone band, and everything
       // below it arrives as boom rather than as bass. Then normalise, because a
       // radio channel has no headroom to spare and a quiet talker is a lost one.
-      "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
+      "-af", VOICE_BAND,
       "pipe:1",
     ],
   );
-  if (pcm && pcm.length > 0) return pcm;
+  if (pcm && pcm.length > 0) return normalisePeak(pcm);
 
   // Retry with no forced decoder at all. Reached when an Ogg turns out not to
   // be Opus, or when a file's extension lied about its contents.
@@ -137,9 +182,9 @@ async function decodeFile(path: string, ogg: boolean): Promise<Buffer | null> {
     "-hide_banner", "-loglevel", "error",
     "-i", path,
     "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS),
-    "-af", `${VOICE_BAND},loudnorm=I=-16:TP=-1.5:LRA=11`,
+    "-af", VOICE_BAND,
     "pipe:1",
-  ]);
+  ]).then((pcm) => (pcm && pcm.length > 0 ? normalisePeak(pcm) : pcm));
 }
 
 /** ffmpeg reading from a path, writing to stdout. */
