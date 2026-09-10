@@ -206,7 +206,6 @@ function envDefaults(kind: PttChannelKind): Record<string, string> {
   // be joined per connection, so the first is the default selection.
   put("channels", process.env.ZELLO_CHANNELS);
   put("channel", process.env.ZELLO_CHANNEL ?? process.env.ZELLO_CHANNELS?.split(",")[0]);
-  put("channelPassword", process.env.ZELLO_CHANNEL_PASSWORD);
   put("username", process.env.ZELLO_USERNAME);
   put("password", process.env.ZELLO_PASSWORD);
   put("issuer", process.env.ZELLO_ISSUER);

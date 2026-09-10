@@ -19,8 +19,6 @@ export interface ZelloClientOptions {
   username: string;
   password: string;
   channel: string;
-  /** Only for password-protected channels; empty/omitted for open ones. */
-  channelPassword?: string;
   issuer?: string;
   privateKey?: string;
   devToken?: string;
@@ -343,12 +341,6 @@ export class ZelloClient extends EventEmitter {
         username: this.options.username,
         password: this.options.password,
         channels: [this.options.channel],
-        // Undocumented, but the only way in: without it a protected channel
-        // answers `on_channel_status` with `invalid password` rather than
-        // failing the logon itself.
-        ...(this.options.channelPassword?.trim()
-          ? { channel_password: this.options.channelPassword.trim() }
-          : {}),
       });
       this.reconnectAttempt = 0;
       this.setState("online", "logged on, waiting for the channel");
@@ -474,7 +466,7 @@ export class ZelloClient extends EventEmitter {
       // trigger "on connect, do X" logic, or it fires repeatedly.
       if (!wasOnline) this.setState("online", `channel ${channel} online`);
     } else {
-      this.setState("error", status.error ? `channel ${channel}: ${status.error}` : `channel ${channel} offline`);
+      this.setState("error", explainChannelError(channel, status.error));
     }
     this.emit("channel", status);
   }
@@ -668,6 +660,28 @@ function imageFrame(imageId: number, imageType: 1 | 2, jpeg: Buffer): Buffer {
   header.writeUInt32BE(imageId, 1);
   header.writeUInt32BE(imageType, 5);
   return Buffer.concat([header, jpeg]);
+}
+
+/**
+ * Turn a channel-status error into something the operator can act on.
+ *
+ * `invalid password` is the one worth expanding. It means the channel is
+ * password-protected and this account is not a member of it — and the Channel
+ * API has no way to send a channel password: verified against the live server,
+ * every documented and undocumented spelling (`channel_password`, a per-channel
+ * object, MD5 of the password, a post-logon join command) is ignored and the
+ * gate still answers `invalid password`. The account has to join the channel
+ * once in a Zello client, which is what the API then checks.
+ */
+function explainChannelError(channel: string, error?: string): string {
+  if (error === "invalid password") {
+    return (
+      `channel ${channel} is password-protected and the bot account is not a member. ` +
+      "The Channel API cannot send a channel password — sign in to the Zello app as the bot " +
+      "account, join the channel with its password once, then reconnect here."
+    );
+  }
+  return error ? `channel ${channel}: ${error}` : `channel ${channel} offline`;
 }
 
 /** The logon frame carries the account password in plaintext — never log it raw. */
