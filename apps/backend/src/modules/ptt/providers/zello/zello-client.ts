@@ -19,6 +19,8 @@ export interface ZelloClientOptions {
   username: string;
   password: string;
   channel: string;
+  /** Only for password-protected channels; empty/omitted for open ones. */
+  channelPassword?: string;
   issuer?: string;
   privateKey?: string;
   devToken?: string;
@@ -341,6 +343,12 @@ export class ZelloClient extends EventEmitter {
         username: this.options.username,
         password: this.options.password,
         channels: [this.options.channel],
+        // Undocumented, but the only way in: without it a protected channel
+        // answers `on_channel_status` with `invalid password` rather than
+        // failing the logon itself.
+        ...(this.options.channelPassword?.trim()
+          ? { channel_password: this.options.channelPassword.trim() }
+          : {}),
       });
       this.reconnectAttempt = 0;
       this.setState("online", "logged on, waiting for the channel");

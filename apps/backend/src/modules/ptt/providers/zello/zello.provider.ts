@@ -57,6 +57,13 @@ export class ZelloProvider implements PttProvider {
       placeholder: "Test integration channel",
       hint: "Only one channel can be joined per connection. Switching reconnects the bridge.",
     },
+    {
+      key: "channelPassword",
+      label: "Channel password",
+      type: "secret",
+      required: false,
+      hint: "Only for password-protected channels. Leave empty for open ones.",
+    },
     { key: "username", label: "Bot username", type: "text", required: true, placeholder: "academyfirstaid.bot" },
     {
       key: "password",
@@ -127,6 +134,7 @@ export class ZelloProvider implements PttProvider {
       username: config.username!.trim(),
       password: config.password!,
       channel: config.channel!.trim(),
+      channelPassword: config.channelPassword,
       issuer: config.issuer?.trim(),
       privateKey: config.privateKey,
       devToken: config.devToken?.trim(),
