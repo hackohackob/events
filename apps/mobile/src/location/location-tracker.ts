@@ -338,7 +338,11 @@ async function sendLocation(
     if (AppState.currentState === "active" && socket.connected) {
       socket.emit("medic_location", payload);
       noteEnergyEvent("sendWs");
-      debugLog("location", "info", "medic location sent via WS", { accuracy: payload.accuracy, battery });
+      debugLog("location", "info", `medic location sent via WS${opts.heartbeat ? " (heartbeat — cached fix)" : ""}`, {
+        accuracy: payload.accuracy,
+        battery,
+        fixAgeSec: Math.round((Date.now() - location.timestamp) / 1000),
+      });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "ws" });
       return;
     }
@@ -357,7 +361,11 @@ async function sendLocation(
         body: JSON.stringify(payload),
       });
       noteEnergyEvent("sendHttpOk");
-      debugLog("location", "info", "medic location sent via HTTP", { accuracy: payload.accuracy, battery });
+      debugLog("location", "info", `medic location sent via HTTP${opts.heartbeat ? " (heartbeat — cached fix)" : ""}`, {
+        accuracy: payload.accuracy,
+        battery,
+        fixAgeSec: Math.round((Date.now() - location.timestamp) / 1000),
+      });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "http" });
     } catch (err) {
       noteEnergyEvent("sendHttpFail");
@@ -572,7 +580,10 @@ async function startDirectWatch(intervalMs: number): Promise<void> {
         // from the OS is still open, and that is all the watchdog asks.
         noteFixReceived();
         // Skip anything the task fallback (or a previous watch) already sent.
-        if (location.timestamp <= lastDeliveredFixTimestamp) return;
+        if (location.timestamp <= lastDeliveredFixTimestamp) {
+          debugLog("location", "info", "watch: skipped already-superseded fix");
+          return;
+        }
         // Skip a stale OS-cached fix delivered on unlock (the position from when
         // the screen locked) — a current fix follows within the watch interval.
         //
@@ -584,6 +595,7 @@ async function startDirectWatch(intervalMs: number): Promise<void> {
         // has always had this escape hatch; the watch was missing it.
         const fixAgeMs = Date.now() - location.timestamp;
         if (fixAgeMs > STALE_FIX_MAX_AGE_MS && Date.now() - lastDeliveredAt < STALE_FIX_MAX_AGE_MS) {
+          debugLog("location", "info", `watch: skipped stale fix (${Math.round(fixAgeMs / 1000)}s old)`);
           return;
         }
         lastDeliveredFixTimestamp = location.timestamp;

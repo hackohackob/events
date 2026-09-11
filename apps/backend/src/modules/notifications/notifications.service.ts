@@ -12,6 +12,13 @@ interface PushMessage {
   priority?: "default" | "normal" | "high";
   /** Android notification channel the push is delivered on. */
   channelId?: string;
+  /**
+   * iOS `content-available: 1`. Expo turns this into an APNs *background*
+   * push (`apns-push-type: background`), which wakes the app's background
+   * task without drawing anything and without making a sound. Must be sent
+   * with no title/body/sound, or iOS treats it as a normal alert.
+   */
+  _contentAvailable?: boolean;
 }
 
 /**
@@ -65,6 +72,19 @@ function buildMessage(token: string, title: string, body: string, data: Record<s
     return { to: token, data: { ...data, title, body }, priority: "high" };
   }
   return { to: token, title, body, data, sound: "default", priority: "high", channelId: opts?.channelId };
+}
+
+/**
+ * A push that exists only to wake the app — no title, no body, no sound, no
+ * channel, nothing in the tray on either platform.
+ *
+ * `priority: "normal"` is not a preference: APNs REJECTS a background push
+ * sent at priority 10, and Expo derives the APNs priority from this field.
+ * On Android the same message arrives as a data-only FCM message, which the
+ * background push task receives without the OS drawing a notification.
+ */
+function buildSilentMessage(token: string, data: Record<string, unknown>): PushMessage {
+  return { to: token, data, priority: "normal", _contentAvailable: true };
 }
 
 @Injectable()
@@ -221,6 +241,21 @@ export class NotificationsService implements OnModuleInit {
     );
     if (rows.length === 0) return;
     await this.sendMessages(rows.map((r) => buildMessage(r.token, title, body, data, opts)));
+  }
+
+  /**
+   * Wake one medic's devices silently. Nothing is displayed and nothing is
+   * audible; the app's background push task is the only thing that sees it.
+   * Returns how many devices were pinged.
+   */
+  async sendSilentToUser(userId: string, eventId: string, data: Record<string, unknown>): Promise<number> {
+    const { rows } = await this.db.query<{ token: string }>(
+      `SELECT token FROM push_tokens WHERE user_id = $1 AND event_id = $2`,
+      [userId, eventId],
+    );
+    if (rows.length === 0) return 0;
+    await this.sendMessages(rows.map((r) => buildSilentMessage(r.token, data)));
+    return rows.length;
   }
 
   async sendToEvent(
