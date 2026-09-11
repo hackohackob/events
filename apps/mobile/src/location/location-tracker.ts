@@ -420,6 +420,59 @@ const STALE_FIX_MAX_AGE_MS = 30_000;
 let lastDeliveredFixTimestamp = 0;
 let lastDeliveredAt = 0;
 
+// ─── Delivery liveness ───────────────────────────────────────────────────────
+//
+// When the OS last handed us ANY fix, and when tracking was last (re)armed.
+// Stamped before every filter, because the question these answer is "is the
+// pipe from CoreLocation/FusedLocation to JS alive at all", not "was the fix
+// worth sending". A fix we dedupe or drop as stale is still proof of life.
+//
+// This exists because task registration — the only thing the watchdog used to
+// check — stays true through every failure mode that actually bites on iOS: a
+// CLLocationManager that auto-paused and will never resume, a deferred-update
+// gate that is buffering forever, a manager whose delegate has gone quiet. In
+// all of those `isTaskRegisteredAsync` still says "registered" while nothing
+// has arrived for half an hour.
+let lastFixReceivedAt = 0;
+let trackingArmedAt = 0;
+
+function noteFixReceived(): void {
+  lastFixReceivedAt = Date.now();
+}
+
+/**
+ * How long the OS may stay silent before we treat the delivery pipe as dead
+ * and rebuild it.
+ *
+ * A stationary iPhone legitimately produces NO fixes (the distance filter is
+ * the only gate iOS has), so this can never be tight — it would restart
+ * tracking every few minutes for a medic correctly holding a post. It is a
+ * liveness probe, not a cadence check.
+ *
+ * Two intervals is the smallest gap that cannot be explained by normal jitter;
+ * the floor keeps short cadences from thrashing, and the cap keeps a long
+ * cadence from letting a genuinely dead pipe run past the point where the
+ * server writes the medic off.
+ *
+ * The cap is set against that server threshold, not picked for roundness:
+ * `computeFreshness` in @events/contracts calls a medic offline at 15 min. A
+ * rebuild at 10 min lands the recovery fix around the 11 min mark worst case,
+ * which keeps four minutes of margin. At 12 min the margin was two, and two is
+ * not enough to absorb a slow GPS re-acquisition.
+ *
+ * A useful side effect: this is an upper bound on silence that does not depend
+ * on the configured cadence, so the 20 and 40 minute options in Settings — both
+ * longer than the server's own offline threshold, and so unusable on their own —
+ * still report inside it.
+ */
+const FIX_STALE_FLOOR_MS = 5 * 60_000;
+const FIX_STALE_CAP_MS = 10 * 60_000;
+
+function fixStaleAfterMs(): number {
+  const interval = effectiveLocationIntervalMs();
+  return Math.min(Math.max(2 * interval, FIX_STALE_FLOOR_MS), FIX_STALE_CAP_MS);
+}
+
 // ─── Heartbeat ───────────────────────────────────────────────────────────────
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -476,7 +529,22 @@ function stopHeartbeat(): void {
   heartbeatTimer = null;
 }
 
-// ─── Direct watch (primary background delivery) ──────────────────────────────
+// ─── Direct watch (primary on Android, FOREGROUND-ONLY on iOS) ───────────────
+//
+// Do not read this as a background path on iPhone. expo-location builds every
+// watchPositionAsync subscription through BaseLocationProvider, which hardcodes
+//
+//   manager.allowsBackgroundLocationUpdates = false
+//
+// and never sets pausesLocationUpdatesAutomatically, so it also keeps
+// CoreLocation's default of true. On iOS this watch therefore stops the moment
+// the app leaves the foreground, and can be paused by the OS even before that —
+// with no resume, because expo implements no didPauseLocationUpdates handler.
+//
+// On iOS the ONLY background delivery is the TaskManager task below (its
+// consumer sets allowsBackgroundLocationUpdates = YES and honours the
+// pausesUpdatesAutomatically we pass it). On Android this watch remains the
+// primary path and the reason tracking survives the known TaskService NPE.
 
 let directWatchSub: ExpoLocation.LocationSubscription | null = null;
 
@@ -500,11 +568,24 @@ async function startDirectWatch(intervalMs: number): Promise<void> {
       },
       (location) => {
         noteEnergyEvent("gpsFix");
+        // Proof of life first: even a fix we go on to discard shows the pipe
+        // from the OS is still open, and that is all the watchdog asks.
+        noteFixReceived();
         // Skip anything the task fallback (or a previous watch) already sent.
         if (location.timestamp <= lastDeliveredFixTimestamp) return;
         // Skip a stale OS-cached fix delivered on unlock (the position from when
         // the screen locked) — a current fix follows within the watch interval.
-        if (Date.now() - location.timestamp > 25_000) return;
+        //
+        // But only while something fresh HAS been arriving. Unconditionally
+        // dropping every fix older than the cutoff meant the first fix back
+        // after a quiet stretch — the recovery fix, the one that proves the
+        // medic is still there — was the one guaranteed to be discarded, and
+        // the next chance was a whole interval later. The background task path
+        // has always had this escape hatch; the watch was missing it.
+        const fixAgeMs = Date.now() - location.timestamp;
+        if (fixAgeMs > STALE_FIX_MAX_AGE_MS && Date.now() - lastDeliveredAt < STALE_FIX_MAX_AGE_MS) {
+          return;
+        }
         lastDeliveredFixTimestamp = location.timestamp;
         lastDeliveredAt = Date.now();
         void sendLocation(location);
@@ -530,6 +611,20 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
   const locations: ExpoLocation.LocationObject[] = data?.locations ?? [];
   if (!locations.length) return;
   noteEnergyEvent("gpsFix");
+  noteFixReceived();
+
+  // iOS can relaunch a TERMINATED app straight into this handler (the task
+  // consumer arms significant-change monitoring alongside the standard
+  // updates), and a relaunch starts a bare JS runtime: no App.tsx effect has
+  // run yet, so nothing has armed the heartbeat. Without this, a medic whose
+  // app was killed in their pocket comes back for exactly one fix and then
+  // goes quiet again until they open the app by hand.
+  //
+  // Deliberately NOT a startLocationLoop() call: that stops and restarts the
+  // very task currently executing. Arming the heartbeat is idempotent and
+  // enough — App.tsx re-runs the full start once the session store hydrates.
+  if (trackingArmedAt === 0) trackingArmedAt = Date.now();
+  startHeartbeat();
 
   const location = locations[locations.length - 1]!;
   const session = useSessionStore.getState();
@@ -588,6 +683,10 @@ export async function sendCurrentLocationNow(): Promise<void> {
       ? lastKnown
       : await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced });
     if (location) {
+      // A one-shot that returns a position is also proof the pipe is open —
+      // and it is what the watchdog's own rebuild ends with, so without this
+      // a successful rebuild would not clear the staleness it just fixed.
+      noteFixReceived();
       // Explicit intent (app opened, tracking (re)started, debug button) —
       // always report, never wait out the interval.
       await sendLocation(location, { force: true });
@@ -710,18 +809,54 @@ export async function startLocationLoop(): Promise<boolean> {
           // 0 — its interval already paces it and a distance gate there would
           // only silence a medic holding a post.
           distanceInterval: ios && !navModeActive ? IOS_IDLE_DISTANCE_FILTER_M : 0,
-          // iOS honours these two in the task consumer (EXLocationTaskConsumer)
-          // and they are what batches delivery to our configured cadence instead
-          // of waking the JS runtime for every fix the GPS produces. Android
-          // keeps 0 — its own interval already paces it and deferring would just
-          // add latency.
-          deferredUpdatesInterval: ios && !navModeActive ? intervalMs : 0,
+          // Deferred updates: OFF, on both platforms. This used to carry the
+          // configured interval on iOS, on the theory that it batched delivery
+          // to our cadence instead of waking JS for every fix. It does batch —
+          // but read EXLocationTaskConsumer's actual gate:
+          //
+          //   [newest.timestamp timeIntervalSinceDate:oldest.timestamp] >= interval/1000
+          //     && _deferredDistance >= distance
+          //
+          // evaluated ONLY inside didUpdateLocations. Two consequences, both of
+          // which produced exactly the silence we were chasing:
+          //
+          // 1. It needs a NEW fix to re-evaluate. A medic who walks 40 m (past
+          //    the distance filter) and then stands still gets that fix buffered
+          //    — the gap to the last report is seconds, not minutes — and then
+          //    no further fix ever arrives to flush it. Their real position sits
+          //    in a native array until they move again. Not late: never sent.
+          //
+          // 2. After iOS relaunches a terminated app via significant-change
+          //    monitoring, the buffer holds one location and `_lastReportedLocation`
+          //    is nil, so `oldest` IS `newest` and the gap is 0 — never >= 180 s.
+          //    The relaunch fix is swallowed, which is why a killed app came back
+          //    silent.
+          //
+          // Pacing belongs in JS, where it already is: sendLocation's own gate
+          // (lastSendAt + effectiveLocationIntervalMs) throttles what reaches the
+          // network. The cost paid for that is a JS wake per fix that clears the
+          // 35 m distance filter — nothing at all while stationary, and the
+          // throttled path returns before any battery read or request.
+          //
+          // Worst case is a medic driving WITHOUT navigation on: 35 m at 50 km/h
+          // is a wake every ~2.5 s. Cheap wakes, but not free. If that ever shows
+          // up in the battery numbers, IOS_IDLE_DISTANCE_FILTER_M is the knob —
+          // raise it. Do NOT reach for deferredUpdatesInterval again: any nonzero
+          // value brings back case 2 above, and case 2 is a medic who is simply
+          // gone. In nav mode this does not arise; that path already ran with
+          // deferral off and no distance filter.
+          deferredUpdatesInterval: 0,
           deferredUpdatesDistance: 0,
-          // Tells iOS what kind of movement to expect so it can shut the radio
-          // down sensibly between fixes. Only the task path reads it.
+          // Tells iOS what kind of movement to expect. This is also the hint
+          // that feeds its decision to pause updates, and `Fitness` means
+          // "expect stops, pause when they stop" — the opposite of what a medic
+          // holding a post needs. `Other` is the least pause-happy value and the
+          // CLLocationManager default. pausesUpdatesAutomatically below is set
+          // false regardless; this stops us asking for the behaviour we then
+          // have to suppress.
           activityType: navModeActive
             ? ExpoLocation.ActivityType.OtherNavigation
-            : ExpoLocation.ActivityType.Fitness,
+            : ExpoLocation.ActivityType.Other,
           mayShowUserSettingsDialog: true,
           foregroundService: {
             notificationTitle: "Extreme Medics — live tracking",
@@ -762,12 +897,14 @@ export async function startLocationLoop(): Promise<boolean> {
       }
     }
 
-    // Primary delivery path: a plain watch subscription (direct callback, no
-    // JobScheduler) kept alive by the foreground service. Always started, even
-    // when the background task above fails to register — EXCEPT while
-    // navigating: the nav camera hook runs its own 1s foreground watcher whose
-    // fixes are already sent (throttled) via sendNavLocationFix, so a second
-    // concurrent GPS subscription would only double the sends and the drain.
+    // Android's primary delivery path: a plain watch subscription (direct
+    // callback, no JobScheduler) kept alive by the foreground service. On iOS
+    // it covers the foreground only — see the section header above. Always
+    // started, even when the background task above fails to register — EXCEPT
+    // while navigating: the nav camera hook runs its own 1s foreground watcher
+    // whose fixes are already sent (throttled) via sendNavLocationFix, so a
+    // second concurrent GPS subscription would only double the sends and the
+    // drain.
     if (navModeActive) {
       directWatchSub?.remove();
       directWatchSub = null;
@@ -780,12 +917,19 @@ export async function startLocationLoop(): Promise<boolean> {
     return false;
   }
 
-  // 5. Keep a medic who is standing still on everyone's map. Only matters once
+  // 5. Restart the liveness clock. Everything below this point is armed, so a
+  //    silence from here on is the OS's, not ours — and that is what the
+  //    freshness watchdog in ensureTrackingAlive measures. Stamping it here
+  //    also makes a failed restart self-limiting: the next stale check is a
+  //    full window away rather than immediate.
+  trackingArmedAt = Date.now();
+
+  // 6. Keep a medic who is standing still on everyone's map. Only matters once
   //    the OS is allowed to stop producing fixes, but it is harmless otherwise —
   //    it only fires after a full interval of silence.
   startHeartbeat();
 
-  // 6. Fire an immediate one-shot send so the map shows a position right away.
+  // 7. Fire an immediate one-shot send so the map shows a position right away.
   void sendCurrentLocationNow();
   return true;
 }
@@ -840,6 +984,10 @@ const NAV_FOREGROUND_SEND_INTERVAL_MS = 5_000;
  * the server, so sends are throttled to one every few seconds.
  */
 export function sendNavLocationFix(location: ExpoLocation.LocationObject): void {
+  // The nav watcher is a real delivery path — count it as proof of life even
+  // for the fixes it throttles away, or leaving navigation would look like a
+  // dead pipe to the watchdog.
+  noteFixReceived();
   if (Date.now() - lastNavSendAt < NAV_FOREGROUND_SEND_INTERVAL_MS) return;
   lastNavSendAt = Date.now();
   // Stamp the shared dedupe marker so the background task (still running at
@@ -855,6 +1003,59 @@ export function sendNavLocationFix(location: ExpoLocation.LocationObject): void 
 
 let lastWatchdogRestartAt = 0;
 const WATCHDOG_RESTART_COOLDOWN_MS = 120_000;
+let staleRestartInFlight = false;
+
+/**
+ * Rebuild tracking when the OS has stopped delivering fixes.
+ *
+ * The silence this looks for is total: no fix from the watch, the background
+ * task, or the nav watcher, for longer than {@link fixStaleAfterMs}. A medic
+ * standing still legitimately produces no fixes on iOS, so this cannot and does
+ * not try to distinguish "stationary" from "broken" — it simply rebuilds the
+ * subscriptions and takes one fresh reading. If they really were just standing
+ * still, the cost is a single GPS acquisition per window and the position that
+ * comes back is correct. If the pipe was dead, this is the only thing that
+ * revives it short of the medic opening the app.
+ *
+ * Self-limiting by construction: startLocationLoop restamps trackingArmedAt, so
+ * a restart that does not help still waits a full window before the next one.
+ */
+async function restartIfDeliveryStale(): Promise<void> {
+  // Navigation runs its own 1 s foreground watcher and reports continuously —
+  // if that has stopped, the nav screen has bigger problems than this.
+  if (navModeActive) return;
+  // A rebuild already running. ensureTrackingAlive fires from a 60 s timer AND
+  // from every foreground transition, and startLocationLoop can take longer
+  // than either gap when the GPS is slow to come up — without this, a slow
+  // restart invites a second one to race it through stop/startLocationUpdates.
+  if (staleRestartInFlight) return;
+
+  const lastSignOfLife = Math.max(lastFixReceivedAt, trackingArmedAt);
+  // Tracking was never armed in this JS context (and no fix has arrived) —
+  // nothing to judge yet.
+  if (lastSignOfLife === 0) return;
+
+  const staleAfterMs = fixStaleAfterMs();
+  const quietForMs = Date.now() - lastSignOfLife;
+  if (quietForMs < staleAfterMs) return;
+
+  debugLog("location", "warn", "tracking watchdog: no fix from the OS — rebuilding tracking", {
+    quietForSec: Math.round(quietForMs / 1000),
+    staleAfterSec: Math.round(staleAfterMs / 1000),
+    everReceivedFix: lastFixReceivedAt > 0,
+  });
+  noteEnergyEvent("watchdogRestart");
+  staleRestartInFlight = true;
+  // Restamp BEFORE awaiting, not just at the end of startLocationLoop: a
+  // rebuild that is merely slow must not still read as silence to the next
+  // tick. startLocationLoop restamps again when it completes.
+  trackingArmedAt = Date.now();
+  try {
+    await startLocationLoop();
+  } finally {
+    staleRestartInFlight = false;
+  }
+}
 
 /**
  * Watchdog: verify the background updates task is still registered, and restart
@@ -874,7 +1075,16 @@ export async function ensureTrackingAlive(): Promise<void> {
     if (permission.status !== "granted") return;
 
     const registered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-    if (registered) return;
+    if (registered) {
+      // Registered is not the same as delivering. Every iOS failure mode that
+      // actually strands a medic leaves the task registered: an auto-paused
+      // CLLocationManager that expo-location never resumes, a watch whose
+      // manager was torn down, a provider that simply stopped calling back. So
+      // ask the only question that distinguishes them — when did a fix last
+      // reach us? — and rebuild the whole thing if the answer is "too long ago".
+      await restartIfDeliveryStale();
+      return;
+    }
 
     // If the background task is in its failure backoff, a restart would just hit
     // the same native NPE — let the backoff window govern re-attempts instead of
