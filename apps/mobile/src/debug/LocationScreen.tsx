@@ -294,6 +294,8 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
         <Row label="Connectivity gate" value={isOnline() ? "online — sends allowed" : "offline — sends parked"} tone={isOnline() ? "ok" : "warn"} />
         <Row label="Queued location fixes" value={String(locationQueueSize)} tone={locationQueueSize > 0 ? "warn" : "ok"} />
         <EnergyRow kind="gpsFix" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="heartbeat" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="watchdogRestart" windowCounts={windowCounts} totals={energyTotals} />
         <EnergyRow kind="sendWs" windowCounts={windowCounts} totals={energyTotals} />
         <EnergyRow kind="sendHttpOk" windowCounts={windowCounts} totals={energyTotals} />
         <EnergyRow kind="sendHttpFail" windowCounts={windowCounts} totals={energyTotals} />
