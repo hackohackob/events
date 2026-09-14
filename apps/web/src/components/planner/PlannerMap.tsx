@@ -256,20 +256,6 @@ export default function PlannerMap({
     }
   }, [selectedView])
 
-  const activeTraces = useMemo(
-    () => ({
-      type: 'FeatureCollection' as const,
-      features: medicViews
-        .filter(v => v.position?.phase === 'moving' && (v.position?.path?.length ?? 0) > 1)
-        .map(v => ({
-          type: 'Feature' as const,
-          properties: { color: v.medic.color },
-          geometry: { type: 'LineString' as const, coordinates: v.position!.path! },
-        })),
-    }),
-    [medicViews],
-  )
-
   const handleMapClick = useCallback(
     (e: MapLayerMouseEvent) => {
       if (!selectedMedicId) return
@@ -292,59 +278,77 @@ export default function PlannerMap({
       <NavigationControl position="top-right" showCompass={false} />
 
       {/* ── Courses ─────────────────────────────────────────────────────── */}
+      {/* Grouped by ROLE, not by course. MapLibre draws layers in the order
+          they are added, so a per-course block would put the second course's
+          dark casing and slate under-line straight over the first course's
+          gradient — which is exactly what happens where two courses share a
+          valley: one route reads and its neighbours go muddy. Every casing
+          goes down first, then every under-line, then every gradient. */}
       {trackData.map(track => (
-        <Source key={track.id} id={`course-${track.id}`} type="geojson" data={track.geojson} lineMetrics>
-          {/* A dark casing first: over a satellite tile or a pale topo map a
-              bare coloured line disappears, and this is the one thing on the
-              screen that always has to be findable. */}
+        <Source key={track.id} id={`course-${track.id}`} type="geojson" data={track.geojson} lineMetrics />
+      ))}
+
+      {/* A dark casing: over a satellite tile or a pale topo map a bare
+          coloured line disappears, and this is the one thing on the screen that
+          always has to be findable. */}
+      {trackData.map(track => (
+        <Layer
+          key={`casing-${track.id}`}
+          id={`course-casing-${track.id}`}
+          source={`course-${track.id}`}
+          type="line"
+          layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+          paint={{ 'line-color': '#020617', 'line-width': 9, 'line-opacity': 0.55, 'line-blur': 0.5 }}
+        />
+      ))}
+
+      {/* The route itself; the gradient paints over it where there is one. */}
+      {trackData.map(track => (
+        <Layer
+          key={`base-${track.id}`}
+          id={`course-base-${track.id}`}
+          source={`course-${track.id}`}
+          type="line"
+          layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+          paint={{
+            'line-color': track.reachMode ? '#64748b' : track.color,
+            'line-width': 4.5,
+            'line-opacity': track.hasSeries ? 0.45 : 0.9,
+          }}
+        />
+      ))}
+
+      {/* Glow makes a dense pack — or a long gap — read from a zoomed-out view. */}
+      {trackData.map(track =>
+        track.hasSeries && (showDensity || track.reachMode) ? (
           <Layer
-            id={`course-casing-${track.id}`}
-            source={`course-${track.id}`}
-            type="line"
-            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-            paint={{ 'line-color': '#020617', 'line-width': 9, 'line-opacity': 0.55, 'line-blur': 0.5 }}
-          />
-          {/* The route itself. In gaps mode the gradient below paints over it. */}
-          <Layer
-            id={`course-base-${track.id}`}
+            key={`glow-${track.id}`}
+            id={`course-glow-${track.id}`}
             source={`course-${track.id}`}
             type="line"
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
             paint={{
-              'line-color': track.reachMode ? '#64748b' : track.color,
-              'line-width': 4.5,
-              'line-opacity': track.hasSeries ? 0.45 : 0.9,
+              'line-gradient': track.gradient as never,
+              'line-width': 20,
+              'line-blur': 14,
+              'line-opacity': 0.6,
             }}
           />
-          {/* Glow underneath makes a dense pack — or a long gap — read from a
-              zoomed-out view. Siblings rather than a wrapped pair on purpose:
-              react-map-gl injects the parent source onto each direct child, and
-              a Fragment in between swallows it. */}
-          {track.hasSeries && (showDensity || track.reachMode) && (
-            <Layer
-              id={`course-glow-${track.id}`}
-              source={`course-${track.id}`}
-              type="line"
-              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-              paint={{
-                'line-gradient': track.gradient as never,
-                'line-width': 20,
-                'line-blur': 14,
-                'line-opacity': 0.6,
-              }}
-            />
-          )}
-          {track.hasSeries && (showDensity || track.reachMode) && (
-            <Layer
-              id={`course-field-${track.id}`}
-              source={`course-${track.id}`}
-              type="line"
-              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-              paint={{ 'line-gradient': track.gradient as never, 'line-width': 6 }}
-            />
-          )}
-        </Source>
-      ))}
+        ) : null,
+      )}
+
+      {trackData.map(track =>
+        track.hasSeries && (showDensity || track.reachMode) ? (
+          <Layer
+            key={`field-${track.id}`}
+            id={`course-field-${track.id}`}
+            source={`course-${track.id}`}
+            type="line"
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-gradient': track.gradient as never, 'line-width': 6 }}
+          />
+        ) : null,
+      )}
 
       {/* ── Individual runners ──────────────────────────────────────────── */}
       {runnerDots && (
@@ -394,19 +398,6 @@ export default function PlannerMap({
               'line-opacity': 0.7,
               'line-dasharray': [1, 2],
             }}
-          />
-        </Source>
-      )}
-
-      {/* ── Live move traces ────────────────────────────────────────────── */}
-      {activeTraces.features.length > 0 && (
-        <Source id="planner-traces" type="geojson" data={activeTraces}>
-          <Layer
-            id="planner-trace-line"
-            source="planner-traces"
-            type="line"
-            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-            paint={{ 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.85 }}
           />
         </Source>
       )}
