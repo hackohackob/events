@@ -143,7 +143,22 @@ export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }:
                       : `Start sweeping ${stop.label.replace(/ start$/, '')}`
                     : stop.kind === 'sweep-end'
                       ? `Sweep complete — ${stop.label.replace(/ finish$/, '')}`
-                      : `${i === 0 ? 'Be at ' : 'Move to '}${stop.label}`
+                      : `Be at ${stop.label}`
+                // The journey gets a line of its own, timed at the departure.
+                // "Be at Point 2, 11:00" tells a medic where to end up; it does
+                // not tell them to leave Point 1 at 10:38, and that is the half
+                // of the sheet they act on first.
+                const previous = i > 0 ? it.stops[i - 1] : null
+                const travelRow =
+                  previous && stop.travelMinutes > 0 && previous.departMs != null
+                    ? {
+                        atMs: previous.departMs,
+                        text: `Travel to ${stop.label.replace(/ (start|tail|finish)$/, '')}`,
+                        detail: `${formatDuration(stop.travelMinutes)}${
+                          stop.vehicleLabel ? ` by ${stop.vehicleLabel.toLowerCase()}` : ''
+                        } · from ${previous.label}`,
+                      }
+                    : null
                 return (
                   <div key={stop.stationId}>
                     {showDay && (
@@ -167,6 +182,34 @@ export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }:
                         </span>
                       </div>
                     ))}
+                    {travelRow && (
+                      <div className="flex gap-2.5">
+                        <div className="flex flex-col items-center flex-shrink-0" style={{ width: 40 }}>
+                          <span className="text-[11px] font-black tabular-nums" style={{ color: '#94a3b8' }}>
+                            {formatTime(travelRow.atMs)}
+                          </span>
+                          <span
+                            className="flex-1 w-px my-1"
+                            style={{ background: `${it.color}44`, minHeight: 10 }}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0 pb-2">
+                          <div className="text-xs font-bold flex items-center gap-1.5" style={{ color: '#cbd5e1' }}>
+                            {stop.vehicleIcon && <span>{stop.vehicleIcon}</span>}
+                            {travelRow.text}
+                            <span style={{ color: '#64748b' }}>({formatDuration(stop.travelMinutes)})</span>
+                          </div>
+                          <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>
+                            {travelRow.detail}
+                          </div>
+                          {stop.tight && (
+                            <div className="text-[10px] font-bold mt-0.5" style={{ color: '#f87171' }}>
+                              Not enough time — short by {formatDuration(stop.shortfallMinutes ?? 0)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex gap-2.5">
                       <div className="flex flex-col items-center flex-shrink-0" style={{ width: 40 }}>
                         <span className="text-[11px] font-black tabular-nums" style={{ color: '#e2e8f0' }}>
@@ -204,11 +247,8 @@ export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }:
                               : it.standDownMs != null
                                 ? `Hold until stand-down ${formatTime(it.standDownMs)}`
                                 : 'Hold until stand-down'}
-                          {stop.travelMinutes > 0
-                            ? ` · ${stop.vehicleIcon ?? ''} ${formatDuration(stop.travelMinutes)} to get here`
-                            : ''}
                         </div>
-                        {stop.tight && (
+                        {stop.tight && !travelRow && (
                           <div className="text-[10px] font-bold mt-0.5" style={{ color: '#f87171' }}>
                             Not enough time — short by {formatDuration(stop.shortfallMinutes ?? 0)}
                           </div>

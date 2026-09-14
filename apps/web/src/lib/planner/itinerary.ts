@@ -186,25 +186,29 @@ export function itineraryToText(itinerary: MedicItinerary, eventTitle: string): 
   const rows: Row[] = []
   for (const stop of itinerary.stops) {
     const text: string[] = []
-    const travel = stop.travelMinutes > 0
-      ? ` (${formatDuration(stop.travelMinutes)}${stop.vehicleIcon ? ` ${stop.vehicleIcon}` : ''})`
-      : ''
     if (stop.kind === 'sweep-start') {
       const course = stop.label.replace(/ (start|tail)$/, '')
       text.push(
         stop.sweepJoin === 'post'
           ? `  ${formatTime(stop.arriveMs)}  LAST RUNNER REACHES YOU — go with them (${course})`
-          : `  ${formatTime(stop.arriveMs)}  START SWEEPING ${course}${travel}`,
+          : `  ${formatTime(stop.arriveMs)}  START SWEEPING ${course}`,
       )
       text.push('           ↳ stay with the last participant')
     } else if (stop.kind === 'sweep-end') {
       text.push(`  ${formatTime(stop.arriveMs)}  sweep complete — ${stop.label.replace(/ finish$/, '')}`)
     } else {
-      text.push(`  ${formatTime(stop.arriveMs)}  ${stop.label}${travel}`)
+      text.push(`  ${formatTime(stop.arriveMs)}  Be at ${stop.label}`)
       if (stop.note) text.push(`           ↳ ${stop.note}`)
-      if (stop.departMs != null && (stop.dwellMinutes ?? 0) >= 1 && !stop.handsOverToSweep) {
-        text.push(`  ${formatTime(stop.departMs)}  leave ${stop.label}`)
-      }
+    }
+    // The journey gets a line of its own at the departure — "be at Point 2 by
+    // 11:00" does not tell anyone to leave Point 1 at 10:38, and that is the
+    // half of the sheet they act on first.
+    const next = itinerary.stops[itinerary.stops.indexOf(stop) + 1]
+    if (next && next.travelMinutes > 0 && stop.departMs != null && !stop.handsOverToSweep) {
+      const how = next.vehicleLabel ? ` by ${next.vehicleLabel.toLowerCase()}` : ''
+      text.push(
+        `  ${formatTime(stop.departMs)}  Travel to ${next.label.replace(/ (start|tail|finish)$/, '')} (${formatDuration(next.travelMinutes)}${how})`,
+      )
     }
     rows.push({ atMs: stop.arriveMs, text, day: 0 })
   }
