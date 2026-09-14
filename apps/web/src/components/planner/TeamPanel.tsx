@@ -427,7 +427,7 @@ export default function TeamPanel({
                                 onClick={() => onPatchStation(medic.id, station.id, { via: undefined })}
                                 className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0"
                                 style={{ background: `${medic.color}22`, color: medic.color }}
-                                title="This journey is routed through waypoints — click to take them off"
+                                title="This journey is bent through waypoints — click to straighten it"
                               >
                                 via {station.via!.length}
                               </button>
@@ -538,10 +538,15 @@ export default function TeamPanel({
                       )
                     })}
                     <div
-                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold"
+                      className="w-full flex flex-col items-center gap-0.5 py-1.5 rounded-lg text-[10px] font-bold"
                       style={{ color: '#64748b', border: '1px dashed rgba(148,163,184,0.2)' }}
                     >
-                      <Plus className="w-3 h-3" /> Move the clock, then click the map to add the next
+                      <span className="flex items-center gap-1.5">
+                        <Plus className="w-3 h-3" /> Move the clock, then click the map to add the next
+                      </span>
+                      <span style={{ color: '#475569', fontWeight: 600 }}>
+                        Drag the route line itself to send them a different way
+                      </span>
                     </div>
                   </div>
                 )}

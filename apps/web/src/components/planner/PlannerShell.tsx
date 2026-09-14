@@ -1052,7 +1052,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                   <span style={{ color: selectedMedic.color }}>{formatTime(cursor)}</span>
                 </span>
                 <span className="text-[10px]" style={{ color: '#475569' }}>
-                  drag the puck to move a posting · click its route to send it that way
+                  drag the puck to move a posting · drag its route to send it another way
                 </span>
                 <button onClick={() => setSelectedMedicId(null)} className="p-0.5" style={{ color: '#475569' }}>
                   <X className="w-3.5 h-3.5" />

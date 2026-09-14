@@ -191,6 +191,12 @@ export default function PlannerMap({
 }: Props) {
   const mapRef = useRef<MapRef>(null)
   const [dragSnapId, setDragSnapId] = useState<string | null>(null)
+  /** A waypoint being pulled out of the drawn route, before it is committed. */
+  const [viaDrag, setViaDrag] = useState<
+    { medicId: string; stationId: string; lngLat: [number, number] } | null
+  >(null)
+  /** The drag ends in a click; that click must not also post a station. */
+  const suppressClick = useRef(false)
   const [hoverMedicId, setHoverMedicId] = useState<string | null>(null)
 
   // The first fit usually lands before the style has finished loading, and
@@ -295,31 +301,62 @@ export default function PlannerMap({
     }
   }, [selectedView])
 
-  const handleMapClick = useCallback(
+  /**
+   * Take hold of the drawn route.
+   *
+   * Dragging the line is the gesture every mapping tool has taught people, so
+   * it has to be the one that works — a click alone left you panning the map
+   * and wondering where the waypoint went. The map's own pan is suspended for
+   * the duration, the waypoint follows the pointer, and it commits on release.
+   *
+   * Hit-tested against the map directly rather than through
+   * `interactiveLayerIds`: a layer that only appears alongside a selection did
+   * not qualify there, and the gesture fell straight through to the map.
+   */
+  const handleMapMouseDown = useCallback(
     (e: MapLayerMouseEvent) => {
       if (!selectedMedicId) return
-      // Landing on the drawn route means "go this way", not "stand here".
-      //
-      // Hit-tested here rather than through `interactiveLayerIds`: that only
-      // decorates the event when react-map-gl is satisfied the layer was
-      // interactive at the time, and a layer that appears with a selection did
-      // not qualify — the click fell through and posted the medic on top of
-      // their own route instead of bending it.
-      // Queried on the underlying map with a plain [x, y]: the wrapper's own
-      // signature came back empty for the very point the raw map matches.
       const map = mapRef.current?.getMap()
       const hits =
         map?.queryRenderedFeatures([e.point.x, e.point.y], {
           layers: ['planner-medic-route-grab'],
         }) ?? []
       const stationId = hits[0]?.properties?.stationId
-      if (typeof stationId === 'string') {
-        onAddVia(selectedMedicId, stationId, [e.lngLat.lng, e.lngLat.lat])
+      if (typeof stationId !== 'string') return
+
+      e.preventDefault()
+      map?.dragPan.disable()
+      suppressClick.current = true
+      setViaDrag({ medicId: selectedMedicId, stationId, lngLat: [e.lngLat.lng, e.lngLat.lat] })
+    },
+    [selectedMedicId],
+  )
+
+  const handleMapMouseMove = useCallback(
+    (e: MapLayerMouseEvent) => {
+      if (!viaDrag) return
+      setViaDrag({ ...viaDrag, lngLat: [e.lngLat.lng, e.lngLat.lat] })
+    },
+    [viaDrag],
+  )
+
+  const handleMapMouseUp = useCallback(() => {
+    if (!viaDrag) return
+    mapRef.current?.getMap()?.dragPan.enable()
+    onAddVia(viaDrag.medicId, viaDrag.stationId, viaDrag.lngLat)
+    setViaDrag(null)
+  }, [viaDrag, onAddVia])
+
+  const handleMapClick = useCallback(
+    (e: MapLayerMouseEvent) => {
+      if (!selectedMedicId) return
+      if (suppressClick.current) {
+        suppressClick.current = false
         return
       }
       onPlaceStation(selectedMedicId, [e.lngLat.lng, e.lngLat.lat])
     },
-    [selectedMedicId, onPlaceStation, onAddVia],
+    [selectedMedicId, onPlaceStation],
   )
 
   return (
@@ -328,9 +365,12 @@ export default function PlannerMap({
       initialViewState={{ longitude: center[0], latitude: center[1], zoom: 11 }}
       mapStyle={styleFor(baseLayer, false)}
       style={{ width: '100%', height: '100%' }}
-      cursor={selectedMedicId ? 'crosshair' : 'grab'}
+      cursor={viaDrag ? 'grabbing' : selectedMedicId ? 'crosshair' : 'grab'}
       onLoad={() => applyBounds(pendingBounds.current ?? fitBounds)}
       onClick={handleMapClick}
+      onMouseDown={handleMapMouseDown}
+      onMouseMove={handleMapMouseMove}
+      onMouseUp={handleMapMouseUp}
       attributionControl={false}
     >
       <NavigationControl position="top-right" showCompass={false} />
@@ -541,6 +581,22 @@ export default function PlannerMap({
       ))}
 
       {/* ── Waypoints on the selected medic's route ─────────────────────── */}
+      {/* The waypoint being dragged out of the route, before release. */}
+      {viaDrag && selectedView && (
+        <Marker longitude={viaDrag.lngLat[0]} latitude={viaDrag.lngLat[1]} anchor="center">
+          <div
+            className="rounded-full"
+            style={{
+              width: 15,
+              height: 15,
+              background: selectedView.medic.color,
+              border: '2px solid #0f172a',
+              boxShadow: `0 0 0 4px ${selectedView.medic.color}33`,
+            }}
+          />
+        </Marker>
+      )}
+
       {selectedView?.legs.flatMap(leg =>
         leg.via.map((point, index) => (
           <Marker
