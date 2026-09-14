@@ -1229,6 +1229,14 @@ export interface PlanStation {
   poiId?: string;
   label: string;
   note?: string;
+  /**
+   * Waypoints the journey INTO this station must pass through, in order.
+   *
+   * The shortest way is not always the way a team takes — a valley road that
+   * avoids the race line, a bridge the direct route ignores, a gate only one
+   * approach can use. Dragging the drawn route bends it through these.
+   */
+  via?: Array<{ lat: number; lng: number }>;
   /** Travel minutes from the previous station. */
   travelMinutes?: number;
   travelSource?: PlanTravelSource;

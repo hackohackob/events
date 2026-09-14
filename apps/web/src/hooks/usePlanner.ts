@@ -149,9 +149,12 @@ function pointAlongPath(path: Array<[number, number]>, fraction: number): [numbe
   return path[path.length - 1]
 }
 
-function legKey(from: { lat: number; lng: number }, to: { lat: number; lng: number }, vehicle: string): string {
+/** Keyed on the whole shape of the leg, waypoints included: bend the route and
+ *  it becomes a different journey that has to be measured again. */
+function legKey(from: { lat: number; lng: number }, to: PlanStation, vehicle: string): string {
   const r = (n: number) => n.toFixed(5)
-  return `${r(from.lng)},${r(from.lat)}>${r(to.lng)},${r(to.lat)}:${vehicle}`
+  const via = (to.via ?? []).map(v => `${r(v.lng)},${r(v.lat)}`).join(';')
+  return `${r(from.lng)},${r(from.lat)}>${via ? `${via}>` : ''}${r(to.lng)},${r(to.lat)}:${vehicle}`
 }
 
 // ─── The hook ────────────────────────────────────────────────────────────────
@@ -521,7 +524,7 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
       for (const job of jobs) {
         if (cancelled) return
         inFlight.current.add(job.key)
-        const routed = await routeLeg(eventId, job.from, job.to, job.vehicle)
+        const routed = await routeLeg(eventId, job.from, job.to, job.vehicle, job.to.via ?? [])
         inFlight.current.delete(job.key)
         attempted.current.add(job.key)
         if (cancelled) return

@@ -422,6 +422,16 @@ export default function TeamPanel({
                                 )}
                               </span>
                             </button>
+                            {(station.via?.length ?? 0) > 0 && (
+                              <button
+                                onClick={() => onPatchStation(medic.id, station.id, { via: undefined })}
+                                className="px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0"
+                                style={{ background: `${medic.color}22`, color: medic.color }}
+                                title="This journey is routed through waypoints — click to take them off"
+                              >
+                                via {station.via!.length}
+                              </button>
+                            )}
                             <button
                               onClick={() => setEditingStation(editing ? null : station.id)}
                               className="p-1 rounded text-[10px] font-bold"

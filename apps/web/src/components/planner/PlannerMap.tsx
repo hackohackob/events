@@ -22,6 +22,15 @@ export interface PlannedMedicView {
   position: MedicPosition | null
   /** The whole day's route, in order — drawn when the medic is selected. */
   routePoints: Array<{ id: string; lng: number; lat: number; label: string; arriveMs: number }>
+  /**
+   * Each journey as it will actually be driven, for the selected medic: the
+   * routed geometry plus any waypoints it has been bent through.
+   */
+  legs: Array<{
+    stationId: string
+    path: [number, number][]
+    via: Array<{ lat: number; lng: number }>
+  }>
 }
 
 interface Props {
@@ -37,6 +46,10 @@ interface Props {
   onSelectMedic: (id: string | null) => void
   /** A map click chose a position for the selected medic — adds a posting. */
   onPlaceStation: (medicId: string, lngLat: [number, number]) => void
+  /** The drawn route was grabbed — bend this leg through here. */
+  onAddVia: (medicId: string, stationId: string, lngLat: [number, number]) => void
+  onMoveVia: (medicId: string, stationId: string, index: number, lngLat: [number, number]) => void
+  onRemoveVia: (medicId: string, stationId: string, index: number) => void
   /** A puck was dragged — relocates the posting the medic is currently on. */
   onDragStation: (medicId: string, lngLat: [number, number]) => void
   /** Nearest POI within snapping range of a coordinate, if any. */
@@ -165,6 +178,9 @@ export default function PlannerMap({
   selectedMedicId,
   onSelectMedic,
   onPlaceStation,
+  onAddVia,
+  onMoveVia,
+  onRemoveVia,
   onDragStation,
   snapTarget,
   fitBounds,
@@ -263,24 +279,47 @@ export default function PlannerMap({
 
   const selectedView = medicViews.find(v => v.medic.id === selectedMedicId) ?? null
 
+  // One feature per leg, carrying the station it arrives at, so a click on the
+  // drawn route knows which journey it landed on.
   const selectedRoute = useMemo(() => {
-    if (!selectedView || selectedView.routePoints.length < 2) return null
+    if (!selectedView || selectedView.legs.length === 0) return null
     return {
-      type: 'Feature' as const,
-      properties: {},
-      geometry: {
-        type: 'LineString' as const,
-        coordinates: selectedView.routePoints.map(p => [p.lng, p.lat] as [number, number]),
-      },
+      type: 'FeatureCollection' as const,
+      features: selectedView.legs
+        .filter(leg => leg.path.length > 1)
+        .map(leg => ({
+          type: 'Feature' as const,
+          properties: { stationId: leg.stationId },
+          geometry: { type: 'LineString' as const, coordinates: leg.path },
+        })),
     }
   }, [selectedView])
 
   const handleMapClick = useCallback(
     (e: MapLayerMouseEvent) => {
       if (!selectedMedicId) return
+      // Landing on the drawn route means "go this way", not "stand here".
+      //
+      // Hit-tested here rather than through `interactiveLayerIds`: that only
+      // decorates the event when react-map-gl is satisfied the layer was
+      // interactive at the time, and a layer that appears with a selection did
+      // not qualify — the click fell through and posted the medic on top of
+      // their own route instead of bending it.
+      // Queried on the underlying map with a plain [x, y]: the wrapper's own
+      // signature came back empty for the very point the raw map matches.
+      const map = mapRef.current?.getMap()
+      const hits =
+        map?.queryRenderedFeatures([e.point.x, e.point.y], {
+          layers: ['planner-medic-route-grab'],
+        }) ?? []
+      const stationId = hits[0]?.properties?.stationId
+      if (typeof stationId === 'string') {
+        onAddVia(selectedMedicId, stationId, [e.lngLat.lng, e.lngLat.lat])
+        return
+      }
       onPlaceStation(selectedMedicId, [e.lngLat.lng, e.lngLat.lat])
     },
-    [selectedMedicId, onPlaceStation],
+    [selectedMedicId, onPlaceStation, onAddVia],
   )
 
   return (
@@ -409,6 +448,15 @@ export default function PlannerMap({
       {/* ── Selected medic's whole route ────────────────────────────────── */}
       {selectedRoute && selectedView && (
         <Source id="planner-medic-route" type="geojson" data={selectedRoute}>
+          {/* A wide, invisible line makes the route easy to grab; the visible
+              one stays thin. */}
+          <Layer
+            id="planner-medic-route-grab"
+            source="planner-medic-route"
+            type="line"
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': selectedView.medic.color, 'line-width': 18, 'line-opacity': 0.01 }}
+          />
           <Layer
             id="planner-medic-route-line"
             source="planner-medic-route"
@@ -416,9 +464,9 @@ export default function PlannerMap({
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
             paint={{
               'line-color': selectedView.medic.color,
-              'line-width': 2,
-              'line-opacity': 0.7,
-              'line-dasharray': [1, 2],
+              'line-width': 2.5,
+              'line-opacity': 0.85,
+              'line-dasharray': [2, 1.5],
             }}
           />
         </Source>
@@ -491,6 +539,39 @@ export default function PlannerMap({
           </div>
         </Marker>
       ))}
+
+      {/* ── Waypoints on the selected medic's route ─────────────────────── */}
+      {selectedView?.legs.flatMap(leg =>
+        leg.via.map((point, index) => (
+          <Marker
+            key={`${leg.stationId}-via-${index}`}
+            longitude={point.lng}
+            latitude={point.lat}
+            anchor="center"
+            draggable
+            onDragEnd={e =>
+              onMoveVia(selectedView.medic.id, leg.stationId, index, [e.lngLat.lng, e.lngLat.lat])
+            }
+          >
+            <div
+              className="flex items-center justify-center rounded-full"
+              style={{
+                width: 13,
+                height: 13,
+                background: '#0f172a',
+                border: `2px solid ${selectedView.medic.color}`,
+                cursor: 'grab',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+              }}
+              title="Drag to move this waypoint · click to drop it"
+              onClick={event => {
+                event.stopPropagation()
+                onRemoveVia(selectedView.medic.id, leg.stationId, index)
+              }}
+            />
+          </Marker>
+        )),
+      )}
 
       {/* ── Medic pucks ─────────────────────────────────────────────────── */}
       {medicViews.map(view => {

@@ -321,6 +321,17 @@ function sanitizeStation(input: unknown): PlanStation | null {
     lat,
     lng,
     poiId: planString(raw.poiId) || undefined,
+    via: Array.isArray(raw.via)
+      ? raw.via
+          .map((v) => {
+            const row = (v ?? {}) as Record<string, unknown>;
+            const vlat = Number(row.lat);
+            const vlng = Number(row.lng);
+            return Number.isFinite(vlat) && Number.isFinite(vlng) ? { lat: vlat, lng: vlng } : null;
+          })
+          .filter((v): v is { lat: number; lng: number } => v !== null)
+          .slice(0, 8)
+      : undefined,
     label: planString(raw.label) || "Position",
     note: planString(raw.note) || undefined,
     travelMinutes: Number.isFinite(travel) ? Math.max(0, travel) : undefined,

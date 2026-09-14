@@ -44,7 +44,7 @@ import {
 
 import { checkSweep, type SweepWarning } from '@/lib/planner/sweep-check'
 import { bucketCount } from '@/lib/planner/isochrone'
-import { nearestOnCourse } from '@/lib/planner/course'
+import { haversineMeters, nearestOnCourse } from '@/lib/planner/course'
 import { vehicleSpeedKmh } from '@/lib/planner/travel'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
 import PlannerMap, { type PlannedMedicView } from './PlannerMap'
@@ -187,6 +187,19 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
             label: s.label,
             arriveMs: new Date(s.arriveAt).getTime(),
           })),
+          legs: timeline.segments
+            .filter(seg => seg.kind === 'move')
+            .map(seg => {
+              const station = timeline.stations.find(st => st.id === seg.stationId)
+              return {
+                stationId: seg.stationId,
+                path:
+                  seg.path && seg.path.length > 1
+                    ? seg.path
+                    : ([seg.from, seg.to].filter(Boolean) as [number, number][]),
+                via: station?.via ?? [],
+              }
+            }),
         }
       }),
     [medics, timelines, cursor, sweepsFor],
@@ -518,6 +531,125 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                 stations: medic.stations.map(s =>
                   s.id === stationId ? { ...s, arriveAt: new Date(arriveMs).toISOString() } : s,
                 ),
+              }
+            : medic,
+        ),
+      }))
+    },
+    [mutate],
+  )
+
+  /**
+   * Bend a journey through a point.
+   *
+   * The waypoint is inserted where it costs least — try every slot in the
+   * existing order and keep the cheapest — so grabbing the middle of a route
+   * that already has two waypoints puts the new one between them rather than on
+   * the end, which is what the hand expects.
+   */
+  const addVia = useCallback(
+    (medicId: string, stationId: string, lngLat: [number, number]) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic => {
+          if (medic.id !== medicId) return medic
+          const stations = [...medic.stations].sort(
+            (a, b) => new Date(a.arriveAt).getTime() - new Date(b.arriveAt).getTime(),
+          )
+          const index = stations.findIndex(s => s.id === stationId)
+          const station = stations[index]
+          const previous = stations[index - 1]
+          if (!station || !previous) return medic
+
+          const point = { lat: lngLat[1], lng: lngLat[0] }
+          const existing = station.via ?? []
+          const legOf = (list: Array<{ lat: number; lng: number }>) => {
+            const chain = [
+              [previous.lng, previous.lat] as [number, number],
+              ...list.map(v => [v.lng, v.lat] as [number, number]),
+              [station.lng, station.lat] as [number, number],
+            ]
+            let total = 0
+            for (let i = 1; i < chain.length; i += 1) total += haversineMeters(chain[i - 1], chain[i])
+            return total
+          }
+          let best = existing.length
+          let bestCost = Number.POSITIVE_INFINITY
+          for (let slot = 0; slot <= existing.length; slot += 1) {
+            const candidate = [...existing.slice(0, slot), point, ...existing.slice(slot)]
+            const cost = legOf(candidate)
+            if (cost < bestCost) {
+              bestCost = cost
+              best = slot
+            }
+          }
+          const via = [...existing.slice(0, best), point, ...existing.slice(best)]
+          return {
+            ...medic,
+            stations: medic.stations.map(s =>
+              s.id === stationId
+                ? {
+                    ...s,
+                    via,
+                    // The journey changed shape; its old duration is stale.
+                    travelMinutes: s.travelSource === 'manual' ? s.travelMinutes : undefined,
+                    travelSource: s.travelSource === 'manual' ? s.travelSource : undefined,
+                  }
+                : s,
+            ),
+          }
+        }),
+      }))
+    },
+    [mutate],
+  )
+
+  const moveVia = useCallback(
+    (medicId: string, stationId: string, index: number, lngLat: [number, number]) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic =>
+          medic.id === medicId
+            ? {
+                ...medic,
+                stations: medic.stations.map(s =>
+                  s.id === stationId
+                    ? {
+                        ...s,
+                        via: (s.via ?? []).map((v, i) =>
+                          i === index ? { lat: lngLat[1], lng: lngLat[0] } : v,
+                        ),
+                        travelMinutes: s.travelSource === 'manual' ? s.travelMinutes : undefined,
+                        travelSource: s.travelSource === 'manual' ? s.travelSource : undefined,
+                      }
+                    : s,
+                ),
+              }
+            : medic,
+        ),
+      }))
+    },
+    [mutate],
+  )
+
+  const removeVia = useCallback(
+    (medicId: string, stationId: string, index: number) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic =>
+          medic.id === medicId
+            ? {
+                ...medic,
+                stations: medic.stations.map(s => {
+                  if (s.id !== stationId) return s
+                  const via = (s.via ?? []).filter((_, i) => i !== index)
+                  return {
+                    ...s,
+                    via: via.length > 0 ? via : undefined,
+                    travelMinutes: s.travelSource === 'manual' ? s.travelMinutes : undefined,
+                    travelSource: s.travelSource === 'manual' ? s.travelSource : undefined,
+                  }
+                }),
               }
             : medic,
         ),
@@ -887,6 +1019,9 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
               }}
               onPlaceStation={(medicId, lngLat) => placeStation(medicId, lngLat, 'click')}
               onDragStation={(medicId, lngLat) => placeStation(medicId, lngLat, 'drag')}
+              onAddVia={addVia}
+              onMoveVia={moveVia}
+              onRemoveVia={removeVia}
               snapTarget={snapTarget}
               fitBounds={fitBounds}
               showRunners={showRunners}
@@ -916,7 +1051,9 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                   Click the map to post <strong>{selectedMedic.name}</strong> at{' '}
                   <span style={{ color: selectedMedic.color }}>{formatTime(cursor)}</span>
                 </span>
-                <span className="text-[10px]" style={{ color: '#475569' }}>drag the puck to move a posting</span>
+                <span className="text-[10px]" style={{ color: '#475569' }}>
+                  drag the puck to move a posting · click its route to send it that way
+                </span>
                 <button onClick={() => setSelectedMedicId(null)} className="p-0.5" style={{ color: '#475569' }}>
                   <X className="w-3.5 h-3.5" />
                 </button>

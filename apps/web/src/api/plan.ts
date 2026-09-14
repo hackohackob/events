@@ -34,6 +34,7 @@ export async function routeLeg(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
   vehicleType: VehicleType,
+  via: Array<{ lat: number; lng: number }> = [],
 ): Promise<RoutedLeg | null> {
   try {
     const { data } = await client.post(
@@ -44,6 +45,7 @@ export async function routeLeg(
         alternatives: 1,
         points: [
           [from.lng, from.lat],
+          ...via.map(v => [v.lng, v.lat] as [number, number]),
           [to.lng, to.lat],
         ],
       },
