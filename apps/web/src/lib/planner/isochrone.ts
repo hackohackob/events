@@ -116,6 +116,27 @@ export function bucketsForCourse(course: CourseModel, shape: ReachShape): Uint8A
   return out
 }
 
+/**
+ * Does this shape actually contain the point it was measured from?
+ *
+ * An isochrone is computed from wherever GraphHopper SNAPPED the request, not
+ * from the point asked for. Ask from a hillside and it answers about whatever
+ * lane it found nearby — sometimes a dead end that reaches nothing, sometimes a
+ * trunk road that reaches everything. Either way the answer is not about the
+ * place asked about, and a shape that fails this test is thrown away.
+ */
+export function shapeContains(shape: ReachShape, point: [number, number]): boolean {
+  const outer = shape.rings.length - 1
+  if (outer < 0) return false
+  const test = (p: [number, number]) => {
+    const [minLng, minLat, maxLng, maxLat] = shape.bounds[outer]
+    if (p[0] < minLng || p[0] > maxLng || p[1] < minLat || p[1] > maxLat) return false
+    return pointInRing(p, shape.rings[outer])
+  }
+  if (test(point)) return true
+  return toleranceOffsets(point[1]).some(([dx, dy]) => test([point[0] + dx, point[1] + dy]))
+}
+
 /** Cache key for a reach shape. Rounded so a nudged pin reuses its isochrone. */
 export function reachKey(point: [number, number], vehicle: string, minutes: number): string {
   return `${point[0].toFixed(4)},${point[1].toFixed(4)}:${vehicle}:${minutes}`

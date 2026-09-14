@@ -28,6 +28,19 @@ export interface CoverageMedic {
   /** How many buckets the isochrone was cut into. */
   bucketCount?: number
   /**
+   * The next-nearest measurement, and how far between the two the medic is
+   * (0 = on {@link buckets}, 1 = on this one).
+   *
+   * Isochrones are measured at fixed anchors, so a medic driving between two of
+   * them would otherwise snap from one shape to the other and take a whole
+   * stretch of course from amber to red in a single minute. Interpolating
+   * between the two is both smoother and closer to the truth: they really are
+   * part-way between the two measurements.
+   */
+  blendBuckets?: Uint8Array
+  blendBucketCount?: number
+  blendWeight?: number
+  /**
    * A sweeper is ON this course, so their road IS the course: reach is measured
    * as distance along it from where they are, not as a shape around them.
    * `[metresAlongCourse, metresOfReach]`.
@@ -103,9 +116,16 @@ export function coverageFor(
         if (reach > 0) value = Math.abs(atMeters - atCourseMeters) / reach
       }
       if (medic.buckets) {
-        const bucket = medic.buckets[i]
-        const count = medic.bucketCount ?? 3
-        const routed = bucket === 0 ? OUT_OF_REACH : bucket / count
+        const ratioOf = (buckets: Uint8Array, count: number) => {
+          const bucket = buckets[i]
+          return bucket === 0 ? OUT_OF_REACH : bucket / count
+        }
+        let routed = ratioOf(medic.buckets, medic.bucketCount ?? 3)
+        if (medic.blendBuckets && medic.blendWeight != null) {
+          const other = ratioOf(medic.blendBuckets, medic.blendBucketCount ?? 3)
+          const w = Math.max(0, Math.min(1, medic.blendWeight))
+          routed = routed * (1 - w) + other * w
+        }
         if (routed < value) value = routed
       } else if (!medic.alongCourse) {
         const point = pointAtMeters(course, atMeters)

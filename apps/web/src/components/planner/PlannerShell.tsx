@@ -80,7 +80,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
     snapTarget,
     pathLookup,
     durationLookup,
-    reachAnchorNear,
+    reachAnchorsNear,
     reachBuckets,
     sweepFitFor,
     sweepsFor,
@@ -213,7 +213,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
         out[d.id] = EMPTY_COVERAGE
         continue
       }
-      const medicsHere: CoverageMedic[] = onDuty.map(v => {
+      const medicsHere: CoverageMedic[] = onDuty.flatMap(v => {
         const position = v.position!.position
         const reachMeters = (vehicleSpeedKmh(v.vehicleType) * 1000 * reachMinutes) / 60
 
@@ -234,15 +234,25 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
             ]
           : undefined
 
-        const anchor = reachAnchorNear(position, v.vehicleType)
-        if (!anchor) return { position, radiusMeters: reachMeters, alongCourse }
-        return {
-          position,
-          radiusMeters: reachMeters,
-          alongCourse,
-          buckets: reachBuckets(d.id, d.course, anchor.key, anchor.shape),
-          bucketCount: anchor.shape.rings.length,
-        }
+        const anchors = reachAnchorsNear(position, v.vehicleType)
+        if (anchors.length === 0) return [{ position, radiusMeters: reachMeters, alongCourse }]
+
+        const [near, next] = anchors
+        // Weighted by how far between the two anchors the medic actually is, so
+        // the shape slides with them rather than snapping at the midpoint.
+        const span = next ? near.distance + next.distance : 0
+        return [
+          {
+            position,
+            radiusMeters: reachMeters,
+            alongCourse,
+            buckets: reachBuckets(d.id, d.course, near.key, near.shape),
+            bucketCount: near.shape.rings.length,
+            blendBuckets: next ? reachBuckets(d.id, d.course, next.key, next.shape) : undefined,
+            blendBucketCount: next?.shape.rings.length,
+            blendWeight: next && span > 0 ? near.distance / span : undefined,
+          },
+        ]
       })
       out[d.id] = coverageFor(d.course, fields[d.id] ?? EMPTY_FIELD, medicsHere)
     }
@@ -254,7 +264,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
     fields,
     hiddenDisciplineIds,
     reachMinutes,
-    reachAnchorNear,
+    reachAnchorsNear,
     reachBuckets,
   ])
 

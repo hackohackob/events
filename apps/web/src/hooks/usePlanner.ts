@@ -38,7 +38,13 @@ import {
   type SweepWindow,
 } from '@/lib/planner/schedule'
 import { estimateTravelMinutes } from '@/lib/planner/travel'
-import { bucketsForCourse, buildReachShape, reachKey, type ReachShape } from '@/lib/planner/isochrone'
+import {
+  bucketsForCourse,
+  buildReachShape,
+  reachKey,
+  shapeContains,
+  type ReachShape,
+} from '@/lib/planner/isochrone'
 import { sampleChords, type SweepFit } from '@/lib/planner/sweep-check'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
@@ -655,10 +661,14 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
         if (from.sweep?.edge === 'start' && to.sweep?.edge === 'end') continue
         if (to.noTravel) continue
         const vehicle = legVehicle(medic, from, to, minTravelMinutes)
-        const path = pathCache.current.get(legKey(from, to, vehicle)) ?? [
-          [from.lng, from.lat],
-          [to.lng, to.lat],
-        ]
+        // Only anchor a journey once its real geometry is known. A straight
+        // line between two postings runs over hillsides, and an isochrone asked
+        // for from a hillside answers about whatever lane GraphHopper snapped
+        // to — a dead end that reaches nothing, or a trunk road that reaches
+        // everything. That is what made the shape lurch between huge and tiny
+        // as a medic drove from one anchor to the next.
+        const path = pathCache.current.get(legKey(from, to, vehicle))
+        if (!path || path.length < 2) continue
         let legMeters = 0
         for (let p = 1; p < path.length; p += 1) legMeters += haversineMeters(path[p - 1], path[p])
         const count = Math.min(
@@ -688,12 +698,17 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
           )
           if (cancelled) return
           if (result) {
-            reachCache.current.set(job.key, buildReachShape(result.polygons))
-            reachAnchors.current = [
-              ...reachAnchors.current.filter(a => a.key !== job.key),
-              { key: job.key, point: job.point, vehicle: job.vehicle },
-            ]
-            setReachTick(t => t + 1)
+            const shape = buildReachShape(result.polygons)
+            // An answer that does not cover the point it was asked about is an
+            // answer about somewhere else. Better no shape than a wrong one.
+            if (shapeContains(shape, job.point)) {
+              reachCache.current.set(job.key, shape)
+              reachAnchors.current = [
+                ...reachAnchors.current.filter(a => a.key !== job.key),
+                { key: job.key, point: job.point, vehicle: job.vehicle },
+              ]
+              setReachTick(t => t + 1)
+            }
           }
         }
       }
@@ -703,35 +718,44 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
     return () => {
       cancelled = true
     }
-  }, [plan, eventId, reachMinutes, sweepsFor, minTravelMinutes, disciplines])
+    // `pathTick` matters: journeys are anchored only once their routed geometry
+    // has landed, so this has to run again as those routes come back.
+  }, [plan, eventId, reachMinutes, sweepsFor, minTravelMinutes, disciplines, pathTick])
 
   /**
-   * The measured shape closest to a position, for that vehicle. `tolerance` is
-   * how far the medic may be from the anchor before the answer stops being
-   * worth anything and the caller falls back to a circle.
+   * The measured shapes nearest a position, for that vehicle.
    *
-   * Set at twice the nominal anchor spacing on purpose: a leg long enough to hit
-   * the per-leg anchor cap ends up more thinly spaced than that, and a slightly
-   * stale network measurement still beats a circle drawn across a mountain.
+   * Two rather than one on purpose. A single nearest anchor makes the shape
+   * swap wholesale the moment a medic passes the midpoint between anchors, and
+   * two isochrones a kilometre apart on a mountain road are not the same shape
+   * — so the coverage jumped once a minute. Taking both and using whichever
+   * reaches further means the picture changes only as an anchor drops out of
+   * range and the next comes in, which is a fraction of the step.
+   *
+   * `tolerance` is twice the widest anchor spacing in play — the sweep one, not
+   * the journey one. Sized to the journey spacing it would never find a second
+   * anchor for a sweeper, whose anchors sit two kilometres apart, and the
+   * blending would silently do nothing for exactly the medic who moves most
+   * slowly and steadily. Distance weighting keeps a far second anchor from
+   * pulling the answer around.
    */
-  const reachAnchorNear = useCallback(
+  const reachAnchorsNear = useCallback(
     (
       point: [number, number],
       vehicle: VehicleType,
-      toleranceMeters = ANCHOR_SPACING_METERS * 2,
-    ): { key: string; shape: ReachShape } | undefined => {
-      let best: { key: string; shape: ReachShape } | undefined
-      let bestDistance = toleranceMeters
+      toleranceMeters = SWEEP_ANCHOR_SPACING_METERS * 2,
+    ): Array<{ key: string; shape: ReachShape; distance: number }> => {
+      const near: Array<{ key: string; shape: ReachShape; distance: number }> = []
       for (const anchor of reachAnchors.current) {
         if (anchor.vehicle !== vehicle) continue
-        const d = haversineMeters(anchor.point, point)
-        if (d > bestDistance) continue
+        const distance = haversineMeters(anchor.point, point)
+        if (distance > toleranceMeters) continue
         const shape = reachCache.current.get(anchor.key)
         if (!shape) continue
-        best = { key: anchor.key, shape }
-        bestDistance = d
+        near.push({ key: anchor.key, shape, distance })
       }
-      return best
+      near.sort((a, b) => a.distance - b.distance)
+      return near.slice(0, 2)
     },
     [reachTick],
   )
@@ -875,7 +899,7 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
     minTravelMinutes,
     pathLookup,
     durationLookup,
-    reachAnchorNear,
+    reachAnchorsNear,
     reachBuckets,
     sweepFitFor,
     sweepWindows,
