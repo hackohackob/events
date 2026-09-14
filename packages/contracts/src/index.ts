@@ -1232,6 +1232,26 @@ export interface PlanStation {
   /** Travel minutes from the previous station. */
   travelMinutes?: number;
   travelSource?: PlanTravelSource;
+  /**
+   * The vehicle {@link travelMinutes} was measured on. A cached duration is
+   * only reused while the medic is still on that vehicle — otherwise swapping a
+   * car for a bike would leave every later leg quoted at car speed.
+   */
+  travelVehicle?: VehicleType;
+}
+
+/**
+ * A vehicle swap partway through a shift.
+ *
+ * A medic who drives to the trailhead and continues on a bike is two different
+ * travel speeds, not one. Every leg is therefore quoted on the vehicle in
+ * effect when that leg departs, not on a single vehicle for the whole event.
+ */
+export interface PlanVehicleChange {
+  id: string;
+  /** When the swap happens, ISO 8601. */
+  at: string;
+  vehicleType: VehicleType;
 }
 
 /** A medic (or vehicle/crew) as it appears in the plan. */
@@ -1240,12 +1260,32 @@ export interface PlanMedic {
   /** Roster medic id when this row mirrors one; absent for planned-only units. */
   medicId?: string;
   name: string;
+  /** What they start the event on. See {@link vehicleChanges} for swaps. */
   vehicleType: VehicleType;
+  /** Swaps, in time order. Legs before the first swap use {@link vehicleType}. */
+  vehicleChanges?: PlanVehicleChange[];
   color: string;
   unit?: string;
   /** Ordered by `arriveAt`; the planner re-sorts on every edit. */
   stations: PlanStation[];
+  /**
+   * Disciplines this medic sweeps: they ride the back of that field from the
+   * start to the moment the last participant is off the course, so their
+   * position is derived rather than posted.
+   */
+  sweeperFor?: string[];
   hidden?: boolean;
+}
+
+/** The vehicle a medic is on at `atMs`. */
+export function planVehicleAt(medic: PlanMedic, atMs: number): VehicleType {
+  let vehicle = medic.vehicleType;
+  for (const change of medic.vehicleChanges ?? []) {
+    const at = new Date(change.at).getTime();
+    if (Number.isFinite(at) && at <= atMs) vehicle = change.vehicleType;
+    else break;
+  }
+  return vehicle;
 }
 
 export interface EventPlanSettings {

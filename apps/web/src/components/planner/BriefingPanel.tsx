@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Check, ClipboardCopy, Download, Printer } from 'lucide-react'
+import { Check, ClipboardCopy, Download, Printer, Waves } from 'lucide-react'
 import type { PlanMedic } from '@events/contracts'
 import type { ResolveOptions } from '@/lib/planner/schedule'
 import {
@@ -15,7 +15,8 @@ import {
 
 interface Props {
   medics: PlanMedic[]
-  resolveOptions: ResolveOptions
+  /** Built per medic, because a medic's sweeps are their own. */
+  resolveOptionsFor: (medic: PlanMedic) => ResolveOptions
   eventTitle: string
 }
 
@@ -24,15 +25,15 @@ interface Props {
  * right — it is what gets printed, pasted into the group chat and read out at
  * the briefing.
  */
-export default function BriefingPanel({ medics, resolveOptions, eventTitle }: Props) {
+export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
 
   const itineraries = useMemo(
     () =>
       medics
-        .filter(m => m.stations.length > 0)
-        .map(m => buildItinerary(m, resolveOptions)),
-    [medics, resolveOptions],
+        .filter(m => m.stations.length > 0 || (m.sweeperFor?.length ?? 0) > 0)
+        .map(m => buildItinerary(m, resolveOptionsFor(m))),
+    [medics, resolveOptionsFor],
   )
 
   const copy = async (key: string, text: string) => {
@@ -108,9 +109,10 @@ export default function BriefingPanel({ medics, resolveOptions, eventTitle }: Pr
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-bold truncate" style={{ color: '#e2e8f0' }}>{it.name}</div>
                 <div className="text-[10px]" style={{ color: '#64748b' }}>
-                  {it.vehicleLabel}
+                  starts on {it.vehicleLabel}
                   {it.unit ? ` · ${it.unit}` : ''} · {it.stops.length} stops ·{' '}
                   {formatDuration(it.travelMinutes)} travelling
+                  {it.swaps.length > 0 && ` · ${it.swaps.length} vehicle swap${it.swaps.length > 1 ? 's' : ''}`}
                 </div>
               </div>
               <button
@@ -126,6 +128,20 @@ export default function BriefingPanel({ medics, resolveOptions, eventTitle }: Pr
             <div className="px-3 pb-3 pt-1">
               {it.stops.map((stop, i) => {
                 const showDay = i === 0 || formatDay(stop.arriveMs) !== formatDay(it.stops[i - 1].arriveMs)
+                // Swaps live on the same clock as the stops; they are printed
+                // just before the stop they precede so the sheet reads in order.
+                const swapsBefore = it.swaps.filter(
+                  s =>
+                    s.atMs <= stop.arriveMs &&
+                    (i === 0 || s.atMs > it.stops[i - 1].arriveMs),
+                )
+                const sweeping = stop.kind !== 'post'
+                const title =
+                  stop.kind === 'sweep-start'
+                    ? `Start sweeping ${stop.label.replace(/ start$/, '')}`
+                    : stop.kind === 'sweep-end'
+                      ? `Sweep complete — ${stop.label.replace(/ finish$/, '')}`
+                      : `${i === 0 ? 'Be at ' : 'Move to '}${stop.label}`
                 return (
                   <div key={stop.stationId}>
                     {showDay && (
@@ -136,28 +152,55 @@ export default function BriefingPanel({ medics, resolveOptions, eventTitle }: Pr
                         {formatDay(stop.arriveMs)}
                       </div>
                     )}
+                    {swapsBefore.map(swap => (
+                      <div key={swap.atMs} className="flex gap-2.5 pb-2">
+                        <span
+                          className="text-[11px] font-black tabular-nums flex-shrink-0 text-center"
+                          style={{ width: 40, color: '#94a3b8' }}
+                        >
+                          {formatTime(swap.atMs)}
+                        </span>
+                        <span className="text-[11px] font-bold" style={{ color: '#fbbf24' }}>
+                          {swap.icon} Switch to {swap.label}
+                        </span>
+                      </div>
+                    ))}
                     <div className="flex gap-2.5">
                       <div className="flex flex-col items-center flex-shrink-0" style={{ width: 40 }}>
                         <span className="text-[11px] font-black tabular-nums" style={{ color: '#e2e8f0' }}>
                           {formatTime(stop.arriveMs)}
                         </span>
                         {i < it.stops.length - 1 && (
-                          <span className="flex-1 w-px my-1" style={{ background: `${it.color}44`, minHeight: 14 }} />
+                          <span
+                            className="flex-1 w-px my-1"
+                            style={{
+                              background: sweeping ? it.color : `${it.color}44`,
+                              minHeight: 14,
+                            }}
+                          />
                         )}
                       </div>
                       <div className="flex-1 min-w-0 pb-2">
-                        <div className="text-xs font-bold" style={{ color: '#cbd5e1' }}>
-                          {i === 0 ? 'Be at ' : 'Move to '}
-                          <span style={{ color: it.color }}>{stop.label}</span>
+                        <div className="text-xs font-bold flex items-center gap-1.5" style={{ color: '#cbd5e1' }}>
+                          {sweeping && <Waves className="w-3 h-3 flex-shrink-0" style={{ color: it.color }} />}
+                          <span style={{ color: sweeping ? it.color : undefined }}>{title}</span>
                         </div>
                         {stop.note && (
                           <div className="text-[10px] mt-0.5" style={{ color: '#94a3b8' }}>{stop.note}</div>
                         )}
                         <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>
-                          {stop.departMs != null
-                            ? `On station ${formatDuration(stop.dwellMinutes ?? 0)} · leave ${formatTime(stop.departMs)}`
-                            : 'Hold until stand-down'}
-                          {stop.travelMinutes > 0 ? ` · ${formatDuration(stop.travelMinutes)} to get here` : ''}
+                          {stop.kind === 'sweep-start'
+                            ? `Stay with the last participant · ${formatDuration(stop.dwellMinutes ?? 0)} on course`
+                            : stop.departMs != null
+                              ? (stop.dwellMinutes ?? 0) < 1
+                                // Nothing to wait for: the next leg needs every
+                                // minute, so they turn around on arrival.
+                                ? `Straight on — leave ${formatTime(stop.departMs)}`
+                                : `On station ${formatDuration(stop.dwellMinutes ?? 0)} · leave ${formatTime(stop.departMs)}`
+                              : 'Hold until stand-down'}
+                          {stop.travelMinutes > 0
+                            ? ` · ${stop.vehicleIcon ?? ''} ${formatDuration(stop.travelMinutes)} to get here`
+                            : ''}
                         </div>
                         {stop.tight && (
                           <div className="text-[10px] font-bold mt-0.5" style={{ color: '#f87171' }}>

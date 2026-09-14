@@ -6,19 +6,25 @@
  * mountain for five hours — they sleep at base camp until 05:30 and drive the
  * last half hour. Every move is therefore anchored to its arrival and reaches
  * backwards by however long the trip takes.
+ *
+ * Two things bend that rule, and both are modelled here rather than bolted on:
+ * a medic may swap vehicles partway through (so each leg is quoted on whatever
+ * they are driving when it departs), and a medic may be sweeping a discipline
+ * (so for that window their position is the back of the field, not a post).
  */
 
-import type { PlanMedic, PlanStation, PlanTravelSource } from '@events/contracts'
+import type { PlanMedic, PlanStation, PlanTravelSource, VehicleType } from '@events/contracts'
+import { planVehicleAt } from '@events/contracts'
 import { haversineMeters } from './course'
 import { estimateTravelMinutes } from './travel'
 
-export type SegmentKind = 'hold' | 'move'
+export type SegmentKind = 'hold' | 'move' | 'sweep'
 
 export interface TimelineSegment {
   kind: SegmentKind
   fromMs: number
   toMs: number
-  /** The station being held, or the one being travelled to. */
+  /** The station being held, the one being travelled to, or the sweep. */
   stationId: string
   label: string
   /** Move segments only. */
@@ -27,6 +33,11 @@ export interface TimelineSegment {
   /** Routed geometry when the router answered; a straight line otherwise. */
   path?: [number, number][]
   travelSource?: PlanTravelSource
+  /** The vehicle this leg is driven on. */
+  vehicleType?: VehicleType
+  /** Sweep segments only: which discipline is being swept. */
+  disciplineId?: string
+  color?: string
   /**
    * The arrival could not be met from the previous station in the time
    * available — the move is drawn compressed and flagged in the UI.
@@ -46,15 +57,51 @@ export interface MedicTimeline {
   travelMinutes: number
   /** Arrivals that cannot physically be met. */
   conflicts: Array<{ stationId: string; shortfallMinutes: number }>
+  /** The full station list the timeline was built from, sweeps included. */
+  stations: PlannedStation[]
+}
+
+/**
+ * A discipline this medic sweeps, expanded into something the scheduler can
+ * reason about: a window, its two endpoints on the course, and where the back
+ * of the field is at any instant inside it.
+ */
+export interface SweepWindow {
+  disciplineId: string
+  label: string
+  color: string
+  startMs: number
+  endMs: number
+  startPoint: [number, number]
+  endPoint: [number, number]
+  positionAt: (atMs: number) => [number, number]
+}
+
+/** A station as the scheduler sees it — a real posting, or a sweep endpoint. */
+export interface PlannedStation extends PlanStation {
+  /** Set on the two synthetic stations that bracket a sweep. */
+  sweep?: { disciplineId: string; edge: 'start' | 'end' }
 }
 
 /** Routed geometries live in memory only — the plan stores durations, not shapes. */
-export type PathLookup = (from: PlanStation, to: PlanStation) => [number, number][] | undefined
+export type PathLookup = (
+  from: PlanStation,
+  to: PlanStation,
+  vehicle: VehicleType,
+) => [number, number][] | undefined
 
 export interface ResolveOptions {
   /** Floor for any move. Nobody relocates in under this, however close it is. */
   minTravelMinutes?: number
   paths?: PathLookup
+  /**
+   * Routed minutes for a leg, when the router has answered one. Consulted for
+   * legs whose destination is synthetic (a sweep endpoint) and therefore has
+   * nowhere on the stored plan to cache a duration.
+   */
+  durations?: (from: PlanStation, to: PlanStation, vehicle: VehicleType) => number | undefined
+  /** Sweeps this medic is on, already resolved against the discipline schedules. */
+  sweeps?: SweepWindow[]
 }
 
 export const DEFAULT_MIN_TRAVEL_MINUTES = 10
@@ -63,44 +110,116 @@ function ms(iso: string): number {
   return new Date(iso).getTime()
 }
 
-/** Stations in the order they happen. The planner never trusts array order. */
-export function sortedStations(medic: PlanMedic): PlanStation[] {
-  return [...medic.stations]
-    .filter(s => Number.isFinite(ms(s.arriveAt)))
-    .sort((a, b) => ms(a.arriveAt) - ms(b.arriveAt))
+/** The vehicle the medic is on at an instant. Re-exported so callers need one import. */
+export function vehicleAt(medic: PlanMedic, atMs: number): VehicleType {
+  return planVehicleAt(medic, atMs)
+}
+
+/**
+ * Every place the medic has to be, in order: their own postings plus the two
+ * endpoints of each sweep. Sweep endpoints are synthetic — they exist so the
+ * legs into and out of a sweep are costed like any other move.
+ */
+export function plannedStations(medic: PlanMedic, sweeps: SweepWindow[] = []): PlannedStation[] {
+  const out: PlannedStation[] = medic.stations.filter(s => Number.isFinite(ms(s.arriveAt)))
+
+  const synthetic: PlannedStation[] = []
+  for (const sweep of sweeps) {
+    synthetic.push({
+      id: `sweep:${sweep.disciplineId}:start`,
+      arriveAt: new Date(sweep.startMs).toISOString(),
+      lng: sweep.startPoint[0],
+      lat: sweep.startPoint[1],
+      label: `${sweep.label} start`,
+      sweep: { disciplineId: sweep.disciplineId, edge: 'start' },
+    })
+    synthetic.push({
+      id: `sweep:${sweep.disciplineId}:end`,
+      arriveAt: new Date(sweep.endMs).toISOString(),
+      lng: sweep.endPoint[0],
+      lat: sweep.endPoint[1],
+      label: `${sweep.label} finish`,
+      sweep: { disciplineId: sweep.disciplineId, edge: 'end' },
+    })
+  }
+
+  // A posting that falls inside a sweep window is unreachable — the medic is on
+  // the course. Dropping it here keeps the timeline honest instead of drawing a
+  // medic in two places at once.
+  const inSweep = (at: number) => sweeps.some(s => at > s.startMs && at < s.endMs)
+
+  return [...out.filter(s => !inSweep(ms(s.arriveAt))), ...synthetic].sort(
+    (a, b) => ms(a.arriveAt) - ms(b.arriveAt),
+  )
+}
+
+/** Stations in the order they happen, sweeps included. */
+export function sortedStations(medic: PlanMedic, sweeps: SweepWindow[] = []): PlannedStation[] {
+  return plannedStations(medic, sweeps)
 }
 
 /**
  * Minutes budgeted for the leg into `to`. A number typed by the coordinator
  * wins; then whatever the router measured and cached onto the station; then a
- * crow-flies estimate for the vehicle.
+ * crow-flies estimate for the vehicle being driven at the time.
  */
 export function legMinutes(
-  medic: PlanMedic,
+  vehicle: VehicleType,
   from: PlanStation,
   to: PlanStation,
   minTravelMinutes = DEFAULT_MIN_TRAVEL_MINUTES,
+  routedMinutes?: number,
 ): { minutes: number; source: PlanTravelSource } {
   if (to.travelMinutes != null && Number.isFinite(to.travelMinutes)) {
-    return {
-      minutes: Math.max(minTravelMinutes, to.travelMinutes),
-      source: to.travelSource ?? 'estimated',
+    // A duration the coordinator typed stands whatever they are driving; a
+    // measured one is only good while they are still on the vehicle it was
+    // measured for.
+    if (to.travelSource === 'manual' || to.travelVehicle == null || to.travelVehicle === vehicle) {
+      return {
+        minutes: Math.max(minTravelMinutes, to.travelMinutes),
+        source: to.travelSource ?? 'estimated',
+      }
     }
+  }
+  if (routedMinutes != null && Number.isFinite(routedMinutes)) {
+    return { minutes: Math.max(minTravelMinutes, routedMinutes), source: 'routed' }
   }
   const meters = haversineMeters([from.lng, from.lat], [to.lng, to.lat])
   return {
-    minutes: Math.max(minTravelMinutes, estimateTravelMinutes(meters, medic.vehicleType)),
+    minutes: Math.max(minTravelMinutes, estimateTravelMinutes(meters, vehicle)),
     source: 'estimated',
   }
 }
 
-/** Build the full hold/move timeline for one medic. */
+/**
+ * Which vehicle a leg is driven on: whatever the medic is on when they ARRIVE.
+ *
+ * The alternative — the vehicle at departure — is more literally true but
+ * behaves badly: a swap to something slower pushes the computed departure
+ * backwards, sometimes to before the swap itself, so picking a bike would
+ * silently keep quoting the car. Keying on the arrival makes the rule the one a
+ * planner means when they say "from here on they're on the bike": every leg
+ * that lands after the swap is on the new vehicle, every leg that landed before
+ * it keeps the old one.
+ */
+export function legVehicle(
+  medic: PlanMedic,
+  _from: PlanStation,
+  to: PlanStation,
+  _minTravelMinutes: number,
+): VehicleType {
+  return vehicleAt(medic, ms(to.arriveAt))
+}
+
+/** Build the full hold/move/sweep timeline for one medic. */
 export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions = {}): MedicTimeline {
   const minTravel = options.minTravelMinutes ?? DEFAULT_MIN_TRAVEL_MINUTES
-  const stations = sortedStations(medic)
+  const sweeps = options.sweeps ?? []
+  const stations = plannedStations(medic, sweeps)
   const segments: TimelineSegment[] = []
   const conflicts: MedicTimeline['conflicts'] = []
   let travelMinutes = 0
+  let moveCount = 0
 
   if (stations.length === 0) {
     return {
@@ -111,15 +230,39 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
       moveCount: 0,
       travelMinutes: 0,
       conflicts,
+      stations,
     }
   }
+
+  const sweepFor = (station: PlannedStation) =>
+    station.sweep ? sweeps.find(s => s.disciplineId === station.sweep!.disciplineId) : undefined
 
   for (let i = 1; i < stations.length; i += 1) {
     const prev = stations[i - 1]
     const station = stations[i]
     const prevArrive = ms(prev.arriveAt)
     const arrive = ms(station.arriveAt)
-    const leg = legMinutes(medic, prev, station, minTravel)
+
+    // Between a sweep's two endpoints the medic is ON the course, riding the
+    // back of the field — not travelling between two posts.
+    if (station.sweep?.edge === 'end' && prev.sweep?.edge === 'start') {
+      const sweep = sweepFor(station)
+      segments.push({
+        kind: 'sweep',
+        fromMs: prevArrive,
+        toMs: arrive,
+        stationId: station.id,
+        label: sweep?.label ?? station.label,
+        disciplineId: station.sweep.disciplineId,
+        color: sweep?.color,
+        from: [prev.lng, prev.lat],
+        to: [station.lng, station.lat],
+      })
+      continue
+    }
+
+    const vehicle = legVehicle(medic, prev, station, minTravel)
+    const leg = legMinutes(vehicle, prev, station, minTravel, options.durations?.(prev, station, vehicle))
 
     let departure = arrive - leg.minutes * 60000
     let tight = false
@@ -152,11 +295,13 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
       label: station.label,
       from: [prev.lng, prev.lat],
       to: [station.lng, station.lat],
-      path: options.paths?.(prev, station),
+      path: options.paths?.(prev, station, vehicle),
       travelSource: leg.source,
+      vehicleType: vehicle,
       tight,
       shortfallMinutes: tight ? shortfallMinutes : undefined,
     })
+    moveCount += 1
     travelMinutes += Math.max(0, (arrive - departure) / 60000)
   }
 
@@ -176,13 +321,14 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
     segments,
     onDutyFromMs: ms(stations[0].arriveAt),
     offDutyAtMs: ms(last.arriveAt),
-    moveCount: Math.max(0, stations.length - 1),
+    moveCount,
     travelMinutes: Math.round(travelMinutes),
     conflicts,
+    stations,
   }
 }
 
-export type MedicPhase = 'off-duty' | 'holding' | 'moving'
+export type MedicPhase = 'off-duty' | 'holding' | 'moving' | 'sweeping'
 
 export interface MedicPosition {
   phase: MedicPhase
@@ -198,6 +344,9 @@ export interface MedicPosition {
   nextEventInMinutes?: number
   nextLabel?: string
   tight?: boolean
+  /** Sweeping only. */
+  disciplineId?: string
+  vehicleType?: VehicleType
 }
 
 /** Ease the drawn motion a little — a vehicle that starts and stops instantly
@@ -234,9 +383,10 @@ function walkPath(path: [number, number][], fraction: number): [number, number] 
 /** Where the medic is at `atMs`, and what they are doing. */
 export function medicPositionAt(
   timeline: MedicTimeline,
-  stations: PlanStation[],
   atMs: number,
+  sweeps: SweepWindow[] = [],
 ): MedicPosition | null {
+  const stations = timeline.stations
   if (stations.length === 0) return null
   const first = stations[0]
 
@@ -253,6 +403,19 @@ export function medicPositionAt(
 
   for (const segment of timeline.segments) {
     if (atMs < segment.fromMs || atMs > segment.toMs) continue
+
+    if (segment.kind === 'sweep') {
+      const sweep = sweeps.find(s => s.disciplineId === segment.disciplineId)
+      return {
+        phase: 'sweeping',
+        position: sweep ? sweep.positionAt(atMs) : (segment.from ?? [first.lng, first.lat]),
+        stationId: segment.stationId,
+        label: segment.label,
+        disciplineId: segment.disciplineId,
+        nextEventInMinutes: Math.round((segment.toMs - atMs) / 60000),
+      }
+    }
+
     if (segment.kind === 'hold') {
       const finite = Number.isFinite(segment.toMs)
       return {
@@ -263,6 +426,7 @@ export function medicPositionAt(
         nextEventInMinutes: finite ? Math.round((segment.toMs - atMs) / 60000) : undefined,
       }
     }
+
     const span = Math.max(1, segment.toMs - segment.fromMs)
     const raw = (atMs - segment.fromMs) / span
     const eased = easeAlong(Math.max(0, Math.min(1, raw)))
@@ -281,6 +445,7 @@ export function medicPositionAt(
       nextEventInMinutes: Math.round((segment.toMs - atMs) / 60000),
       nextLabel: segment.label,
       tight: segment.tight,
+      vehicleType: segment.vehicleType,
     }
   }
 

@@ -5,7 +5,7 @@ import MapGL, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/ma
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { VEHICLE_TYPE_META } from '@events/contracts'
-import type { PlanMedic } from '@events/contracts'
+import type { PlanMedic, VehicleType } from '@events/contracts'
 import { styleFor, type BaseLayer } from '@/lib/map-styles'
 import { PoiIcon } from '@/lib/poi-icons'
 import { POI_CONFIGS } from '@/lib/constants'
@@ -18,6 +18,8 @@ import type { MedicPosition } from '@/lib/planner/schedule'
 
 export interface PlannedMedicView {
   medic: PlanMedic
+  /** The vehicle this medic is on at the playhead, not their base vehicle. */
+  vehicleType: VehicleType
   position: MedicPosition | null
   /** The whole day's route, in order — drawn when the medic is selected. */
   routePoints: Array<{ id: string; lng: number; lat: number; label: string; arriveMs: number }>
@@ -43,11 +45,14 @@ interface Props {
   fitBounds?: [[number, number], [number, number]]
   showRunners: boolean
   showDensity: boolean
-  /** Stretches of occupied course with no medic in reach, per discipline. */
+  /** Reach analysis per discipline; drives the course colouring in gaps mode. */
   coverage: Record<string, CoverageReport>
+  coverageMeters: number
+  /** Sweep windows, so a sweeping medic's puck reads differently. */
+  sweepColors: Record<string, string>
 }
 
-// ─── Field gradient ──────────────────────────────────────────────────────────
+// ─── Course painting ─────────────────────────────────────────────────────────
 
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '')
@@ -56,34 +61,69 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
+function rgba(c: [number, number, number], alpha: number): string {
+  return `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${alpha.toFixed(3)})`
+}
+
+function mix(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+}
+
 /**
  * Colour for a stretch of course carrying `density` of the field: the
  * discipline's own hue where the field is thin, burning towards a hot amber
- * white where it bunches up. Empty course stays fully transparent, so the
- * gradient reads as "here are the people", not "here is the route".
+ * white where it bunches up. Empty course keeps a dim trace of the hue, so the
+ * route is always legible even where nobody is running yet.
  */
 function densityColor(hex: string, density: number): string {
-  if (density <= 0.002) return 'rgba(0,0,0,0)'
-  const [r, g, b] = hexToRgb(hex)
+  const base = hexToRgb(hex)
+  if (density <= 0.002) return rgba(base, 0.34)
   const heat = Math.min(1, density * 1.45)
-  const mix = Math.pow(heat, 1.6)
-  const hot: [number, number, number] = [255, 245, 214]
-  const cr = Math.round(r + (hot[0] - r) * mix)
-  const cg = Math.round(g + (hot[1] - g) * mix)
-  const cb = Math.round(b + (hot[2] - b) * mix)
-  const alpha = 0.35 + 0.65 * Math.min(1, density * 2.2)
-  return `rgba(${cr},${cg},${cb},${alpha.toFixed(3)})`
+  const hot: [number, number, number] = [255, 246, 214]
+  return rgba(mix(base, hot, Math.pow(heat, 1.6)), 0.6 + 0.4 * Math.min(1, density * 2.2))
 }
 
-/** MapLibre `line-gradient` expression built from the density histogram. */
-function gradientExpression(color: string, density: number[]): unknown[] {
-  const stops: unknown[] = ['interpolate', ['linear'], ['line-progress']]
-  stops.push(0, densityColor(color, density[0] ?? 0))
-  for (let i = 0; i < DENSITY_BINS; i += 1) {
-    const at = Math.min(0.999, (i + 0.5) / DENSITY_BINS)
-    stops.push(at, densityColor(color, density[i] ?? 0))
+/**
+ * Reach ramp, keyed on "how many radii away is the nearest medic".
+ *
+ * Deliberately not the discipline's own hue: when the coverage view is on, a
+ * course drawn in its own red or orange reads as a course in trouble. In this
+ * mode colour means one thing only — green is covered, red is not.
+ */
+const REACH_RAMP: Array<[number, [number, number, number]]> = [
+  [0.0, [34, 197, 94]],
+  [0.75, [132, 204, 22]],
+  [1.0, [250, 204, 21]],
+  [1.5, [249, 115, 22]],
+  [2.2, [239, 68, 68]],
+]
+
+/** Slate for course nobody is on — present, but plainly out of play. */
+const IDLE_COURSE: [number, number, number] = [148, 163, 184]
+
+function reachColor(nearestMeters: number, radiusMeters: number, occupied: boolean): string {
+  if (!occupied) return rgba(IDLE_COURSE, 0.42)
+  const ratio = radiusMeters > 0 ? nearestMeters / radiusMeters : Number.POSITIVE_INFINITY
+  if (!Number.isFinite(ratio)) return rgba(REACH_RAMP[REACH_RAMP.length - 1][1], 0.98)
+  for (let i = 1; i < REACH_RAMP.length; i += 1) {
+    const [stop, color] = REACH_RAMP[i]
+    const [prevStop, prevColor] = REACH_RAMP[i - 1]
+    if (ratio <= stop) {
+      const t = stop === prevStop ? 0 : (ratio - prevStop) / (stop - prevStop)
+      return rgba(mix(prevColor, color, t), 0.98)
+    }
   }
-  stops.push(1, densityColor(color, density[DENSITY_BINS - 1] ?? 0))
+  return rgba(REACH_RAMP[REACH_RAMP.length - 1][1], 0.98)
+}
+
+/** MapLibre `line-gradient` expression from a per-bin colour function. */
+function gradientExpression(colorAt: (bin: number) => string): unknown[] {
+  const stops: unknown[] = ['interpolate', ['linear'], ['line-progress']]
+  stops.push(0, colorAt(0))
+  for (let i = 0; i < DENSITY_BINS; i += 1) {
+    stops.push(Math.min(0.999, (i + 0.5) / DENSITY_BINS), colorAt(i))
+  }
+  stops.push(1, colorAt(DENSITY_BINS - 1))
   return stops
 }
 
@@ -106,6 +146,8 @@ export default function PlannerMap({
   showRunners,
   showDensity,
   coverage,
+  coverageMeters,
+  sweepColors,
 }: Props) {
   const mapRef = useRef<MapRef>(null)
   const [dragSnapId, setDragSnapId] = useState<string | null>(null)
@@ -135,19 +177,33 @@ export default function PlannerMap({
     [disciplines, hiddenDisciplineIds],
   )
 
+  // In gaps mode the colour of every course means reach, not discipline; in
+  // field mode it means where the runners are. One or the other, never both —
+  // two meanings on one line is what made the old view hard to read.
   const trackData = useMemo(
     () =>
-      visible.map(d => ({
-        id: d.id,
-        color: d.color,
-        geojson: {
-          type: 'Feature' as const,
-          properties: {},
-          geometry: { type: 'LineString' as const, coordinates: d.course.coordinates },
-        },
-        density: fields[d.id]?.density ?? [],
-      })),
-    [visible, fields],
+      visible.map(d => {
+        const density = fields[d.id]?.density ?? []
+        const report = coverage[d.id]
+        const reachMode = report != null && report.nearest.length > 0
+        return {
+          id: d.id,
+          color: d.color,
+          reachMode,
+          geojson: {
+            type: 'Feature' as const,
+            properties: {},
+            geometry: { type: 'LineString' as const, coordinates: d.course.coordinates },
+          },
+          gradient: reachMode
+            ? gradientExpression(bin =>
+                reachColor(report.nearest[bin] ?? Number.POSITIVE_INFINITY, coverageMeters, report.occupied[bin] ?? false),
+              )
+            : gradientExpression(bin => densityColor(d.color, density[bin] ?? 0)),
+          hasSeries: reachMode || density.length > 0,
+        }
+      }),
+    [visible, fields, coverage, coverageMeters],
   )
 
   const runnerDots = useMemo(() => {
@@ -258,42 +314,53 @@ export default function PlannerMap({
       {/* ── Courses ─────────────────────────────────────────────────────── */}
       {trackData.map(track => (
         <Source key={track.id} id={`course-${track.id}`} type="geojson" data={track.geojson} lineMetrics>
-          {/* The route itself, always visible but deliberately quiet. */}
+          {/* A dark casing first: over a satellite tile or a pale topo map a
+              bare coloured line disappears, and this is the one thing on the
+              screen that always has to be findable. */}
+          <Layer
+            id={`course-casing-${track.id}`}
+            source={`course-${track.id}`}
+            type="line"
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': '#020617', 'line-width': 9, 'line-opacity': 0.55, 'line-blur': 0.5 }}
+          />
+          {/* The route itself. In gaps mode the gradient below paints over it. */}
           <Layer
             id={`course-base-${track.id}`}
             source={`course-${track.id}`}
             type="line"
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-            paint={{ 'line-color': track.color, 'line-width': 2.5, 'line-opacity': 0.32 }}
+            paint={{
+              'line-color': track.reachMode ? '#64748b' : track.color,
+              'line-width': 4.5,
+              'line-opacity': track.hasSeries ? 0.45 : 0.9,
+            }}
           />
-          {/* Glow underneath makes a dense pack read from a zoomed-out view.
-              These are siblings rather than a wrapped pair on purpose:
+          {/* Glow underneath makes a dense pack — or a long gap — read from a
+              zoomed-out view. Siblings rather than a wrapped pair on purpose:
               react-map-gl injects the parent source onto each direct child, and
               a Fragment in between swallows it. */}
-          {showDensity && track.density.length > 0 && (
+          {track.hasSeries && (showDensity || track.reachMode) && (
             <Layer
               id={`course-glow-${track.id}`}
               source={`course-${track.id}`}
               type="line"
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{
-                'line-gradient': gradientExpression(track.color, track.density) as never,
-                'line-width': 16,
-                'line-blur': 12,
-                'line-opacity': 0.55,
+                'line-gradient': track.gradient as never,
+                'line-width': 20,
+                'line-blur': 14,
+                'line-opacity': 0.6,
               }}
             />
           )}
-          {showDensity && track.density.length > 0 && (
+          {track.hasSeries && (showDensity || track.reachMode) && (
             <Layer
               id={`course-field-${track.id}`}
               source={`course-${track.id}`}
               type="line"
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-              paint={{
-                'line-gradient': gradientExpression(track.color, track.density) as never,
-                'line-width': 5,
-              }}
+              paint={{ 'line-gradient': track.gradient as never, 'line-width': 6 }}
             />
           )}
         </Source>
@@ -319,6 +386,8 @@ export default function PlannerMap({
       )}
 
       {/* ── Coverage gaps ───────────────────────────────────────────────── */}
+      {/* The gradient already says red; this halo is what makes a long gap
+          findable when the whole event is zoomed to fit. */}
       {coverageGaps.features.length > 0 && (
         <Source id="planner-gaps" type="geojson" data={coverageGaps}>
           <Layer
@@ -326,27 +395,7 @@ export default function PlannerMap({
             source="planner-gaps"
             type="line"
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-            paint={{
-              'line-color': '#ef4444',
-              'line-width': 18,
-              'line-opacity': 0.3,
-              'line-blur': 10,
-            }}
-          />
-          {/* Dashes, not just a colour: the density gradient already owns the
-              warm end of the palette, and "no medic here" has to be readable
-              over an orange course as well as a green one. */}
-          <Layer
-            id="planner-gap-line"
-            source="planner-gaps"
-            type="line"
-            layout={{ 'line-cap': 'butt', 'line-join': 'round' }}
-            paint={{
-              'line-color': '#fecaca',
-              'line-width': 2,
-              'line-opacity': 0.9,
-              'line-dasharray': [2, 2],
-            }}
+            paint={{ 'line-color': '#ef4444', 'line-width': 30, 'line-opacity': 0.22, 'line-blur': 18 }}
           />
         </Source>
       )}
@@ -474,14 +523,16 @@ export default function PlannerMap({
         const hovered = hoverMedicId === view.medic.id
         const offDuty = view.position.phase === 'off-duty'
         const moving = view.position.phase === 'moving'
-        const meta = VEHICLE_TYPE_META[view.medic.vehicleType] ?? VEHICLE_TYPE_META.foot
+        const sweeping = view.position.phase === 'sweeping'
+        const meta = VEHICLE_TYPE_META[view.vehicleType] ?? VEHICLE_TYPE_META.foot
+        const sweepColor = (view.position.disciplineId && sweepColors[view.position.disciplineId]) || view.medic.color
         return (
           <Marker
             key={view.medic.id}
             longitude={view.position.position[0]}
             latitude={view.position.position[1]}
             anchor="center"
-            draggable
+            draggable={!sweeping}
             onDragStart={() => onSelectMedic(view.medic.id)}
             onDrag={e => {
               const snap = snapTarget([e.lngLat.lng, e.lngLat.lat])
@@ -502,15 +553,24 @@ export default function PlannerMap({
               }}
               style={{ cursor: 'grab' }}
             >
-              {moving && (
+              {(moving || sweeping) && (
                 <span
                   className="absolute rounded-full"
                   style={{
                     width: 44,
                     height: 44,
-                    border: `1.5px solid ${view.medic.color}`,
-                    animation: 'plannerMovePulse 1.6s ease-out infinite',
+                    border: `1.5px solid ${sweeping ? sweepColor : view.medic.color}`,
+                    animation: `plannerMovePulse ${sweeping ? '2.4s' : '1.6s'} ease-out infinite`,
                   }}
+                />
+              )}
+              {/* A sweeper is pinned to the back of a field, so it carries that
+                  discipline's colour as a ring — you can see at a glance which
+                  race's tail it is riding. */}
+              {sweeping && (
+                <span
+                  className="absolute rounded-full"
+                  style={{ width: 34, height: 34, border: `2px dashed ${sweepColor}`, opacity: 0.9 }}
                 />
               )}
               <span
@@ -543,9 +603,11 @@ export default function PlannerMap({
                     {' · '}
                     {view.position.phase === 'moving'
                       ? `→ ${view.position.label}`
-                      : view.position.phase === 'off-duty'
-                        ? 'off duty'
-                        : view.position.label}
+                      : view.position.phase === 'sweeping'
+                        ? `sweeping ${view.position.label}`
+                        : view.position.phase === 'off-duty'
+                          ? 'off duty'
+                          : view.position.label}
                   </span>
                 </div>
               )}

@@ -6,12 +6,15 @@
  * exactly the same timeline the map preview plays.
  */
 
-import type { PlanMedic, PlanStation } from '@events/contracts'
-import { VEHICLE_TYPE_META } from '@events/contracts'
-import { resolveMedicTimeline, sortedStations, type ResolveOptions } from './schedule'
+import type { PlanMedic, VehicleType } from '@events/contracts'
+import { VEHICLE_TYPE_META, planVehicleAt } from '@events/contracts'
+import { resolveMedicTimeline, type ResolveOptions } from './schedule'
+
+export type ItineraryStopKind = 'post' | 'sweep-start' | 'sweep-end'
 
 export interface ItineraryStop {
   stationId: string
+  kind: ItineraryStopKind
   arriveMs: number
   /** When they have to leave for the next stop; null at the last one. */
   departMs: number | null
@@ -25,6 +28,16 @@ export interface ItineraryStop {
   /** The move into this stop doesn't fit in the time allowed. */
   tight?: boolean
   shortfallMinutes?: number
+  /** What they drive to get here. */
+  vehicleLabel?: string
+  vehicleIcon?: string
+}
+
+/** A vehicle swap, rendered inline in the call sheet at its own time. */
+export interface ItineraryVehicleSwap {
+  atMs: number
+  label: string
+  icon: string
 }
 
 export interface MedicItinerary {
@@ -35,36 +48,73 @@ export interface MedicItinerary {
   vehicleIcon: string
   color: string
   stops: ItineraryStop[]
+  swaps: ItineraryVehicleSwap[]
   onDutyFromMs: number | null
   travelMinutes: number
   conflictCount: number
+  /** Courses this medic sweeps, by name. */
+  sweeps: string[]
+}
+
+function vehicleMeta(vehicle: VehicleType) {
+  return VEHICLE_TYPE_META[vehicle] ?? VEHICLE_TYPE_META.foot
 }
 
 export function buildItinerary(medic: PlanMedic, options: ResolveOptions = {}): MedicItinerary {
-  const stations: PlanStation[] = sortedStations(medic)
   const timeline = resolveMedicTimeline(medic, options)
-  const meta = VEHICLE_TYPE_META[medic.vehicleType] ?? VEHICLE_TYPE_META.foot
+  const stations = timeline.stations
+  const meta = vehicleMeta(medic.vehicleType)
 
   const stops: ItineraryStop[] = stations.map((station, i) => {
     const arriveMs = new Date(station.arriveAt).getTime()
     const move = timeline.segments.find(s => s.kind === 'move' && s.stationId === station.id)
-    const nextMove = stations[i + 1]
-      ? timeline.segments.find(s => s.kind === 'move' && s.stationId === stations[i + 1].id)
+    const sweepOut = timeline.segments.find(
+      s => s.kind === 'sweep' && s.fromMs === arriveMs,
+    )
+    const nextStation = stations[i + 1]
+    const nextLeg = nextStation
+      ? timeline.segments.find(
+          s => (s.kind === 'move' || s.kind === 'sweep') && s.stationId === nextStation.id,
+        )
       : undefined
-    const departMs = nextMove ? nextMove.fromMs : null
+    const departMs = nextLeg ? nextLeg.fromMs : null
+    const legVehicle = move?.vehicleType ?? planVehicleAt(medic, arriveMs)
+    const legMeta = vehicleMeta(legVehicle)
     return {
       stationId: station.id,
+      kind: station.sweep ? (station.sweep.edge === 'start' ? 'sweep-start' : 'sweep-end') : 'post',
       arriveMs,
       departMs,
       label: station.label,
       note: station.note,
       poiId: station.poiId,
       travelMinutes: move ? Math.round((move.toMs - move.fromMs) / 60000) : 0,
-      dwellMinutes: departMs != null ? Math.max(0, Math.round((departMs - arriveMs) / 60000)) : null,
+      // "On station" is meaningless for a sweep start — they leave immediately,
+      // with the field — so it is reported as the sweep's own duration instead.
+      dwellMinutes:
+        sweepOut != null
+          ? Math.max(0, Math.round((sweepOut.toMs - sweepOut.fromMs) / 60000))
+          : departMs != null
+            ? Math.max(0, Math.round((departMs - arriveMs) / 60000))
+            : null,
       tight: move?.tight,
       shortfallMinutes: move?.shortfallMinutes,
+      vehicleLabel: move ? legMeta.label : undefined,
+      vehicleIcon: move ? legMeta.icon : undefined,
     }
   })
+
+  const swaps: ItineraryVehicleSwap[] = (medic.vehicleChanges ?? [])
+    .map(change => {
+      const at = new Date(change.at).getTime()
+      const changeMeta = vehicleMeta(change.vehicleType)
+      return { atMs: at, label: changeMeta.label, icon: changeMeta.icon }
+    })
+    .filter(swap => Number.isFinite(swap.atMs))
+
+  const sweeps = timeline.segments
+    .filter(s => s.kind === 'sweep')
+    .map(s => s.label)
 
   return {
     planMedicId: medic.id,
@@ -74,9 +124,11 @@ export function buildItinerary(medic: PlanMedic, options: ResolveOptions = {}): 
     vehicleIcon: meta.icon,
     color: medic.color,
     stops,
+    swaps,
     onDutyFromMs: timeline.onDutyFromMs,
     travelMinutes: timeline.travelMinutes,
     conflictCount: timeline.conflicts.length,
+    sweeps,
   }
 }
 
@@ -107,25 +159,52 @@ export function formatDuration(minutes: number): string {
 /** A plain-text briefing sheet — pasteable into a radio log or a group chat. */
 export function itineraryToText(itinerary: MedicItinerary, eventTitle: string): string {
   const lines: string[] = []
-  lines.push(`${itinerary.name}${itinerary.unit ? ` (${itinerary.unit})` : ''} — ${itinerary.vehicleLabel}`)
+  lines.push(`${itinerary.name}${itinerary.unit ? ` (${itinerary.unit})` : ''} — starts on ${itinerary.vehicleLabel}`)
   lines.push(eventTitle)
   lines.push('')
-  let lastDay = ''
+
+  // Swaps are events on the same clock as the stops, so they are merged into
+  // one stream rather than listed separately — a call sheet is read top to
+  // bottom, and "switch to the bike" has to appear where it happens.
+  type Row = { atMs: number; text: string[]; day: number }
+  const rows: Row[] = []
   for (const stop of itinerary.stops) {
-    const day = formatDay(stop.arriveMs)
+    const text: string[] = []
+    const travel = stop.travelMinutes > 0
+      ? ` (${formatDuration(stop.travelMinutes)}${stop.vehicleIcon ? ` ${stop.vehicleIcon}` : ''})`
+      : ''
+    if (stop.kind === 'sweep-start') {
+      text.push(`  ${formatTime(stop.arriveMs)}  START SWEEPING ${stop.label.replace(/ start$/, '')}${travel}`)
+      text.push('           ↳ stay with the last participant')
+    } else if (stop.kind === 'sweep-end') {
+      text.push(`  ${formatTime(stop.arriveMs)}  sweep complete — ${stop.label.replace(/ finish$/, '')}`)
+    } else {
+      text.push(`  ${formatTime(stop.arriveMs)}  ${stop.label}${travel}`)
+      if (stop.note) text.push(`           ↳ ${stop.note}`)
+      if (stop.departMs != null && (stop.dwellMinutes ?? 0) >= 1) {
+        text.push(`  ${formatTime(stop.departMs)}  leave ${stop.label}`)
+      }
+    }
+    rows.push({ atMs: stop.arriveMs, text, day: 0 })
+  }
+  for (const swap of itinerary.swaps) {
+    rows.push({ atMs: swap.atMs, text: [`  ${formatTime(swap.atMs)}  switch to ${swap.icon} ${swap.label}`], day: 0 })
+  }
+  rows.sort((a, b) => a.atMs - b.atMs)
+
+  let lastDay = ''
+  for (const row of rows) {
+    const day = formatDay(row.atMs)
     if (day !== lastDay) {
       lines.push(day.toUpperCase())
       lastDay = day
     }
-    const travel = stop.travelMinutes > 0 ? ` (${formatDuration(stop.travelMinutes)} travel)` : ''
-    lines.push(`  ${formatTime(stop.arriveMs)}  ${stop.label}${travel}`)
-    if (stop.note) lines.push(`           ↳ ${stop.note}`)
-    if (stop.departMs != null) {
-      lines.push(`  ${formatTime(stop.departMs)}  leave ${stop.label}`)
-    }
+    lines.push(...row.text)
   }
+
   lines.push('')
-  lines.push(`Moves: ${Math.max(0, itinerary.stops.length - 1)} · Travel: ${formatDuration(itinerary.travelMinutes)}`)
+  const moves = itinerary.stops.filter(s => s.kind === 'post').length
+  lines.push(`Moves: ${Math.max(0, moves - 1)} · Travel: ${formatDuration(itinerary.travelMinutes)}`)
   return lines.join('\n')
 }
 
@@ -137,14 +216,15 @@ function csvCell(value: string | number | null | undefined): string {
 /** One row per stop, every medic — the format planners paste into a spreadsheet. */
 export function itinerariesToCsv(itineraries: MedicItinerary[]): string {
   const rows = [
-    ['Medic', 'Unit', 'Vehicle', 'Date', 'Arrive', 'Location', 'Depart', 'On station', 'Travel in (min)', 'Note'],
+    ['Medic', 'Unit', 'Type', 'Vehicle in', 'Date', 'Arrive', 'Location', 'Depart', 'On station', 'Travel in (min)', 'Note'],
   ]
   for (const it of itineraries) {
     for (const stop of it.stops) {
       rows.push([
         it.name,
         it.unit ?? '',
-        it.vehicleLabel,
+        stop.kind === 'post' ? 'Post' : stop.kind === 'sweep-start' ? 'Sweep start' : 'Sweep end',
+        stop.vehicleLabel ?? it.vehicleLabel,
         formatDay(stop.arriveMs),
         formatTime(stop.arriveMs),
         stop.label,
@@ -152,6 +232,21 @@ export function itinerariesToCsv(itineraries: MedicItinerary[]): string {
         stop.dwellMinutes != null ? formatDuration(stop.dwellMinutes) : 'until end',
         String(stop.travelMinutes),
         stop.note ?? '',
+      ])
+    }
+    for (const swap of it.swaps) {
+      rows.push([
+        it.name,
+        it.unit ?? '',
+        'Vehicle swap',
+        swap.label,
+        formatDay(swap.atMs),
+        formatTime(swap.atMs),
+        `Switch to ${swap.label}`,
+        '',
+        '',
+        '',
+        '',
       ])
     }
   }

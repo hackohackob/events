@@ -14,9 +14,14 @@ import { fetchEventById, type ApiEventSummary } from '@/api/events'
 import { getMedicRoster } from '@/api/medics'
 import { fetchPlan, routeLeg, savePlan } from '@/api/plan'
 import { fetchGpxTrack } from '@/lib/gpx'
-import { buildCourse, haversineMeters, type CourseModel } from '@/lib/planner/course'
-import { buildFieldShape, scheduleEndMs, type FieldShape } from '@/lib/planner/field'
-import { DEFAULT_MIN_TRAVEL_MINUTES } from '@/lib/planner/schedule'
+import { buildCourse, haversineMeters, pointAtMeters, type CourseModel } from '@/lib/planner/course'
+import { buildFieldShape, fieldAt, scheduleEndMs, type FieldShape } from '@/lib/planner/field'
+import {
+  DEFAULT_MIN_TRAVEL_MINUTES,
+  legVehicle,
+  plannedStations,
+  type SweepWindow,
+} from '@/lib/planner/schedule'
 import { estimateTravelMinutes } from '@/lib/planner/travel'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
@@ -363,10 +368,55 @@ export function usePlanner(eventId: string) {
 
   const medics = plan?.medics ?? []
 
+  // ── Sweeps ──────────────────────────────────────────────────────────────
+  /**
+   * Each discipline expanded into a sweepable window. Lives here rather than in
+   * the view because the routing pass below has to cost the legs into and out
+   * of a sweep, which means it needs to know where those endpoints are.
+   */
+  const sweepWindows = useMemo(() => {
+    const out: Record<string, SweepWindow> = {}
+    for (const d of disciplines) {
+      if (!d.hasCourse) continue
+      const startMs = new Date(d.schedule.startAt).getTime()
+      if (!Number.isFinite(startMs)) continue
+      const coords = d.course.coordinates
+      out[d.id] = {
+        disciplineId: d.id,
+        label: d.name,
+        color: d.color,
+        startMs,
+        endMs: scheduleEndMs(d.schedule),
+        startPoint: coords[0],
+        endPoint: coords[coords.length - 1],
+        positionAt: (atMs: number) => {
+          const state = fieldAt(d.schedule, d.shape, d.course, atMs)
+          if (state.onCourse <= 0 || state.tailMeters < 0) {
+            return atMs <= startMs ? coords[0] : coords[coords.length - 1]
+          }
+          return pointAtMeters(d.course, state.tailMeters)
+        },
+      }
+    }
+    return out
+  }, [disciplines])
+
+  const sweepsFor = useCallback(
+    (medic: PlanMedic): SweepWindow[] =>
+      (medic.sweeperFor ?? [])
+        .map(id => sweepWindows[id])
+        .filter((w): w is SweepWindow => w != null)
+        .sort((a, b) => a.startMs - b.startMs),
+    [sweepWindows],
+  )
+
   // ── Routed leg measurement ──────────────────────────────────────────────
   // Straight-line estimates appear instantly; the router upgrades them in the
   // background and the timeline re-flows when each answer lands.
   const pathCache = useRef<Map<string, [number, number][]>>(new Map())
+  /** Routed minutes per leg. Kept in memory because a sweep endpoint has no
+   *  station in the stored plan to hang a duration off. */
+  const durationCache = useRef<Map<string, number>>(new Map())
   const inFlight = useRef<Set<string>>(new Set())
   /** Legs already put to the router. Keyed by endpoints + vehicle, so a moved
    *  station or a re-vehicled medic is a new key and gets measured again — but
@@ -378,15 +428,26 @@ export function usePlanner(eventId: string) {
     if (!plan || !eventId) return
     let cancelled = false
 
-    const jobs: Array<{ medic: PlanMedic; from: PlanStation; to: PlanStation; key: string }> = []
+    const jobs: Array<{
+      medic: PlanMedic
+      from: PlanStation
+      to: PlanStation
+      vehicle: VehicleType
+      key: string
+    }> = []
     for (const medic of plan.medics) {
-      const stations = [...medic.stations].sort(
-        (a, b) => new Date(a.arriveAt).getTime() - new Date(b.arriveAt).getTime(),
-      )
+      const sweeps = sweepsFor(medic)
+      const stations = plannedStations(medic, sweeps)
       for (let i = 1; i < stations.length; i += 1) {
-        const key = legKey(stations[i - 1], stations[i], medic.vehicleType)
+        const from = stations[i - 1]
+        const to = stations[i]
+        // The stretch between a sweep's own two endpoints is the course itself,
+        // not a relocation — nothing to route.
+        if (from.sweep?.edge === 'start' && to.sweep?.edge === 'end') continue
+        const vehicle = legVehicle(medic, from, to, minTravelMinutes)
+        const key = legKey(from, to, vehicle)
         if (!attempted.current.has(key) && !inFlight.current.has(key)) {
-          jobs.push({ medic, from: stations[i - 1], to: stations[i], key })
+          jobs.push({ medic, from, to, vehicle, key })
         }
       }
     }
@@ -398,7 +459,7 @@ export function usePlanner(eventId: string) {
       for (const job of jobs) {
         if (cancelled) return
         inFlight.current.add(job.key)
-        const routed = await routeLeg(eventId, job.from, job.to, job.medic.vehicleType)
+        const routed = await routeLeg(eventId, job.from, job.to, job.vehicle)
         inFlight.current.delete(job.key)
         attempted.current.add(job.key)
         if (cancelled) return
@@ -406,19 +467,21 @@ export function usePlanner(eventId: string) {
           // No router (or no route): fall back to the crow-flies estimate and a
           // straight line, both already good enough to plan against.
           const meters = haversineMeters([job.from.lng, job.from.lat], [job.to.lng, job.to.lat])
-          const minutes = Math.max(minTravelMinutes, estimateTravelMinutes(meters, job.medic.vehicleType))
+          const minutes = Math.max(minTravelMinutes, estimateTravelMinutes(meters, job.vehicle))
           pathCache.current.set(job.key, [
             [job.from.lng, job.from.lat],
             [job.to.lng, job.to.lat],
           ])
+          durationCache.current.set(job.key, minutes)
           mutate(
-            current => applyLegResult(current, job.medic.id, job.to.id, minutes, 'estimated'),
+            current => applyLegResult(current, job.medic.id, job.to.id, minutes, 'estimated', job.vehicle),
             { silent: true },
           )
           setPathTick(t => t + 1)
           continue
         }
         pathCache.current.set(job.key, routed.path)
+        durationCache.current.set(job.key, Math.max(minTravelMinutes, routed.minutes))
         mutate(
           current =>
             applyLegResult(
@@ -427,6 +490,7 @@ export function usePlanner(eventId: string) {
               job.to.id,
               Math.max(minTravelMinutes, routed.minutes),
               'routed',
+              job.vehicle,
             ),
           { silent: true },
         )
@@ -437,12 +501,18 @@ export function usePlanner(eventId: string) {
     return () => {
       cancelled = true
     }
-  }, [plan, eventId, mutate, minTravelMinutes])
+  }, [plan, eventId, mutate, minTravelMinutes, sweepsFor])
 
   const pathLookup = useCallback(
     (from: PlanStation, to: PlanStation, vehicle: VehicleType) =>
       pathCache.current.get(legKey(from, to, vehicle)),
     // pathTick forces consumers to re-resolve once a route lands.
+    [pathTick],
+  )
+
+  const durationLookup = useCallback(
+    (from: PlanStation, to: PlanStation, vehicle: VehicleType) =>
+      durationCache.current.get(legKey(from, to, vehicle)),
     [pathTick],
   )
 
@@ -494,6 +564,9 @@ export function usePlanner(eventId: string) {
     snapMeters,
     minTravelMinutes,
     pathLookup,
+    durationLookup,
+    sweepWindows,
+    sweepsFor,
     bounds,
   }
 }
@@ -505,6 +578,7 @@ function applyLegResult(
   stationId: string,
   minutes: number,
   source: 'routed' | 'estimated',
+  vehicle: VehicleType,
 ): EventPlan {
   let changed = false
   const medics = plan.medics.map(medic => {
@@ -514,9 +588,15 @@ function applyLegResult(
       if (station.id !== stationId) return station
       // Never overwrite a duration the coordinator typed in themselves.
       if (station.travelSource === 'manual') return station
-      if (station.travelMinutes === minutes && station.travelSource === source) return station
+      if (
+        station.travelMinutes === minutes &&
+        station.travelSource === source &&
+        station.travelVehicle === vehicle
+      ) {
+        return station
+      }
       medicChanged = true
-      return { ...station, travelMinutes: minutes, travelSource: source }
+      return { ...station, travelMinutes: minutes, travelSource: source, travelVehicle: vehicle }
     })
     if (!medicChanged) return medic
     changed = true

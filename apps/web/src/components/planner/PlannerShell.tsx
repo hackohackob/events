@@ -21,14 +21,13 @@ import type {
   PlanStation,
   VehicleType,
 } from '@events/contracts'
-import { planMedicColor } from '@events/contracts'
+import { planMedicColor, planVehicleAt } from '@events/contracts'
 import { usePlanner } from '@/hooks/usePlanner'
 import type { BaseLayer } from '@/lib/map-styles'
 import { fieldAt, EMPTY_FIELD, type FieldState } from '@/lib/planner/field'
 import {
   medicPositionAt,
   resolveMedicTimeline,
-  sortedStations,
   type MedicTimeline,
   type ResolveOptions,
 } from '@/lib/planner/schedule'
@@ -55,7 +54,18 @@ const TIME_GRID_MS = 5 * 60_000
 
 export default function PlannerShell({ eventId }: { eventId: string }) {
   const planner = usePlanner(eventId)
-  const { plan, mutate, disciplines, medics, bounds, snapTarget, pathLookup, minTravelMinutes } = planner
+  const {
+    plan,
+    mutate,
+    disciplines,
+    medics,
+    bounds,
+    snapTarget,
+    pathLookup,
+    durationLookup,
+    sweepsFor,
+    minTravelMinutes,
+  } = planner
 
   const [tab, setTab] = useState<Tab>('course')
   const [cursorMs, setCursorMs] = useState<number | null>(null)
@@ -121,12 +131,20 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
     return out
   }, [disciplines, cursor])
 
+  const sweepColors = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const d of disciplines) out[d.id] = d.color
+    return out
+  }, [disciplines])
+
   const resolveOptionsFor = useCallback(
     (medic: PlanMedic): ResolveOptions => ({
       minTravelMinutes,
-      paths: (from, to) => pathLookup(from, to, medic.vehicleType),
+      paths: (from, to, vehicle) => pathLookup(from, to, vehicle),
+      durations: (from, to, vehicle) => durationLookup(from, to, vehicle),
+      sweeps: sweepsFor(medic),
     }),
-    [minTravelMinutes, pathLookup],
+    [minTravelMinutes, pathLookup, durationLookup, sweepsFor],
   )
 
   const timelines = useMemo(() => {
@@ -138,11 +156,12 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
   const medicViews: PlannedMedicView[] = useMemo(
     () =>
       medics.map(medic => {
-        const stations = sortedStations(medic)
+        const timeline = timelines[medic.id]
         return {
           medic,
-          position: medicPositionAt(timelines[medic.id], stations, cursor),
-          routePoints: stations.map(s => ({
+          vehicleType: planVehicleAt(medic, cursor),
+          position: medicPositionAt(timeline, cursor, sweepsFor(medic)),
+          routePoints: timeline.stations.map(s => ({
             id: s.id,
             lng: s.lng,
             lat: s.lat,
@@ -151,7 +170,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
           })),
         }
       }),
-    [medics, timelines, cursor],
+    [medics, timelines, cursor, sweepsFor],
   )
 
   /** Reach analysis: occupied course with no medic inside the coverage radius. */
@@ -186,6 +205,75 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
       mutate(current => ({
         ...current,
         medics: current.medics.map(m => (m.id === id ? { ...m, ...patch } : m)),
+      }))
+    },
+    [mutate],
+  )
+
+  /**
+   * Put a medic on a vehicle *from the playhead onwards*.
+   *
+   * Before their first posting there is nothing to preserve, so that edits the
+   * base vehicle; after it, this records a swap and every leg that departs
+   * before it keeps the vehicle it was quoted on.
+   */
+  const setVehicle = useCallback(
+    (medicId: string, vehicle: VehicleType) => {
+      // Floored, not rounded: a swap rounded *up* would sit a few minutes in the
+      // future, and the picker would snap straight back to the old vehicle.
+      const at = Math.floor(cursor / TIME_GRID_MS) * TIME_GRID_MS
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic => {
+          if (medic.id !== medicId) return medic
+          const firstStation = [...medic.stations].sort(
+            (a, b) => new Date(a.arriveAt).getTime() - new Date(b.arriveAt).getTime(),
+          )[0]
+          const firstMs = firstStation ? new Date(firstStation.arriveAt).getTime() : Infinity
+          const changes = medic.vehicleChanges ?? []
+          if (changes.length === 0 && at <= firstMs) {
+            return { ...medic, vehicleType: vehicle }
+          }
+          const atIso = new Date(at).toISOString()
+          // One swap per instant: picking twice at the same time replaces.
+          const rest = changes.filter(c => new Date(c.at).getTime() !== at)
+          const next = [
+            ...rest,
+            { id: `vc-${at.toString(36)}`, at: atIso, vehicleType: vehicle },
+          ].sort((a, b) => a.at.localeCompare(b.at))
+          return { ...medic, vehicleChanges: next }
+        }),
+      }))
+    },
+    [mutate, cursor],
+  )
+
+  const removeVehicleChange = useCallback(
+    (medicId: string, changeId: string) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic => {
+          if (medic.id !== medicId) return medic
+          const next = (medic.vehicleChanges ?? []).filter(c => c.id !== changeId)
+          return { ...medic, vehicleChanges: next.length > 0 ? next : undefined }
+        }),
+      }))
+    },
+    [mutate],
+  )
+
+  const toggleSweeper = useCallback(
+    (medicId: string, disciplineId: string) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic => {
+          if (medic.id !== medicId) return medic
+          const now = medic.sweeperFor ?? []
+          const next = now.includes(disciplineId)
+            ? now.filter(id => id !== disciplineId)
+            : [...now, disciplineId]
+          return { ...medic, sweeperFor: next.length > 0 ? next : undefined }
+        }),
       }))
     },
     [mutate],
@@ -244,9 +332,12 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
           // Which station is this gesture about?
           let targetId: string | null = null
           if (mode === 'drag') {
-            const timeline = timelines[medic.id]
-            const position = medicPositionAt(timeline, stations, cursor)
-            targetId = position?.stationId ?? null
+            const position = medicPositionAt(timelines[medic.id], cursor, sweepsFor(medic))
+            // A sweep endpoint is derived from the discipline, not posted, so a
+            // drag that lands on one is ignored rather than silently discarded
+            // into a new posting somewhere else.
+            targetId = position?.stationId.startsWith('sweep:') ? null : position?.stationId ?? null
+            if (position?.phase === 'sweeping') return medic
           } else {
             const near = stations.find(
               s => Math.abs(new Date(s.arriveAt).getTime() - cursor) < TIME_GRID_MS / 2,
@@ -287,7 +378,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
         }),
       }))
     },
-    [mutate, snapTarget, cursor, timelines],
+    [mutate, snapTarget, cursor, timelines, sweepsFor],
   )
 
   const moveStation = useCallback(
@@ -614,13 +705,22 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                 onPatchStation={patchStation}
                 onRemoveStation={removeStation}
                 onFocusStation={focusStation}
+                onSetVehicle={setVehicle}
+                onRemoveVehicleChange={removeVehicleChange}
+                disciplines={disciplines.map(d => ({
+                  id: d.id,
+                  name: d.name,
+                  color: d.color,
+                  hasCourse: d.hasCourse,
+                }))}
+                onToggleSweeper={toggleSweeper}
               />
             )}
             {tab === 'briefing' && (
               <BriefingPanel
                 medics={medics}
                 eventTitle={planner.event?.title ?? 'Event'}
-                resolveOptions={{ minTravelMinutes }}
+                resolveOptionsFor={resolveOptionsFor}
               />
             )}
           </div>
@@ -648,6 +748,8 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
               showRunners={showRunners}
               showDensity={showDensity}
               coverage={coverage}
+              coverageMeters={coverageMeters}
+              sweepColors={sweepColors}
             />
 
             {/* Placement hint */}

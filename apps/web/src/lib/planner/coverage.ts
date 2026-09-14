@@ -5,16 +5,16 @@
  * shows you where the help is. This is the subtraction of the two — the
  * stretches of course that have people on them and nobody within reach — which
  * is the actual question the whole planner exists to answer.
+ *
+ * The result is reported two ways: as a per-bin series that paints the course
+ * from green to red, and as the contiguous gap ranges that get called out.
  */
 
 import { haversineMeters, pointAtMeters, type CourseModel } from './course'
-import type { FieldState } from './field'
+import { DENSITY_BINS, type FieldState } from './field'
 
 /** Default reach: about what a vehicle covers on mountain roads in ten minutes. */
 export const DEFAULT_COVERAGE_METERS = 3000
-
-/** Coarse enough to stay cheap at 60 fps, fine enough to spot a real hole. */
-const SAMPLE_METERS = 1000
 
 export interface CoverageGap {
   /** Metres along the course. */
@@ -25,16 +25,25 @@ export interface CoverageGap {
 }
 
 export interface CoverageReport {
+  /**
+   * Per course bin (same binning as the field density), metres to the nearest
+   * on-duty medic. `Infinity` when there is no medic at all.
+   */
+  nearest: number[]
+  /** Per bin: is anyone actually on this stretch right now? */
+  occupied: boolean[]
   /** Metres of occupied course with nobody in reach. */
   uncoveredMeters: number
   /** Metres of occupied course in total. */
   occupiedMeters: number
   gaps: CoverageGap[]
-  /** The single worst stretch, or null when everything is covered. */
+  /** The single worst stretch, 0 when everything occupied is covered. */
   worstGapMeters: number
 }
 
 export const EMPTY_COVERAGE: CoverageReport = {
+  nearest: [],
+  occupied: [],
   uncoveredMeters: 0,
   occupiedMeters: 0,
   gaps: [],
@@ -42,9 +51,10 @@ export const EMPTY_COVERAGE: CoverageReport = {
 }
 
 /**
- * Walk the occupied stretch of a course and mark every kilometre that has no
- * medic within `radiusMeters`. Medics are taken at their position *now*,
- * including ones mid-move — a medic driving past a valley does cover it.
+ * Measure the whole course bin by bin. Medics are taken at their position
+ * *now*, including ones mid-move and ones sweeping — a medic driving past a
+ * valley does cover it, and the sweeper covers the back of the field by
+ * definition.
  */
 export function coverageFor(
   course: CourseModel,
@@ -52,34 +62,53 @@ export function coverageFor(
   medicPositions: Array<[number, number]>,
   radiusMeters = DEFAULT_COVERAGE_METERS,
 ): CoverageReport {
-  if (field.onCourse <= 0 || field.tailMeters < 0 || course.totalMeters <= 0) return EMPTY_COVERAGE
+  if (course.totalMeters <= 0) return EMPTY_COVERAGE
 
-  const from = Math.max(0, field.tailMeters)
-  const to = Math.min(course.totalMeters, Math.max(field.leaderMeters, field.tailMeters))
-  const occupiedMeters = Math.max(0, to - from)
-  if (occupiedMeters <= 0) return { ...EMPTY_COVERAGE, occupiedMeters: 0 }
+  const binMeters = course.totalMeters / DENSITY_BINS
+  const nearest = new Array<number>(DENSITY_BINS).fill(Number.POSITIVE_INFINITY)
+  const occupied = new Array<boolean>(DENSITY_BINS).fill(false)
 
+  const hasField = field.onCourse > 0 && field.tailMeters >= 0
+  const fieldFrom = hasField ? Math.max(0, field.tailMeters) : 0
+  const fieldTo = hasField ? Math.max(field.leaderMeters, field.tailMeters) : 0
+
+  let uncoveredMeters = 0
+  let occupiedMeters = 0
   const gaps: CoverageGap[] = []
-  let uncovered = 0
-  let worst = 0
   let open: CoverageGap | null = null
+  let worst = 0
 
-  for (let m = from; m <= to; m += SAMPLE_METERS) {
-    const point = pointAtMeters(course, m)
-    let nearest = Number.POSITIVE_INFINITY
+  for (let i = 0; i < DENSITY_BINS; i += 1) {
+    const atMeters = (i + 0.5) * binMeters
+    const point = pointAtMeters(course, atMeters)
+
+    let best = Number.POSITIVE_INFINITY
     for (const medic of medicPositions) {
       const d = haversineMeters(point, medic)
-      if (d < nearest) nearest = d
-      if (nearest <= radiusMeters) break
+      if (d < best) best = d
+      // Anything this close is comfortably covered; no need to keep looking.
+      if (best <= radiusMeters * 0.4) break
+    }
+    nearest[i] = best
+
+    const isOccupied = hasField && atMeters >= fieldFrom && atMeters <= fieldTo
+    occupied[i] = isOccupied
+    if (!isOccupied) {
+      if (open) {
+        worst = Math.max(worst, open.toMeters - open.fromMeters)
+        open = null
+      }
+      continue
     }
 
-    if (nearest > radiusMeters) {
-      uncovered += Math.min(SAMPLE_METERS, to - m)
+    occupiedMeters += binMeters
+    if (best > radiusMeters) {
+      uncoveredMeters += binMeters
       if (open) {
-        open.toMeters = m
+        open.toMeters = atMeters
         open.coordinates.push(point)
       } else {
-        open = { fromMeters: m, toMeters: m, coordinates: [point] }
+        open = { fromMeters: atMeters, toMeters: atMeters, coordinates: [point] }
         gaps.push(open)
       }
     } else if (open) {
@@ -90,9 +119,10 @@ export function coverageFor(
   if (open) worst = Math.max(worst, open.toMeters - open.fromMeters)
 
   return {
-    uncoveredMeters: Math.round(uncovered),
+    nearest,
+    occupied,
+    uncoveredMeters: Math.round(uncoveredMeters),
     occupiedMeters: Math.round(occupiedMeters),
-    // A one-sample gap has no length yet still marks a hole; report the sample.
     gaps: gaps.filter(g => g.coordinates.length > 1),
     worstGapMeters: Math.round(worst),
   }

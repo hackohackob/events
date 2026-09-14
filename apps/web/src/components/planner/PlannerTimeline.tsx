@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   SkipBack,
+  Waves,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
@@ -532,6 +533,38 @@ export default function PlannerTimeline({
                         const width = Math.max(2, xOf(segEnd) - left)
                         if (segEnd < fromMs || segment.fromMs > toMs) return null
 
+                        if (segment.kind === 'sweep') {
+                          // Not a post and not a drive: the medic is on the
+                          // course, moving with the back of the field. Drawn as
+                          // a solid band in that discipline's colour so the lane
+                          // reads against the discipline lane above it.
+                          const color = segment.color ?? medic.color
+                          return (
+                            <div
+                              key={`${segment.stationId}-sweep-${si}`}
+                              onClick={e => { e.stopPropagation(); onStationClick(medic.id, segment.stationId) }}
+                              className="absolute flex items-center gap-1 px-2 rounded-lg overflow-hidden"
+                              style={{
+                                left,
+                                width,
+                                top: 5,
+                                height: MEDIC_LANE - 10,
+                                background: `linear-gradient(90deg, ${color}44, ${color}22)`,
+                                border: `1px solid ${color}`,
+                                cursor: 'pointer',
+                              }}
+                              title={`Sweeping ${segment.label} — with the last participant, ${formatTime(segment.fromMs)} to ${formatTime(segEnd)}`}
+                            >
+                              <Waves className="w-2.5 h-2.5 flex-shrink-0" style={{ color }} />
+                              {width > 60 && (
+                                <span className="text-[9px] font-bold truncate" style={{ color: '#e2e8f0' }}>
+                                  Sweeping {segment.label}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        }
+
                         if (segment.kind === 'move') {
                           return (
                             <div
@@ -551,7 +584,9 @@ export default function PlannerTimeline({
                               title={
                                 segment.tight
                                   ? `Too tight: ${segment.label} needs ${formatDuration(segment.shortfallMinutes ?? 0)} more`
-                                  : `Travel to ${segment.label} — ${formatDuration((segEnd - segment.fromMs) / 60000)}${segment.travelSource === 'routed' ? ' (routed)' : ''}`
+                                  : `Travel to ${segment.label} on ${
+                                      VEHICLE_TYPE_META[segment.vehicleType ?? medic.vehicleType]?.label ?? 'foot'
+                                    } — ${formatDuration((segEnd - segment.fromMs) / 60000)}${segment.travelSource === 'routed' ? ' (routed)' : ''}`
                               }
                             >
                               {segment.tight && width > 16 && (
@@ -601,6 +636,31 @@ export default function PlannerTimeline({
                                 {isDragging ? formatTime(dragging!.previewMs) : segment.label}
                               </span>
                             )}
+                          </div>
+                        )
+                      })}
+                      {/* Vehicle swaps, pinned to the lane. A swap changes what
+                          every later leg costs, so it belongs on the clock. */}
+                      {(medic.vehicleChanges ?? []).map(change => {
+                        const at = new Date(change.at).getTime()
+                        if (!Number.isFinite(at) || at < fromMs || at > toMs) return null
+                        return (
+                          <div
+                            key={change.id}
+                            className="absolute flex items-center justify-center rounded-full pointer-events-none"
+                            style={{
+                              left: xOf(at) - 8,
+                              top: MEDIC_LANE / 2 - 8,
+                              width: 16,
+                              height: 16,
+                              fontSize: 8,
+                              background: 'rgba(2,8,18,0.95)',
+                              border: `1px solid ${medic.color}`,
+                              zIndex: 4,
+                            }}
+                            title={`Switches to ${VEHICLE_TYPE_META[change.vehicleType]?.label ?? 'foot'} at ${formatTime(at)}`}
+                          >
+                            {VEHICLE_TYPE_META[change.vehicleType]?.icon ?? '🚶'}
                           </div>
                         )
                       })}

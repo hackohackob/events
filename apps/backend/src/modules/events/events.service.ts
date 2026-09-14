@@ -7,6 +7,7 @@ import type {
   PlanDisciplineSchedule,
   PlanMedic,
   PlanStation,
+  PlanVehicleChange,
   TrackGeoJson,
 } from "@events/contracts";
 import { mkdir, readFile, writeFile } from "fs/promises";
@@ -324,7 +325,16 @@ function sanitizeStation(input: unknown): PlanStation | null {
     travelMinutes: Number.isFinite(travel) ? Math.max(0, travel) : undefined,
     travelSource:
       source === "routed" || source === "estimated" || source === "manual" ? source : undefined,
+    travelVehicle: raw.travelVehicle ? normalizeVehicleType(raw.travelVehicle) : undefined,
   };
+}
+
+function sanitizeVehicleChange(input: unknown): PlanVehicleChange | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const at = planInstant(raw.at);
+  if (!at) return null;
+  return { id: planString(raw.id) || randomUUID(), at, vehicleType: normalizeVehicleType(raw.vehicleType) };
 }
 
 function sanitizePlanMedic(input: unknown): PlanMedic | null {
@@ -338,14 +348,27 @@ function sanitizePlanMedic(input: unknown): PlanMedic | null {
         .filter((s): s is PlanStation => s !== null)
         .sort((a, b) => a.arriveAt.localeCompare(b.arriveAt))
     : [];
+  // Sorted on the way in: `planVehicleAt` walks the list in order and stops at
+  // the first change in the future, which only works on a sorted list.
+  const vehicleChanges = Array.isArray(raw.vehicleChanges)
+    ? raw.vehicleChanges
+        .map(sanitizeVehicleChange)
+        .filter((c): c is PlanVehicleChange => c !== null)
+        .sort((a, b) => a.at.localeCompare(b.at))
+    : [];
+  const sweeperFor = Array.isArray(raw.sweeperFor)
+    ? Array.from(new Set(raw.sweeperFor.map((d) => planString(d)).filter(Boolean)))
+    : [];
   return {
     id,
     medicId: planString(raw.medicId) || undefined,
     name: planString(raw.name) || "Unnamed unit",
     vehicleType: normalizeVehicleType(raw.vehicleType),
+    vehicleChanges: vehicleChanges.length > 0 ? vehicleChanges : undefined,
     color: planString(raw.color) || "#38bdf8",
     unit: planString(raw.unit) || undefined,
     stations,
+    sweeperFor: sweeperFor.length > 0 ? sweeperFor : undefined,
     hidden: raw.hidden === true || undefined,
   };
 }

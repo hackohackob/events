@@ -6,12 +6,14 @@ import {
   Clock,
   Eye,
   EyeOff,
+  Lock,
   MapPin,
   Plus,
   Trash2,
   UserPlus,
+  X,
 } from 'lucide-react'
-import { VEHICLE_TYPES, VEHICLE_TYPE_META } from '@events/contracts'
+import { VEHICLE_TYPES, VEHICLE_TYPE_META, planVehicleAt } from '@events/contracts'
 import type { PlanMedic, PlanStation, VehicleType } from '@events/contracts'
 import type { MedicTimeline } from '@/lib/planner/schedule'
 import { formatDuration, formatStamp, formatTime } from '@/lib/planner/itinerary'
@@ -29,12 +31,12 @@ interface Props {
   onRemoveStation: (medicId: string, stationId: string) => void
   /** Focus the map on a station. */
   onFocusStation: (medicId: string, stationId: string) => void
-}
-
-function stationsInOrder(medic: PlanMedic): PlanStation[] {
-  return [...medic.stations].sort(
-    (a, b) => new Date(a.arriveAt).getTime() - new Date(b.arriveAt).getTime(),
-  )
+  /** Put the medic on this vehicle from the playhead onwards. */
+  onSetVehicle: (medicId: string, vehicle: VehicleType) => void
+  onRemoveVehicleChange: (medicId: string, changeId: string) => void
+  /** Disciplines available to sweep. */
+  disciplines: Array<{ id: string; name: string; color: string; hasCourse: boolean }>
+  onToggleSweeper: (medicId: string, disciplineId: string) => void
 }
 
 function toLocalInput(iso: string): string {
@@ -56,6 +58,10 @@ export default function TeamPanel({
   onPatchStation,
   onRemoveStation,
   onFocusStation,
+  onSetVehicle,
+  onRemoveVehicleChange,
+  disciplines,
+  onToggleSweeper,
 }: Props) {
   const [editingStation, setEditingStation] = useState<string | null>(null)
 
@@ -83,7 +89,9 @@ export default function TeamPanel({
       {medics.map(medic => {
         const selected = medic.id === selectedMedicId
         const timeline = timelines[medic.id]
-        const stations = stationsInOrder(medic)
+        // The timeline's own station list, so sweep endpoints appear in the
+        // panel exactly where they appear on the lane.
+        const stations = timeline?.stations ?? medic.stations
         const conflicts = timeline?.conflicts.length ?? 0
         return (
           <div
@@ -116,6 +124,11 @@ export default function TeamPanel({
                     {medic.name}
                   </span>
                   <span className="flex items-center gap-2 text-[10px]" style={{ color: '#64748b' }}>
+                    {(medic.sweeperFor?.length ?? 0) > 0 && (
+                      <span style={{ color: medic.color }}>
+                        sweeps {medic.sweeperFor!.length === 1 ? '1 course' : `${medic.sweeperFor!.length} courses`} ·
+                      </span>
+                    )}
                     <span>{stations.length} {stations.length === 1 ? 'position' : 'positions'}</span>
                     {timeline && timeline.travelMinutes > 0 && (
                       <span>· {formatDuration(timeline.travelMinutes)} travelling</span>
@@ -140,35 +153,111 @@ export default function TeamPanel({
 
             {selected && (
               <div className="px-3 pb-3 space-y-2.5">
-                <div className="flex gap-2">
-                  <input
-                    value={medic.name}
-                    onChange={e => onPatchMedic(medic.id, { name: e.target.value })}
-                    className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs font-semibold outline-none"
-                    style={{
-                      background: 'rgba(255,255,255,0.04)',
-                      border: '1px solid rgba(148,163,184,0.14)',
-                      color: '#e2e8f0',
-                    }}
-                  />
-                  <select
-                    value={medic.vehicleType}
-                    onChange={e => onPatchMedic(medic.id, { vehicleType: e.target.value as VehicleType })}
-                    className="rounded-lg px-2 py-1.5 text-xs font-semibold outline-none"
-                    style={{
-                      background: 'rgba(255,255,255,0.04)',
-                      border: '1px solid rgba(148,163,184,0.14)',
-                      color: '#cbd5e1',
-                    }}
-                    title="Vehicle — sets how long every move takes"
-                  >
-                    {VEHICLE_TYPES.map(v => (
-                      <option key={v} value={v} style={{ background: '#0f172a' }}>
-                        {VEHICLE_TYPE_META[v].icon} {VEHICLE_TYPE_META[v].label}
-                      </option>
+                <input
+                  value={medic.name}
+                  onChange={e => onPatchMedic(medic.id, { name: e.target.value })}
+                  className="w-full rounded-lg px-2 py-1.5 text-xs font-semibold outline-none"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(148,163,184,0.14)',
+                    color: '#e2e8f0',
+                  }}
+                />
+
+                {/* Vehicle is a property of a MOMENT, not of the medic: picking
+                    one here changes what they drive from the playhead onwards
+                    and leaves every earlier leg on whatever it was. */}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={planVehicleAt(medic, cursorMs)}
+                      onChange={e => onSetVehicle(medic.id, e.target.value as VehicleType)}
+                      className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs font-semibold outline-none"
+                      style={{
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(148,163,184,0.14)',
+                        color: '#cbd5e1',
+                      }}
+                      title="Sets the vehicle from the playhead onwards — earlier legs keep the old one"
+                    >
+                      {VEHICLE_TYPES.map(v => (
+                        <option key={v} value={v} style={{ background: '#0f172a' }}>
+                          {VEHICLE_TYPE_META[v].icon} {VEHICLE_TYPE_META[v].label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[9px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: '#475569' }}>
+                      from {formatTime(cursorMs)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                    <span
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold"
+                      style={{ background: 'rgba(255,255,255,0.04)', color: '#94a3b8' }}
+                      title="What they start the event on"
+                    >
+                      {(VEHICLE_TYPE_META[medic.vehicleType] ?? VEHICLE_TYPE_META.foot).icon} from start
+                    </span>
+                    {(medic.vehicleChanges ?? []).map(change => (
+                      <span
+                        key={change.id}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold"
+                        style={{ background: `${medic.color}1f`, color: medic.color }}
+                      >
+                        {(VEHICLE_TYPE_META[change.vehicleType] ?? VEHICLE_TYPE_META.foot).icon}{' '}
+                        {formatStamp(new Date(change.at).getTime())}
+                        <button
+                          onClick={() => onRemoveVehicleChange(medic.id, change.id)}
+                          title="Drop this swap"
+                          style={{ color: 'inherit', opacity: 0.7 }}
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
                     ))}
-                  </select>
+                  </div>
                 </div>
+
+                {/* Sweeping: one tap per course. A sweeper has no postings for
+                    that window — they ride the back of the field — so this is a
+                    toggle, not another thing to place on the map. */}
+                {disciplines.length > 0 && (
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-widest mb-1" style={{ color: '#64748b' }}>
+                      Sweeper for
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {disciplines.map(d => {
+                        const on = medic.sweeperFor?.includes(d.id) ?? false
+                        return (
+                          <button
+                            key={d.id}
+                            disabled={!d.hasCourse}
+                            onClick={() => onToggleSweeper(medic.id, d.id)}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-95 disabled:opacity-30"
+                            style={{
+                              background: on ? `${d.color}22` : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${on ? d.color : 'rgba(148,163,184,0.14)'}`,
+                              color: on ? d.color : '#64748b',
+                            }}
+                            title={
+                              d.hasCourse
+                                ? `Ride the back of ${d.name} from the start until the last participant is off the course`
+                                : 'This discipline has no GPX track to sweep'
+                            }
+                          >
+                            <span
+                              className="w-1.5 h-1.5 rounded-full"
+                              style={{ background: on ? d.color : '#334155' }}
+                            />
+                            {d.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {stations.length === 0 ? (
                   <div
@@ -187,6 +276,43 @@ export default function TeamPanel({
                       const arriveMs = new Date(station.arriveAt).getTime()
                       const move = timeline?.segments.find(s => s.kind === 'move' && s.stationId === station.id)
                       const editing = editingStation === station.id
+                      const sweep = (station as { sweep?: { edge: 'start' | 'end' } }).sweep
+                      if (sweep) {
+                        // A sweep endpoint is owned by the discipline's schedule
+                        // — re-timing it here would just be overwritten.
+                        return (
+                          <div
+                            key={station.id}
+                            className="flex items-center gap-2 px-2.5 py-2 rounded-xl"
+                            style={{ background: `${medic.color}12`, border: `1px dashed ${medic.color}55` }}
+                          >
+                            <span
+                              className="flex items-center justify-center rounded-full text-[9px] font-black flex-shrink-0"
+                              style={{ width: 18, height: 18, background: `${medic.color}22`, color: medic.color }}
+                            >
+                              {i + 1}
+                            </span>
+                            <button
+                              onClick={() => onFocusStation(medic.id, station.id)}
+                              className="flex-1 min-w-0 text-left"
+                            >
+                              <span className="block text-xs font-bold truncate" style={{ color: '#e2e8f0' }}>
+                                {sweep.edge === 'start' ? 'Start sweeping' : 'Sweep complete'} — {station.label.replace(/ (start|finish)$/, '')}
+                              </span>
+                              <span className="flex items-center gap-1.5 text-[10px]" style={{ color: '#64748b' }}>
+                                <Clock className="w-2.5 h-2.5" />
+                                {formatStamp(arriveMs)}
+                                {move && (
+                                  <span style={{ color: move.tight ? '#f87171' : '#475569' }}>
+                                    · {formatDuration((move.toMs - move.fromMs) / 60000)} to get here
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                            <Lock className="w-3 h-3 flex-shrink-0" style={{ color: '#475569' }} />
+                          </div>
+                        )
+                      }
                       return (
                         <div
                           key={station.id}
