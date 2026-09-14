@@ -179,12 +179,18 @@ export class GraphHopperClient {
   async isochrone(
     profile: RouteProfile,
     point: LngLat,
-    seconds: number,
+    limit: { seconds: number } | { meters: number },
     buckets: number,
   ): Promise<LngLat[][]> {
     const params = new URLSearchParams({
       point: `${point[1]},${point[0]}`,
-      time_limit: String(Math.max(60, Math.round(seconds))),
+      ...("seconds" in limit
+        ? { time_limit: String(Math.max(60, Math.round(limit.seconds))) }
+        : // A DISTANCE budget expresses a vehicle's speed floor: the elevation
+          // aware bike profiles crawl up a climb, which is honest for legs and
+          // wrong for a motor, and routing already corrects for it with a floor
+          // that the time-limited isochrone knew nothing about.
+          { distance_limit: String(Math.max(200, Math.round(limit.meters))) }),
       profile: graphhopperProfile(profile),
       // Eight, not five: the planner asks for twice its reach budget in six
       // slices so it can grade how far PAST the budget somewhere is.

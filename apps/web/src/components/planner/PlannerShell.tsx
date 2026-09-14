@@ -43,6 +43,7 @@ import {
 } from '@/lib/planner/coverage'
 
 import { checkSweep, type SweepWarning } from '@/lib/planner/sweep-check'
+import { bucketCount } from '@/lib/planner/isochrone'
 import { nearestOnCourse } from '@/lib/planner/course'
 import { vehicleSpeedKmh } from '@/lib/planner/travel'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
@@ -242,7 +243,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
             alongCourse,
             measures: anchors.map(anchor => ({
               buckets: reachBuckets(d.id, d.course, anchor.key, anchor.shape),
-              bucketCount: anchor.shape.rings.length,
+              bucketCount: bucketCount(anchor.shape),
             })),
           },
         ]

@@ -169,7 +169,12 @@ export const VEHICLE_PROFILES: Record<VehicleType, VehicleProfileOption[]> = {
   ],
 
   atv: [
-    { profile: "rescue_4x4", durationFactor: 1, label: "track" },
+    // A quad is not a 4×4 on tarmac. At factor 1 it inherited the car profile's
+    // open-road speed and came out with exactly a car's reach — which is how an
+    // ATV ended up looking like the wrong kind of vehicle on a road network and
+    // nothing like the trail vehicle it is. Most rescue quads are limited
+    // somewhere near 50-60 km/h and are slower still with a casualty aboard.
+    { profile: "rescue_4x4", durationFactor: 1.4, label: "track" },
     // A quad also takes wide paths and bridleways the 4×4 model refuses.
     { profile: "mtb", durationFactor: 0.7, minSpeedMs: 4.5, restrict: ATV_WAYS, label: "path" },
   ],
@@ -209,6 +214,14 @@ export function effectiveDurationFactor(
   if (!floor || !(timeMs > 0) || !(distanceMeters > 0)) return factor;
   const fastestMs = (distanceMeters / floor) * 1000;
   return Math.min(factor, fastestMs / timeMs);
+}
+
+/**
+ * Every network this vehicle can genuinely use, best-first. Routing measures
+ * them all and takes the fastest; reach unions them.
+ */
+export function profileOptions(vehicle: VehicleType): VehicleProfileOption[] {
+  return VEHICLE_PROFILES[vehicle] ?? VEHICLE_PROFILES.foot;
 }
 
 /** The profile a vehicle should default to for turn-by-turn navigation. */

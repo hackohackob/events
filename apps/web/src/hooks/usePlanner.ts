@@ -711,7 +711,7 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
           )
           if (cancelled) return
           if (result) {
-            const shape = buildReachShape(result.polygons)
+            const shape = buildReachShape(result.buckets)
             // An answer that does not cover the point it was asked about is an
             // answer about somewhere else. Better no shape than a wrong one.
             if (shapeContains(shape, job.point)) {

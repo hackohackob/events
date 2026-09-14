@@ -62,9 +62,13 @@ export async function routeLeg(
 }
 
 export interface IsochroneResult {
-  profile: string;
-  /** Nested rings, innermost (quickest) first; `[lng, lat]`. */
-  polygons: Array<Array<[number, number]>>;
+  /** Which networks answered — a vehicle may be able to use more than one. */
+  profiles: string[];
+  /**
+   * Innermost bucket first. Each bucket holds one ring per network the vehicle
+   * can use, so a point is reachable in that bucket if ANY of them contains it.
+   */
+  buckets: Array<Array<Array<[number, number]>>>;
 }
 
 /**
@@ -91,7 +95,7 @@ export async function fetchIsochrone(
       { lat: point.lat, lng: point.lng, vehicleType, minutes: minutes * 2, buckets: 6 },
       { headers: { "x-event-id": eventId } },
     );
-    return data?.polygons?.length ? data : null;
+    return data?.buckets?.length ? data : null;
   } catch {
     return null;
   }

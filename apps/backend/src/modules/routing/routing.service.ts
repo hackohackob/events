@@ -6,6 +6,7 @@ import {
   effectiveDurationFactor,
   optionForProfile,
   primaryProfile,
+  profileOptions,
   type VehicleProfileOption,
 } from "./vehicle-profiles";
 import { GraphHopperClient, type GraphHopperPath } from "./graphhopper.client";
@@ -75,25 +76,61 @@ export class RoutingService {
 
   /**
    * Everywhere a vehicle can reach from a point within `minutes`, as nested
-   * polygons (innermost first).
+   * rings — innermost bucket first, and possibly SEVERAL rings per bucket.
+   *
+   * Several because a vehicle is not one network. An ATV, a motorbike, a 4×4
+   * and an offroad ambulance each genuinely choose between the road/track
+   * network and the trail network depending on where they are standing, and
+   * routing has always measured both and taken the faster. Reach did not: it
+   * took only the vehicle's first profile and ignored the rest, so an ATV was
+   * quoted a 4×4's reach and silently denied every path it can actually ride.
+   * Stand one on a trail and its reach collapses to whatever road the engine
+   * snapped to — which is how an ATV ends up looking worse than an e-bike.
    *
    * The engine's own travel time is quoted for its profile, not for this
-   * vehicle, so the budget is divided by the vehicle's duration factor before
-   * it is sent: a motorbike covering rescue-4×4 ground in 0.8 of the time gets
-   * to spend 0.8-proportionally more of the profile's minutes.
+   * vehicle, so each option's budget is divided by that option's duration
+   * factor: a motorbike covering rescue-4×4 ground in 0.8 of the time gets to
+   * spend proportionally more of the profile's minutes.
    */
   async isochrone(
     vehicleType: VehicleType,
     point: LngLat,
     minutes: number,
     buckets = 3,
-  ): Promise<{ profile: RouteProfile; polygons: LngLat[][] }> {
-    const profile = primaryProfile(vehicleType);
-    const option = optionForProfile(vehicleType, profile);
-    const factor = option?.durationFactor ?? 1;
-    const seconds = (minutes * 60) / (factor > 0 ? factor : 1);
-    const polygons = await this.graphhopper.isochrone(profile, point, seconds, buckets);
-    return { profile, polygons };
+  ): Promise<{ profiles: RouteProfile[]; buckets: LngLat[][][] }> {
+    const options = profileOptions(vehicleType);
+    const perOption = await Promise.all(
+      options.flatMap((option) => {
+        const factor = option.durationFactor > 0 ? option.durationFactor : 1;
+        const seconds = (minutes * 60) / factor;
+        const probes = [
+          this.graphhopper
+            .isochrone(option.profile, point, { seconds }, buckets)
+            .then((rings) => ({ profile: option.profile, rings })),
+        ];
+        // A vehicle with a speed floor is never as slow as the profile says on
+        // a climb. Asking the same question as a DISTANCE budget is exactly
+        // that floor, and unioning the two gives the vehicle both its
+        // gradient-aware answer and its "a motor does not slow down" one.
+        if (option.minSpeedMs) {
+          probes.push(
+            this.graphhopper
+              .isochrone(option.profile, point, { meters: option.minSpeedMs * seconds }, buckets)
+              .then((rings) => ({ profile: option.profile, rings })),
+          );
+        }
+        return probes;
+      }),
+    );
+
+    // Group by bucket: bucket k holds one ring per profile that reached it.
+    const grouped: LngLat[][][] = [];
+    for (let k = 0; k < buckets; k += 1) {
+      const ring = perOption.map((o) => o.rings[k]).filter((r): r is LngLat[] => r != null && r.length >= 4);
+      if (ring.length > 0) grouped.push(ring);
+    }
+    const profiles = [...new Set(perOption.filter((o) => o.rings.length > 0).map((o) => o.profile))];
+    return { profiles, buckets: grouped };
   }
 
   isValidProfile(profile: string): profile is RouteProfile {

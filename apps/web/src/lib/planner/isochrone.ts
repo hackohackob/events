@@ -13,30 +13,40 @@ import { DENSITY_BINS } from './field'
 
 export type Ring = [number, number][]
 
+type Bounds = [number, number, number, number]
+
 export interface ReachShape {
-  /** Innermost bucket first; the last ring is the full time budget. */
-  rings: Ring[]
+  /**
+   * Innermost bucket first. A bucket holds one ring per network the vehicle can
+   * use — an ATV rides both the track network and the trails — so a point is
+   * reachable in that bucket if ANY of its rings contains it.
+   */
+  buckets: Ring[][]
   /** `[minLng, minLat, maxLng, maxLat]` per ring — the cheap rejection test. */
-  bounds: Array<[number, number, number, number]>
+  bounds: Bounds[][]
 }
 
-export function buildReachShape(rings: Ring[]): ReachShape {
-  return {
-    rings,
-    bounds: rings.map(ring => {
-      let minLng = Infinity
-      let minLat = Infinity
-      let maxLng = -Infinity
-      let maxLat = -Infinity
-      for (const [lng, lat] of ring) {
-        if (lng < minLng) minLng = lng
-        if (lat < minLat) minLat = lat
-        if (lng > maxLng) maxLng = lng
-        if (lat > maxLat) maxLat = lat
-      }
-      return [minLng, minLat, maxLng, maxLat] as [number, number, number, number]
-    }),
+function ringBounds(ring: Ring): Bounds {
+  let minLng = Infinity
+  let minLat = Infinity
+  let maxLng = -Infinity
+  let maxLat = -Infinity
+  for (const [lng, lat] of ring) {
+    if (lng < minLng) minLng = lng
+    if (lat < minLat) minLat = lat
+    if (lng > maxLng) maxLng = lng
+    if (lat > maxLat) maxLat = lat
   }
+  return [minLng, minLat, maxLng, maxLat]
+}
+
+export function buildReachShape(buckets: Ring[][]): ReachShape {
+  return { buckets, bounds: buckets.map(rings => rings.map(ringBounds)) }
+}
+
+/** How many buckets this shape was cut into. */
+export function bucketCount(shape: ReachShape): number {
+  return shape.buckets.length
 }
 
 /** Even-odd ray cast. The ring is assumed closed (GeoJSON always is). */
@@ -88,14 +98,17 @@ function toleranceOffsets(lat: number): Array<[number, number]> {
  */
 export function bucketsForCourse(course: CourseModel, shape: ReachShape): Uint8Array {
   const out = new Uint8Array(DENSITY_BINS)
-  if (course.totalMeters <= 0 || shape.rings.length === 0) return out
+  if (course.totalMeters <= 0 || shape.buckets.length === 0) return out
   const binMeters = course.totalMeters / DENSITY_BINS
 
   const bucketAt = (point: [number, number]): number => {
-    for (let r = 0; r < shape.rings.length; r += 1) {
-      const [minLng, minLat, maxLng, maxLat] = shape.bounds[r]
-      if (point[0] < minLng || point[0] > maxLng || point[1] < minLat || point[1] > maxLat) continue
-      if (pointInRing(point, shape.rings[r])) return r + 1
+    for (let k = 0; k < shape.buckets.length; k += 1) {
+      const rings = shape.buckets[k]
+      for (let r = 0; r < rings.length; r += 1) {
+        const [minLng, minLat, maxLng, maxLat] = shape.bounds[k][r]
+        if (point[0] < minLng || point[0] > maxLng || point[1] < minLat || point[1] > maxLat) continue
+        if (pointInRing(point, rings[r])) return k + 1
+      }
     }
     return 0
   }
@@ -126,13 +139,14 @@ export function bucketsForCourse(course: CourseModel, shape: ReachShape): Uint8A
  * place asked about, and a shape that fails this test is thrown away.
  */
 export function shapeContains(shape: ReachShape, point: [number, number]): boolean {
-  const outer = shape.rings.length - 1
+  const outer = shape.buckets.length - 1
   if (outer < 0) return false
-  const test = (p: [number, number]) => {
-    const [minLng, minLat, maxLng, maxLat] = shape.bounds[outer]
-    if (p[0] < minLng || p[0] > maxLng || p[1] < minLat || p[1] > maxLat) return false
-    return pointInRing(p, shape.rings[outer])
-  }
+  const test = (p: [number, number]) =>
+    shape.buckets[outer].some((ring, r) => {
+      const [minLng, minLat, maxLng, maxLat] = shape.bounds[outer][r]
+      if (p[0] < minLng || p[0] > maxLng || p[1] < minLat || p[1] > maxLat) return false
+      return pointInRing(p, ring)
+    })
   if (test(point)) return true
   return toleranceOffsets(point[1]).some(([dx, dy]) => test([point[0] + dx, point[1] + dy]))
 }
