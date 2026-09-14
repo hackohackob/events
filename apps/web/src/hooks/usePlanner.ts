@@ -520,6 +520,14 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
 
     // Serial on purpose: a planner dragging a puck around would otherwise fire
     // a dozen routing calls a second at the shared GraphHopper instance.
+    //
+    // `cancelled` stops the loop ISSUING further requests; it never discards an
+    // answer already paid for. This effect re-runs on every plan change — and
+    // it writes to the plan itself — so it cancels itself constantly. Dropping
+    // the in-flight answer there marked the leg attempted and cached nothing,
+    // and since an attempted leg is never asked again, its geometry was gone
+    // for the session: the route reverted to a straight line on reload and only
+    // came back when an edit made it a new leg to measure.
     void (async () => {
       for (const job of jobs) {
         if (cancelled) return
@@ -527,7 +535,6 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
         const routed = await routeLeg(eventId, job.from, job.to, job.vehicle, job.to.via ?? [])
         inFlight.current.delete(job.key)
         attempted.current.add(job.key)
-        if (cancelled) return
         if (!routed) {
           // No router (or no route): fall back to the crow-flies estimate and a
           // straight line, both already good enough to plan against.
@@ -712,7 +719,9 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
             job.vehicle,
             reachMinutes,
           )
-          if (cancelled) return
+          // Cached whatever happens next: an anchor is marked attempted above
+          // and never asked again, so throwing the answer away on a cancel
+          // leaves that spot permanently unmeasured.
           if (result) {
             const shape = buildReachShape(result.buckets)
             // An answer that does not cover the point it was asked about is an
@@ -831,7 +840,6 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
             { lat: chord.to[1], lng: chord.to[0] },
             job.vehicle,
           )
-          if (cancelled) return
           // A zero-length answer means both ends snapped to the same node —
           // the vehicle has no way onto this stretch, not a perfect score.
           if (!routed || routed.meters <= 50) unroutable += 1
