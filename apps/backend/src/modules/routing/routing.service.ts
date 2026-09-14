@@ -2,7 +2,12 @@ import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import type { VehicleType } from "@events/contracts";
 import { EventsService } from "../events/events.service";
 import { buildCorridorModel, type CorridorModel } from "./race-corridor";
-import { effectiveDurationFactor, optionForProfile, type VehicleProfileOption } from "./vehicle-profiles";
+import {
+  effectiveDurationFactor,
+  optionForProfile,
+  primaryProfile,
+  type VehicleProfileOption,
+} from "./vehicle-profiles";
 import { GraphHopperClient, type GraphHopperPath } from "./graphhopper.client";
 import { buildSegments, classifyPoints } from "./surface-classification";
 import type {
@@ -67,6 +72,29 @@ export class RoutingService {
     private readonly eventsService: EventsService,
     private readonly graphhopper: GraphHopperClient,
   ) {}
+
+  /**
+   * Everywhere a vehicle can reach from a point within `minutes`, as nested
+   * polygons (innermost first).
+   *
+   * The engine's own travel time is quoted for its profile, not for this
+   * vehicle, so the budget is divided by the vehicle's duration factor before
+   * it is sent: a motorbike covering rescue-4×4 ground in 0.8 of the time gets
+   * to spend 0.8-proportionally more of the profile's minutes.
+   */
+  async isochrone(
+    vehicleType: VehicleType,
+    point: LngLat,
+    minutes: number,
+    buckets = 3,
+  ): Promise<{ profile: RouteProfile; polygons: LngLat[][] }> {
+    const profile = primaryProfile(vehicleType);
+    const option = optionForProfile(vehicleType, profile);
+    const factor = option?.durationFactor ?? 1;
+    const seconds = (minutes * 60) / (factor > 0 ? factor : 1);
+    const polygons = await this.graphhopper.isochrone(profile, point, seconds, buckets);
+    return { profile, polygons };
+  }
 
   isValidProfile(profile: string): profile is RouteProfile {
     return (PROFILES as string[]).includes(profile);

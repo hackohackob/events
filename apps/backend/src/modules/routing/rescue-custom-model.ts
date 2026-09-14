@@ -26,12 +26,18 @@ export const RESCUE_4X4_CUSTOM_MODEL = {
     { if: "track_type == GRADE1 || track_type == GRADE2 || track_type == GRADE3", multiply_by: "1.0" },
     { if: "track_type == GRADE4", multiply_by: "0.5" },
     { if: "track_type == GRADE5", multiply_by: "0.25" },
-    // Penalize unknown access on minor ways.
-    { if: "road_access == OTHER && road_class == TRACK", multiply_by: "0.7" },
+    // Penalize restricted access on minor ways. GraphHopper's `road_access`
+    // enum has no catch-all value — naming one that does not exist makes the
+    // whole model fail to compile, and every rescue route 502s with it — so the
+    // restricted values are listed out.
+    {
+      if: "(road_access == CUSTOMERS || road_access == DELIVERY || road_access == AGRICULTURAL || road_access == FORESTRY || road_access == MILITARY) && road_class == TRACK",
+      multiply_by: "0.7",
+    },
   ],
   speed: [
     { if: "road_class == TRACK", limit_to: "30" },
     { if: "surface == GRAVEL || surface == COMPACTED || surface == FINE_GRAVEL", limit_to: "35" },
-    { if: "surface == DIRT || surface == GROUND || surface == GRASS || surface == SAND || surface == MUD", limit_to: "20" },
+    { if: "surface == DIRT || surface == GROUND || surface == GRASS || surface == SAND", limit_to: "20" },
   ],
 } as const;

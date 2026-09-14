@@ -46,7 +46,8 @@ interface Props {
   showDensity: boolean
   /** Reach analysis per discipline; drives the course colouring in gaps mode. */
   coverage: Record<string, CoverageReport>
-  coverageMeters: number
+  /** Only for the legend wording; the ratios already carry the maths. */
+  reachMinutes: number
   /** Sweep windows, so a sweeping medic's puck reads differently. */
   sweepColors: Record<string, string>
 }
@@ -85,9 +86,9 @@ function mix(a: [number, number, number], b: [number, number, number], t: number
  * white where it bunches up. Empty course keeps a dim trace of the hue, so the
  * route is always legible even where nobody is running yet.
  */
-function densityColor(hex: string, density: number): string {
+function densityColor(hex: string, density: number, forGlow = false): string {
   const base = hexToRgb(hex)
-  if (density <= 0.002) return rgba(base, 0.34)
+  if (density <= 0.002) return forGlow ? TRANSPARENT : rgba(base, 0.34)
   const heat = Math.min(1, density * 1.45)
   const hot: [number, number, number] = [255, 246, 214]
   return rgba(mix(base, hot, Math.pow(heat, 1.6)), 0.6 + 0.4 * Math.min(1, density * 2.2))
@@ -111,9 +112,16 @@ const REACH_RAMP: Array<[number, [number, number, number]]> = [
 /** Slate for course nobody is on — present, but plainly out of play. */
 const IDLE_COURSE: [number, number, number] = [148, 163, 184]
 
-function reachColor(nearestMeters: number, radiusMeters: number, occupied: boolean): string {
-  if (!occupied) return rgba(IDLE_COURSE, 0.42)
-  const ratio = radiusMeters > 0 ? nearestMeters / radiusMeters : Number.POSITIVE_INFINITY
+const TRANSPARENT = 'rgba(0,0,0,0)'
+
+/**
+ * `forGlow` drops the idle slate entirely. The glow is twenty pixels wide and
+ * heavily blurred, so a grey stretch of one course spreads right across a
+ * neighbouring course's gradient and greys it out — which is exactly what makes
+ * two routes sharing a valley unreadable. Only stretches that carry people glow.
+ */
+function reachColor(ratio: number, occupied: boolean, forGlow = false): string {
+  if (!occupied) return forGlow ? TRANSPARENT : rgba(IDLE_COURSE, 0.42)
   if (!Number.isFinite(ratio)) return rgba(REACH_RAMP[REACH_RAMP.length - 1][1], 0.98)
   for (let i = 1; i < REACH_RAMP.length; i += 1) {
     const [stop, color] = REACH_RAMP[i]
@@ -156,7 +164,6 @@ export default function PlannerMap({
   showRunners,
   showDensity,
   coverage,
-  coverageMeters,
   sweepColors,
 }: Props) {
   const mapRef = useRef<MapRef>(null)
@@ -195,7 +202,7 @@ export default function PlannerMap({
       visible.map(d => {
         const density = fields[d.id]?.density ?? []
         const report = coverage[d.id]
-        const reachMode = report != null && report.nearest.length > 0
+      const reachMode = report != null && report.ratio.length > 0
         return {
           id: d.id,
           color: d.color,
@@ -207,13 +214,18 @@ export default function PlannerMap({
           },
           gradient: reachMode
             ? gradientExpression(bin =>
-                reachColor(report.nearest[bin] ?? Number.POSITIVE_INFINITY, coverageMeters, report.occupied[bin] ?? false),
+                reachColor(report.ratio[bin] ?? Number.POSITIVE_INFINITY, report.occupied[bin] ?? false),
               )
             : gradientExpression(bin => densityColor(d.color, density[bin] ?? 0)),
+          glowGradient: reachMode
+            ? gradientExpression(bin =>
+                reachColor(report.ratio[bin] ?? Number.POSITIVE_INFINITY, report.occupied[bin] ?? false, true),
+              )
+            : gradientExpression(bin => densityColor(d.color, density[bin] ?? 0, true)),
           hasSeries: reachMode || density.length > 0,
         }
       }),
-    [visible, fields, coverage, coverageMeters],
+    [visible, fields, coverage],
   )
 
   const runnerDots = useMemo(() => {
@@ -328,10 +340,10 @@ export default function PlannerMap({
             type="line"
             layout={{ 'line-cap': 'round', 'line-join': 'round' }}
             paint={{
-              'line-gradient': track.gradient as never,
-              'line-width': 20,
-              'line-blur': 14,
-              'line-opacity': 0.6,
+              'line-gradient': track.glowGradient as never,
+              'line-width': 16,
+              'line-blur': 12,
+              'line-opacity': 0.55,
             }}
           />
         ) : null,

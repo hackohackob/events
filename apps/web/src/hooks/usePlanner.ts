@@ -9,10 +9,16 @@ import type {
   PlanStation,
   VehicleType,
 } from '@events/contracts'
-import { EMPTY_EVENT_PLAN, normalizeVehicleType, planMedicColor, planSweeps } from '@events/contracts'
+import {
+  EMPTY_EVENT_PLAN,
+  normalizeVehicleType,
+  planMedicColor,
+  planSweeps,
+  planVehicleAt,
+} from '@events/contracts'
 import { fetchEventById, type ApiEventSummary } from '@/api/events'
 import { getMedicRoster } from '@/api/medics'
-import { fetchPlan, routeLeg, savePlan } from '@/api/plan'
+import { fetchIsochrone, fetchPlan, routeLeg, savePlan } from '@/api/plan'
 import { fetchGpxTrack } from '@/lib/gpx'
 import {
   buildCourse,
@@ -32,6 +38,8 @@ import {
   type SweepWindow,
 } from '@/lib/planner/schedule'
 import { estimateTravelMinutes } from '@/lib/planner/travel'
+import { buildReachShape, reachKey, type ReachShape } from '@/lib/planner/isochrone'
+import { sampleChords, type SweepFit } from '@/lib/planner/sweep-check'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -117,7 +125,8 @@ function legKey(from: { lat: number; lng: number }, to: { lat: number; lng: numb
 
 // ─── The hook ────────────────────────────────────────────────────────────────
 
-export function usePlanner(eventId: string) {
+export function usePlanner(eventId: string, options: { reachMinutes: number }) {
+  const { reachMinutes } = options
   const eventQuery = useQuery({
     queryKey: ['events', eventId],
     queryFn: () => fetchEventById(eventId),
@@ -538,6 +547,131 @@ export function usePlanner(eventId: string) {
     [pathTick],
   )
 
+  // ── Reach (routed isochrones) ───────────────────────────────────────────
+  //
+  // Only postings are measured on the network: they are where a medic actually
+  // stands, they are few, and they do not move while the clock runs. A medic in
+  // transit or riding a sweep falls back to a radius — there is no sensible way
+  // to ask the router about a position that changes every frame.
+  const reachCache = useRef<Map<string, ReachShape>>(new Map())
+  const reachAttempted = useRef<Set<string>>(new Set())
+  const [reachTick, setReachTick] = useState(0)
+
+  useEffect(() => {
+    if (!plan || !eventId || !Number.isFinite(reachMinutes)) return
+    let cancelled = false
+
+    const jobs: Array<{ point: [number, number]; vehicle: VehicleType; key: string }> = []
+    for (const medic of plan.medics) {
+      if (medic.hidden) continue
+      for (const station of medic.stations) {
+        const vehicle = planVehicleAt(medic, new Date(station.arriveAt).getTime())
+        const point: [number, number] = [station.lng, station.lat]
+        const key = reachKey(point, vehicle, reachMinutes)
+        if (reachAttempted.current.has(key)) continue
+        if (jobs.some(j => j.key === key)) continue
+        jobs.push({ point, vehicle, key })
+      }
+    }
+    if (jobs.length === 0) return
+
+    void (async () => {
+      for (const job of jobs) {
+        if (cancelled) return
+        reachAttempted.current.add(job.key)
+        const result = await fetchIsochrone(
+          eventId,
+          { lat: job.point[1], lng: job.point[0] },
+          job.vehicle,
+          reachMinutes,
+        )
+        if (cancelled) return
+        if (result) reachCache.current.set(job.key, buildReachShape(result.polygons))
+        setReachTick(t => t + 1)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [plan, eventId, reachMinutes])
+
+  const reachShapeFor = useCallback(
+    (point: [number, number], vehicle: VehicleType): ReachShape | undefined =>
+      reachCache.current.get(reachKey(point, vehicle, reachMinutes)),
+    [reachMinutes, reachTick],
+  )
+
+  // ── Can the sweeper's vehicle follow the course? ────────────────────────
+  //
+  // Measured, not guessed: a handful of two-kilometre stretches of the course
+  // are routed on the vehicle's own network and compared against the course
+  // distance. A vehicle that has to drive eight kilometres of road to cover two
+  // kilometres of trail is not sweeping anything.
+  const fitCache = useRef<Map<string, SweepFit>>(new Map())
+  const fitAttempted = useRef<Set<string>>(new Set())
+  const [fitTick, setFitTick] = useState(0)
+
+  useEffect(() => {
+    if (!plan || !eventId) return
+    let cancelled = false
+
+    const jobs: Array<{ key: string; course: CourseModel; vehicle: VehicleType }> = []
+    for (const medic of plan.medics) {
+      for (const sweep of planSweeps(medic)) {
+        const discipline = disciplines.find(d => d.id === sweep.disciplineId)
+        if (!discipline?.hasCourse) continue
+        const startMs = new Date(discipline.schedule.startAt).getTime()
+        const vehicle = planVehicleAt(medic, startMs)
+        const key = `${sweep.disciplineId}:${vehicle}`
+        if (fitAttempted.current.has(key) || jobs.some(j => j.key === key)) continue
+        jobs.push({ key, course: discipline.course, vehicle })
+      }
+    }
+    if (jobs.length === 0) return
+
+    void (async () => {
+      for (const job of jobs) {
+        if (cancelled) return
+        fitAttempted.current.add(job.key)
+        const chords = sampleChords(job.course)
+        if (chords.length === 0) continue
+        const ratios: number[] = []
+        let unroutable = 0
+        for (const chord of chords) {
+          const routed = await routeLeg(
+            eventId,
+            { lat: chord.from[1], lng: chord.from[0] },
+            { lat: chord.to[1], lng: chord.to[0] },
+            job.vehicle,
+          )
+          if (cancelled) return
+          // A zero-length answer means both ends snapped to the same node —
+          // the vehicle has no way onto this stretch, not a perfect score.
+          if (!routed || routed.meters <= 50) unroutable += 1
+          else ratios.push(routed.meters / chord.courseMeters)
+        }
+        const sorted = [...ratios].sort((a, b) => a - b)
+        fitCache.current.set(job.key, {
+          detourRatio: sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : Number.POSITIVE_INFINITY,
+          unroutable,
+          sampled: chords.length,
+        })
+        setFitTick(t => t + 1)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [plan, eventId, disciplines])
+
+  const sweepFitFor = useCallback(
+    (disciplineId: string, vehicle: VehicleType): SweepFit | undefined =>
+      fitCache.current.get(`${disciplineId}:${vehicle}`),
+    [fitTick],
+  )
+
   // ── Timeline bounds ─────────────────────────────────────────────────────
   const bounds = useMemo(() => {
     const stamps: number[] = []
@@ -554,6 +688,8 @@ export function usePlanner(eventId: string) {
         const at = new Date(station.arriveAt).getTime()
         if (Number.isFinite(at)) stamps.push(at)
       }
+      const standDown = medic.standDownAt ? new Date(medic.standDownAt).getTime() : NaN
+      if (Number.isFinite(standDown)) stamps.push(standDown)
     }
     if (stamps.length === 0) {
       const dates = event?.dates ?? []
@@ -587,6 +723,8 @@ export function usePlanner(eventId: string) {
     minTravelMinutes,
     pathLookup,
     durationLookup,
+    reachShapeFor,
+    sweepFitFor,
     sweepWindows,
     sweepsFor,
     bounds,

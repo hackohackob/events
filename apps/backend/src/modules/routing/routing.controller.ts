@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Post, UseGuards } from "@nestjs/
 import { AuthGuard } from "../common/guards/auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
+import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPES, type VehicleType } from "@events/contracts";
 import { RouteRequestDto } from "./dto/route-request.dto";
 import { ClosestMedicsService } from "./closest-medics.service";
 import { ExitPointsService } from "./exit-points.service";
@@ -32,7 +33,29 @@ export class RoutingController {
     });
   }
 
-  /** Nearest paved-road access points around a location (e.g. an incident).
+  /**
+   * Reach: everywhere this vehicle can get to from a point inside a time
+   * budget, as nested polygons. Used by the deployment planner to decide which
+   * stretches of course a posted medic actually covers — a ridge between them
+   * and the course counts against them here, which a radius cannot express.
+   */
+  @Post("isochrone")
+  async isochrone(
+    @Body() body: { lat: number; lng: number; minutes?: number; vehicleType?: VehicleType; buckets?: number },
+  ) {
+    const point = validatePoint([Number(body.lng), Number(body.lat)], 0);
+    const minutes = Number(body.minutes);
+    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 240) {
+      throw new BadRequestException("minutes must be between 1 and 240");
+    }
+    const vehicleType = (VEHICLE_TYPES as string[]).includes(String(body.vehicleType))
+      ? (body.vehicleType as VehicleType)
+      : DEFAULT_VEHICLE_TYPE;
+    const buckets = Number.isFinite(Number(body.buckets)) ? Number(body.buckets) : 3;
+    return this.routingService.isochrone(vehicleType, point, minutes, buckets);
+  }
+
+  /** Nearest paved-road access points around a location (e.g. an incident).  /** Nearest paved-road access points around a location (e.g. an incident).
    *  `from` (the caller's position) adds a by-car leg per point. */
   @Post("closest-asphalt")
   async closestAsphalt(

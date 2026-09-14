@@ -60,3 +60,32 @@ export async function routeLeg(
     return null;
   }
 }
+
+export interface IsochroneResult {
+  profile: string;
+  /** Nested rings, innermost (quickest) first; `[lng, lat]`. */
+  polygons: Array<Array<[number, number]>>;
+}
+
+/**
+ * Everywhere a vehicle can reach from a point inside `minutes`. Null on any
+ * failure — the planner falls back to a plain radius rather than showing
+ * nothing, so a plan stays workable with the routing engine down.
+ */
+export async function fetchIsochrone(
+  eventId: string,
+  point: { lat: number; lng: number },
+  vehicleType: VehicleType,
+  minutes: number,
+): Promise<IsochroneResult | null> {
+  try {
+    const { data } = await client.post<IsochroneResult>(
+      "/routing/isochrone",
+      { lat: point.lat, lng: point.lng, vehicleType, minutes, buckets: 3 },
+      { headers: { "x-event-id": eventId } },
+    );
+    return data?.polygons?.length ? data : null;
+  } catch {
+    return null;
+  }
+}

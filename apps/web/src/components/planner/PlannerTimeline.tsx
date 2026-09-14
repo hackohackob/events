@@ -22,6 +22,7 @@ import { fieldLoadCurve } from '@/lib/planner/load'
 const HOUR = 3600_000
 const GUTTER = 172
 const RULER_HEIGHT = 38
+const TRANSPORT_HEIGHT = 52
 const DISCIPLINE_LANE = 34
 const MEDIC_LANE = 36
 
@@ -56,6 +57,8 @@ interface Props {
   onStationClick: (medicId: string, stationId: string) => void
   collapsed: boolean
   onToggleCollapsed: () => void
+  /** Sets the medic's stand-down — when the last block stops being open-ended. */
+  onSetStandDown: (medicId: string, atMs: number | null) => void
 }
 
 /** Tick spacing that keeps labels readable at the current zoom. */
@@ -103,9 +106,33 @@ export default function PlannerTimeline({
   onStationClick,
   collapsed,
   onToggleCollapsed,
+  onSetStandDown,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [pxPerHour, setPxPerHour] = useState(60)
+
+  // ── Dock height ───────────────────────────────────────────────────────────
+  // A dozen medics do not fit in a fixed-height dock, and a coordinator working
+  // the map wants it small again afterwards — so the split is theirs to set.
+  const [dockHeight, setDockHeight] = useState(300)
+  const startResize = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault()
+      const startY = e.clientY
+      const startHeight = dockHeight
+      const max = Math.max(220, window.innerHeight - 220)
+      const move = (ev: PointerEvent) => {
+        setDockHeight(Math.min(max, Math.max(TRANSPORT_HEIGHT + 40, startHeight - (ev.clientY - startY))))
+      }
+      const up = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    },
+    [dockHeight],
+  )
   const spanMs = Math.max(HOUR, toMs - fromMs)
 
   // ── Zoom ──────────────────────────────────────────────────────────────────
@@ -214,33 +241,47 @@ export default function PlannerTimeline({
   /** A drag ends in a click event; this keeps that click from also re-seeking. */
   const suppressClick = useRef(false)
 
-  const startStationDrag = useCallback(
-    (e: React.PointerEvent, medicId: string, stationId: string, arriveMs: number) => {
+  /**
+   * Drag a time along the ruler.
+   *
+   * Both ends of a block are draggable and they mean different things: the left
+   * edge is when the medic gets there, the right edge is when they stop being
+   * available — which is either the next posting's arrival pulled earlier, or,
+   * on the last block, their stand-down.
+   */
+  const startTimeDrag = useCallback(
+    (
+      e: React.PointerEvent,
+      medicId: string,
+      handleId: string,
+      fromMs: number,
+      commit: (atMs: number) => void,
+    ) => {
       e.preventDefault()
       e.stopPropagation()
       onPlaying(false)
       onSelectMedic(medicId)
       const startX = e.clientX
-      let latest = arriveMs
+      let latest = fromMs
 
       const move = (ev: PointerEvent) => {
         if (Math.abs(ev.clientX - startX) > 2) suppressClick.current = true
         const deltaMs = ((ev.clientX - startX) / pxPerHour) * HOUR
         // Five-minute grid by default; hold Shift for the minute.
         const grid = ev.shiftKey ? 60_000 : 5 * 60_000
-        latest = Math.round((arriveMs + deltaMs) / grid) * grid
-        setDragging({ medicId, stationId, previewMs: latest })
+        latest = Math.round((fromMs + deltaMs) / grid) * grid
+        setDragging({ medicId, stationId: handleId, previewMs: latest })
       }
       const up = () => {
         window.removeEventListener('pointermove', move)
         window.removeEventListener('pointerup', up)
         setDragging(null)
-        if (latest !== arriveMs) onMoveStation(medicId, stationId, latest)
+        if (latest !== fromMs) commit(latest)
       }
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', up)
     },
-    [pxPerHour, onMoveStation, onPlaying, onSelectMedic],
+    [pxPerHour, onPlaying, onSelectMedic],
   )
 
   // ── Derived rendering data ────────────────────────────────────────────────
@@ -272,16 +313,30 @@ export default function PlannerTimeline({
 
   return (
     <div
-      className="flex flex-col flex-shrink-0 select-none"
+      className="relative flex flex-col flex-shrink-0 select-none"
       style={{
         borderTop: '1px solid rgba(148,163,184,0.12)',
         background: 'linear-gradient(180deg, rgba(8,15,28,0.97) 0%, rgba(4,10,20,0.99) 100%)',
-        height: collapsed ? 52 : Math.min(392, RULER_HEIGHT + bodyHeight + 52),
-        transition: 'height 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+        height: collapsed ? TRANSPORT_HEIGHT : dockHeight,
+        transition: 'height 200ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
+      {/* Drag handle along the top edge. */}
+      {!collapsed && (
+        <div
+          onPointerDown={startResize}
+          className="absolute left-0 right-0 flex items-center justify-center group"
+          style={{ top: -4, height: 9, cursor: 'ns-resize', zIndex: 40 }}
+          title="Drag to resize the timeline"
+        >
+          <span
+            className="rounded-full transition-colors"
+            style={{ width: 46, height: 3, background: 'rgba(148,163,184,0.35)' }}
+          />
+        </div>
+      )}
       {/* ── Transport ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 h-[52px] flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 flex-shrink-0" style={{ height: TRANSPORT_HEIGHT }}>
         <button
           onClick={() => {
             if (!playing && cursorMs >= toMs - 1000) onCursor(fromMs)
@@ -597,12 +652,27 @@ export default function PlannerTimeline({
                           )
                         }
 
-                        const isDragging = dragging?.stationId === segment.stationId
-                        const dragOffset = isDragging ? xOf(dragging!.previewMs) - xOf(segment.fromMs) : 0
+                        const stations = timeline?.stations ?? []
+                        const index = stations.findIndex(st => st.id === segment.stationId)
+                        const nextStation = index >= 0 ? stations[index + 1] : undefined
+                        const isLast = nextStation == null
+                        // A sweep endpoint is owned by the discipline's clock —
+                        // its edges are not the coordinator's to drag.
+                        const leftLocked = stations[index]?.sweep != null
+                        const rightLocked = nextStation?.sweep != null
+                        const leftHandle = `${segment.stationId}:start`
+                        const rightHandle = `${segment.stationId}:end`
+                        const dragKey = dragging?.stationId
+                        const dragOffset =
+                          dragKey === leftHandle ? xOf(dragging!.previewMs) - xOf(segment.fromMs) : 0
+                        const endOffset =
+                          dragKey === rightHandle ? xOf(dragging!.previewMs) - xOf(segEnd) : 0
+                        const isDragging = dragKey === leftHandle || dragKey === rightHandle
+                        const openEnded = !Number.isFinite(segment.toMs)
+
                         return (
                           <div
                             key={`${segment.stationId}-hold-${si}`}
-                            onPointerDown={e => startStationDrag(e, medic.id, segment.stationId, segment.fromMs)}
                             onClick={e => {
                               e.stopPropagation()
                               if (suppressClick.current) {
@@ -614,17 +684,66 @@ export default function PlannerTimeline({
                             className="absolute flex items-center gap-1 px-2 rounded-lg overflow-hidden"
                             style={{
                               left: left + dragOffset,
-                              width,
+                              width: Math.max(4, width + endOffset - dragOffset),
                               top: 6,
                               height: MEDIC_LANE - 12,
                               background: `${medic.color}22`,
                               border: `1px solid ${medic.color}${isDragging ? 'ff' : '77'}`,
                               boxShadow: isDragging ? `0 0 0 3px ${medic.color}33` : 'none',
-                              cursor: 'ew-resize',
+                              cursor: 'pointer',
                               zIndex: isDragging ? 5 : 1,
                             }}
-                            title={`${segment.label} — from ${formatTime(segment.fromMs)}`}
+                            title={`${segment.label} — ${formatTime(segment.fromMs)} to ${
+                              openEnded ? 'stand-down' : formatTime(segEnd)
+                            }`}
                           >
+                            {/* Left grip: when they get here. */}
+                            {!leftLocked && (
+                              <span
+                                onPointerDown={e =>
+                                  startTimeDrag(e, medic.id, leftHandle, segment.fromMs, at =>
+                                    onMoveStation(medic.id, segment.stationId, at),
+                                  )
+                                }
+                                className="absolute top-0 bottom-0 left-0"
+                                style={{ width: 7, cursor: 'ew-resize', zIndex: 2 }}
+                                title={`Arrives ${formatTime(segment.fromMs)} — drag to change`}
+                              />
+                            )}
+                            {/* Right grip: when they stop being available here —
+                                the next posting's arrival, or the stand-down on
+                                the last block. */}
+                            {!rightLocked && (
+                              <span
+                                onPointerDown={e =>
+                                  startTimeDrag(
+                                    e,
+                                    medic.id,
+                                    rightHandle,
+                                    Number.isFinite(segment.toMs) ? segment.toMs : cursorMs,
+                                    at => {
+                                      if (isLast) onSetStandDown(medic.id, at)
+                                      else if (nextStation) {
+                                        // The right edge is a departure; the
+                                        // arrival it feeds moves with it, so the
+                                        // journey keeps its length.
+                                        const travel = new Date(nextStation.arriveAt).getTime() - segEnd
+                                        onMoveStation(medic.id, nextStation.id, at + travel)
+                                      }
+                                    },
+                                  )
+                                }
+                                className="absolute top-0 bottom-0 right-0"
+                                style={{ width: 7, cursor: 'ew-resize', zIndex: 2 }}
+                                title={
+                                  isLast
+                                    ? openEnded
+                                      ? 'Drag to set a stand-down'
+                                      : `Stands down ${formatTime(segEnd)} — drag to change`
+                                    : `Leaves ${formatTime(segEnd)} — drag to change`
+                                }
+                              />
+                            )}
                             <span
                               className="w-1 h-1 rounded-full flex-shrink-0"
                               style={{ background: medic.color }}

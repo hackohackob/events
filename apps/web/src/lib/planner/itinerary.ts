@@ -54,6 +54,8 @@ export interface MedicItinerary {
   stops: ItineraryStop[]
   swaps: ItineraryVehicleSwap[]
   onDutyFromMs: number | null
+  /** When they go off the board, when a stand-down is set. */
+  standDownMs: number | null
   travelMinutes: number
   conflictCount: number
   /** Courses this medic sweeps, by name. */
@@ -139,6 +141,7 @@ export function buildItinerary(medic: PlanMedic, options: ResolveOptions = {}): 
     stops,
     swaps,
     onDutyFromMs: timeline.onDutyFromMs,
+    standDownMs: timeline.standDownMs,
     travelMinutes: timeline.travelMinutes,
     conflictCount: timeline.conflicts.length,
     sweeps,
@@ -220,6 +223,9 @@ export function itineraryToText(itinerary: MedicItinerary, eventTitle: string): 
     lines.push(...row.text)
   }
 
+  if (itinerary.standDownMs != null) {
+    lines.push(`  ${formatTime(itinerary.standDownMs)}  stand down`)
+  }
   lines.push('')
   const moves = itinerary.stops.filter(s => s.kind === 'post').length
   lines.push(`Moves: ${Math.max(0, moves - 1)} · Travel: ${formatDuration(itinerary.travelMinutes)}`)

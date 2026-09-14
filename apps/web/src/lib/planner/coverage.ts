@@ -3,70 +3,77 @@
  *
  * Timing the disciplines shows you where the runners are; posting the medics
  * shows you where the help is. This is the subtraction of the two — the
- * stretches of course that have people on them and nobody within reach — which
- * is the actual question the whole planner exists to answer.
+ * stretches of course that have people on them and nobody who can get there in
+ * time — which is the actual question the whole planner exists to answer.
  *
- * The result is reported two ways: as a per-bin series that paints the course
- * from green to red, and as the contiguous gap ranges that get called out.
+ * Reach is expressed as a RATIO, not a distance: 0 is on top of a medic, 1 is
+ * the edge of the reach budget, above that is out. That lets a routed isochrone
+ * (bucket 2 of 3 → 0.67) and a crow-flies fallback (2.1 km of a 3 km radius →
+ * 0.7) feed the same scale and the same colour ramp.
  */
 
 import { haversineMeters, pointAtMeters, type CourseModel } from './course'
 import { DENSITY_BINS, type FieldState } from './field'
 
-/** Default reach: about what a vehicle covers on mountain roads in ten minutes. */
-export const DEFAULT_COVERAGE_METERS = 3000
+/** Default reach: ten minutes, which is the usual "someone is with you" target. */
+export const DEFAULT_REACH_MINUTES = 10
+
+/** Ratio assigned to a bin no medic can reach at all. */
+const OUT_OF_REACH = 2.2
+
+export interface CoverageMedic {
+  position: [number, number]
+  /**
+   * Per-bin reach buckets from a routed isochrone (1 = innermost). Present for
+   * medics standing still long enough to have been measured.
+   */
+  buckets?: Uint8Array
+  /** How many buckets the isochrone was cut into. */
+  bucketCount?: number
+  /** Crow-flies fallback for medics on the move, metres. */
+  radiusMeters: number
+}
 
 export interface CoverageGap {
-  /** Metres along the course. */
   fromMeters: number
   toMeters: number
-  /** Geometry of the gap, for drawing. */
   coordinates: [number, number][]
 }
 
 export interface CoverageReport {
-  /**
-   * Per course bin (same binning as the field density), metres to the nearest
-   * on-duty medic. `Infinity` when there is no medic at all.
-   */
-  nearest: number[]
+  /** Per bin: 0 = on top of a medic, 1 = edge of reach, above = out. */
+  ratio: number[]
   /** Per bin: is anyone actually on this stretch right now? */
   occupied: boolean[]
-  /** Metres of occupied course with nobody in reach. */
   uncoveredMeters: number
-  /** Metres of occupied course in total. */
   occupiedMeters: number
   gaps: CoverageGap[]
-  /** The single worst stretch, 0 when everything occupied is covered. */
   worstGapMeters: number
+  /** True when at least one medic was measured on the network, not by radius. */
+  routed: boolean
 }
 
 export const EMPTY_COVERAGE: CoverageReport = {
-  nearest: [],
+  ratio: [],
   occupied: [],
   uncoveredMeters: 0,
   occupiedMeters: 0,
   gaps: [],
   worstGapMeters: 0,
+  routed: false,
 }
 
-/**
- * Measure the whole course bin by bin. Medics are taken at their position
- * *now*, including ones mid-move and ones sweeping — a medic driving past a
- * valley does cover it, and the sweeper covers the back of the field by
- * definition.
- */
 export function coverageFor(
   course: CourseModel,
   field: FieldState,
-  medicPositions: Array<[number, number]>,
-  radiusMeters = DEFAULT_COVERAGE_METERS,
+  medics: CoverageMedic[],
 ): CoverageReport {
   if (course.totalMeters <= 0) return EMPTY_COVERAGE
 
   const binMeters = course.totalMeters / DENSITY_BINS
-  const nearest = new Array<number>(DENSITY_BINS).fill(Number.POSITIVE_INFINITY)
+  const ratio = new Array<number>(DENSITY_BINS).fill(OUT_OF_REACH)
   const occupied = new Array<boolean>(DENSITY_BINS).fill(false)
+  const routed = medics.some(m => m.buckets != null)
 
   const hasField = field.onCourse > 0 && field.tailMeters >= 0
   const fieldFrom = hasField ? Math.max(0, field.tailMeters) : 0
@@ -80,16 +87,24 @@ export function coverageFor(
 
   for (let i = 0; i < DENSITY_BINS; i += 1) {
     const atMeters = (i + 0.5) * binMeters
-    const point = pointAtMeters(course, atMeters)
+    let best = OUT_OF_REACH
 
-    let best = Number.POSITIVE_INFINITY
-    for (const medic of medicPositions) {
-      const d = haversineMeters(point, medic)
-      if (d < best) best = d
-      // Anything this close is comfortably covered; no need to keep looking.
-      if (best <= radiusMeters * 0.4) break
+    for (const medic of medics) {
+      let value: number
+      if (medic.buckets) {
+        const bucket = medic.buckets[i]
+        const count = medic.bucketCount ?? 3
+        value = bucket === 0 ? OUT_OF_REACH : bucket / count
+      } else {
+        const point = pointAtMeters(course, atMeters)
+        value = medic.radiusMeters > 0
+          ? haversineMeters(point, medic.position) / medic.radiusMeters
+          : OUT_OF_REACH
+      }
+      if (value < best) best = value
+      if (best <= 0.34) break
     }
-    nearest[i] = best
+    ratio[i] = best
 
     const isOccupied = hasField && atMeters >= fieldFrom && atMeters <= fieldTo
     occupied[i] = isOccupied
@@ -102,8 +117,9 @@ export function coverageFor(
     }
 
     occupiedMeters += binMeters
-    if (best > radiusMeters) {
+    if (best > 1) {
       uncoveredMeters += binMeters
+      const point = pointAtMeters(course, atMeters)
       if (open) {
         open.toMeters = atMeters
         open.coordinates.push(point)
@@ -119,11 +135,12 @@ export function coverageFor(
   if (open) worst = Math.max(worst, open.toMeters - open.fromMeters)
 
   return {
-    nearest,
+    ratio,
     occupied,
     uncoveredMeters: Math.round(uncoveredMeters),
     occupiedMeters: Math.round(occupiedMeters),
     gaps: gaps.filter(g => g.coordinates.length > 1),
     worstGapMeters: Math.round(worst),
+    routed,
   }
 }

@@ -65,6 +65,8 @@ export interface MedicTimeline {
   conflicts: Array<{ stationId: string; shortfallMinutes: number }>
   /** The full station list the timeline was built from, sweeps included. */
   stations: PlannedStation[]
+  /** When the medic goes off the board, if they have a stand-down set. */
+  standDownMs: number | null
 }
 
 /**
@@ -326,6 +328,7 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
       travelMinutes: 0,
       conflicts,
       stations,
+      standDownMs: null,
     }
   }
 
@@ -416,12 +419,15 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
     travelMinutes += Math.max(0, (arrive - departure) / 60000)
   }
 
-  // The final station is held open-ended; the caller clips it to the plan end.
+  // The final station runs to the medic's stand-down, or open-ended when they
+  // have none — the caller clips an open end to the plan's own end.
   const last = stations[stations.length - 1]
+  const standDown = medic.standDownAt ? ms(medic.standDownAt) : NaN
+  const lastArrive = ms(last.arriveAt)
   segments.push({
     kind: 'hold',
-    fromMs: ms(last.arriveAt),
-    toMs: Number.POSITIVE_INFINITY,
+    fromMs: lastArrive,
+    toMs: Number.isFinite(standDown) && standDown > lastArrive ? standDown : Number.POSITIVE_INFINITY,
     stationId: last.id,
     label: last.label,
     to: [last.lng, last.lat],
@@ -436,6 +442,7 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
     travelMinutes: Math.round(travelMinutes),
     conflicts,
     stations,
+    standDownMs: Number.isFinite(standDown) && standDown > lastArrive ? standDown : null,
   }
 }
 
@@ -500,6 +507,18 @@ export function medicPositionAt(
   const stations = timeline.stations
   if (stations.length === 0) return null
   const first = stations[0]
+  const last = stations[stations.length - 1]
+
+  // Past stand-down they are no longer on the board: drawn faded, and not
+  // counted as covering anything.
+  if (timeline.standDownMs != null && atMs > timeline.standDownMs) {
+    return {
+      phase: 'off-duty',
+      position: [last.lng, last.lat],
+      stationId: last.id,
+      label: last.label,
+    }
+  }
 
   if (timeline.onDutyFromMs != null && atMs < timeline.onDutyFromMs) {
     return {
@@ -560,6 +579,5 @@ export function medicPositionAt(
     }
   }
 
-  const last = stations[stations.length - 1]
   return { phase: 'holding', position: [last.lng, last.lat], stationId: last.id, label: last.label }
 }

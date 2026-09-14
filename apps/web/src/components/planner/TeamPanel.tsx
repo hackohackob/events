@@ -16,6 +16,7 @@ import {
 import { VEHICLE_TYPES, VEHICLE_TYPE_META, planSweeps, planVehicleAt } from '@events/contracts'
 import type { PlanMedic, PlanStation, PlanSweepJoin, VehicleType } from '@events/contracts'
 import type { MedicTimeline, ResolvedSweep } from '@/lib/planner/schedule'
+import type { SweepWarning } from '@/lib/planner/sweep-check'
 import { formatDuration, formatStamp, formatTime } from '@/lib/planner/itinerary'
 
 interface Props {
@@ -40,6 +41,8 @@ interface Props {
   onSetSweepJoin: (medicId: string, disciplineId: string, joinFrom: PlanSweepJoin) => void
   /** The medic's sweeps with their join point already worked out. */
   sweepsFor: (medic: PlanMedic) => ResolvedSweep[]
+  /** Vehicle-vs-course problems with a sweep, if any. */
+  sweepWarningsFor: (medic: PlanMedic, disciplineId: string) => SweepWarning[]
 }
 
 function toLocalInput(iso: string): string {
@@ -67,6 +70,7 @@ export default function TeamPanel({
   onToggleSweeper,
   onSetSweepJoin,
   sweepsFor,
+  sweepWarningsFor,
 }: Props) {
   const [editingStation, setEditingStation] = useState<string | null>(null)
 
@@ -304,6 +308,20 @@ export default function TeamPanel({
                               ? `Last runner reaches ${sweep.postLabel} at ${formatTime(sweep.startMs)} · clear ${formatTime(sweep.endMs)}`
                               : `Off the line ${formatTime(sweep.startMs)} · clear ${formatTime(sweep.endMs)}`}
                         </div>
+                        {sweepWarningsFor(medic, sweep.disciplineId).map((warning, wi) => (
+                          <div
+                            key={wi}
+                            className="flex items-start gap-1.5 mt-1.5 px-1.5 py-1 rounded-lg text-[9px] font-semibold"
+                            style={{
+                              background:
+                                warning.level === 'blocker' ? 'rgba(248,113,113,0.12)' : 'rgba(245,158,11,0.1)',
+                              color: warning.level === 'blocker' ? '#fca5a5' : '#fcd34d',
+                            }}
+                          >
+                            <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 mt-px" />
+                            <span>{warning.message}</span>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>

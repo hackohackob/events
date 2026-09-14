@@ -111,7 +111,7 @@ const E_MOTORCYCLE_WAYS = {
 const ROAD_AMBULANCE_WAYS = {
   priority: [
     { if: "road_class == TRACK", multiply_by: "0" },
-    { if: "surface == DIRT || surface == GROUND || surface == GRASS || surface == SAND || surface == MUD", multiply_by: "0" },
+    { if: "surface == DIRT || surface == GROUND || surface == GRASS || surface == SAND", multiply_by: "0" },
     { if: "surface == GRAVEL || surface == FINE_GRAVEL", multiply_by: "0.35" },
     { if: "road_access == PRIVATE || road_access == NO", multiply_by: "0" },
   ],
@@ -122,7 +122,7 @@ const OFFROAD_AMBULANCE_WAYS = {
   priority: [
     { if: "track_type == GRADE5", multiply_by: "0" },
     { if: "track_type == GRADE4", multiply_by: "0.35" },
-    { if: "surface == MUD || surface == SAND", multiply_by: "0.2" },
+    { if: "surface == GROUND || surface == SAND", multiply_by: "0.2" },
   ],
   speed: [
     // Driven cautiously with a patient aboard, and top-heavy when empty.

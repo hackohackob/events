@@ -34,7 +34,16 @@ import {
   type ResolvedSweep,
 } from '@/lib/planner/schedule'
 import { formatTime } from '@/lib/planner/itinerary'
-import { coverageFor, DEFAULT_COVERAGE_METERS, EMPTY_COVERAGE, type CoverageReport } from '@/lib/planner/coverage'
+import {
+  coverageFor,
+  DEFAULT_REACH_MINUTES,
+  EMPTY_COVERAGE,
+  type CoverageMedic,
+  type CoverageReport,
+} from '@/lib/planner/coverage'
+import { bucketsForCourse } from '@/lib/planner/isochrone'
+import { checkSweep, type SweepWarning } from '@/lib/planner/sweep-check'
+import { vehicleSpeedKmh } from '@/lib/planner/travel'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
 import PlannerMap, { type PlannedMedicView } from './PlannerMap'
 import PlannerTimeline, { type PlaySpeed } from './PlannerTimeline'
@@ -55,7 +64,9 @@ const TAB_LABEL: Record<Tab, string> = {
 const TIME_GRID_MS = 5 * 60_000
 
 export default function PlannerShell({ eventId }: { eventId: string }) {
-  const planner = usePlanner(eventId)
+  const [showCoverage, setShowCoverage] = useState(true)
+  const [reachMinutes, setReachMinutes] = useState(DEFAULT_REACH_MINUTES)
+  const planner = usePlanner(eventId, { reachMinutes })
   const {
     plan,
     mutate,
@@ -65,6 +76,8 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
     snapTarget,
     pathLookup,
     durationLookup,
+    reachShapeFor,
+    sweepFitFor,
     sweepsFor,
     minTravelMinutes,
   } = planner
@@ -79,8 +92,6 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
   const [showDensity, setShowDensity] = useState(true)
   const [showRunners, setShowRunners] = useState(true)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
-  const [showCoverage, setShowCoverage] = useState(true)
-  const [coverageMeters, setCoverageMeters] = useState(DEFAULT_COVERAGE_METERS)
   const [fitBounds, setFitBounds] = useState<[[number, number], [number, number]] | undefined>()
 
   // Park the playhead on the first start — but only once the event has loaded.
@@ -175,21 +186,75 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
     [medics, timelines, cursor, sweepsFor],
   )
 
-  /** Reach analysis: occupied course with no medic inside the coverage radius. */
+  /**
+   * Reach analysis, per course.
+   *
+   * A posted medic is measured on the road network — their isochrone is indexed
+   * against the course once, when it arrives — so a ridge between them and the
+   * course counts against them. Anyone on the move gets a crow-flies circle
+   * sized from their vehicle's speed, which is the best that can be said about
+   * a position that changes every frame.
+   */
   const coverage = useMemo(() => {
     const out: Record<string, CoverageReport> = {}
     if (!showCoverage) return out
-    const onDuty = medicViews
-      .filter(v => !v.medic.hidden && v.position && v.position.phase !== 'off-duty')
-      .map(v => v.position!.position)
+
+    const onDuty = medicViews.filter(
+      v => !v.medic.hidden && v.position && v.position.phase !== 'off-duty',
+    )
+
     for (const d of disciplines) {
-      out[d.id] =
-        !d.hasCourse || hiddenDisciplineIds.has(d.id)
-          ? EMPTY_COVERAGE
-          : coverageFor(d.course, fields[d.id] ?? EMPTY_FIELD, onDuty, coverageMeters)
+      if (!d.hasCourse || hiddenDisciplineIds.has(d.id)) {
+        out[d.id] = EMPTY_COVERAGE
+        continue
+      }
+      const medicsHere: CoverageMedic[] = onDuty.map(v => {
+        const position = v.position!.position
+        const radiusMeters = (vehicleSpeedKmh(v.vehicleType) * 1000 * reachMinutes) / 60
+        // Only a medic standing on a posting has a measured shape: `position`
+        // equals the station, so the same key finds it.
+        const shape =
+          v.position!.phase === 'holding' ? reachShapeFor(position, v.vehicleType) : undefined
+        if (!shape) return { position, radiusMeters }
+        return {
+          position,
+          radiusMeters,
+          buckets: bucketsForCourse(d.course, shape),
+          bucketCount: shape.rings.length,
+        }
+      })
+      out[d.id] = coverageFor(d.course, fields[d.id] ?? EMPTY_FIELD, medicsHere)
     }
     return out
-  }, [showCoverage, medicViews, disciplines, fields, hiddenDisciplineIds, coverageMeters])
+  }, [showCoverage, medicViews, disciplines, fields, hiddenDisciplineIds, reachMinutes, reachShapeFor])
+
+  /**
+   * Whether each medic's vehicle can actually do the sweep they are down for.
+   * Checked against the course they would be following, not the one they are
+   * nearest — a car marked to sweep a mountain trail is a plan that fails on
+   * the night.
+   */
+  const sweepWarningsFor = useCallback(
+    (medic: PlanMedic, disciplineId: string): SweepWarning[] => {
+      const discipline = disciplines.find(d => d.id === disciplineId)
+      if (!discipline) return []
+      // Checked against the vehicle they are on when they actually pick the
+      // tail up, which for a post join is not the gun.
+      const sweep = sweepsFor(medic).find(w => w.disciplineId === disciplineId)
+      const atMs = sweep?.startMs ?? new Date(discipline.schedule.startAt).getTime()
+      const vehicle = planVehicleAt(medic, atMs)
+      return checkSweep({
+        vehicle,
+        fit: sweepFitFor(disciplineId, planVehicleAt(medic, new Date(discipline.schedule.startAt).getTime())),
+        disciplineName: discipline.name,
+        disciplineType: discipline.type,
+        distanceKm: discipline.distanceKm,
+        ascentMeters: discipline.ascentMeters,
+        slowestMinutes: discipline.schedule.slowestMinutes,
+      })
+    },
+    [disciplines, sweepsFor, sweepFitFor],
+  )
 
   // ── Plan edits ────────────────────────────────────────────────────────────
   const patchSchedule = useCallback(
@@ -420,6 +485,21 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                   s.id === stationId ? { ...s, arriveAt: new Date(arriveMs).toISOString() } : s,
                 ),
               }
+            : medic,
+        ),
+      }))
+    },
+    [mutate],
+  )
+
+  /** The medic's last block stops being open-ended; `null` reopens it. */
+  const setStandDown = useCallback(
+    (medicId: string, atMs: number | null) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic =>
+          medic.id === medicId
+            ? { ...medic, standDownAt: atMs == null ? undefined : new Date(atMs).toISOString() }
             : medic,
         ),
       }))
@@ -713,8 +793,8 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                 hiddenDisciplineIds={hiddenDisciplineIds}
                 onToggleVisible={toggleDiscipline}
                 coverage={coverage}
-                coverageMeters={coverageMeters}
-                onCoverageMeters={setCoverageMeters}
+                reachMinutes={reachMinutes}
+                onReachMinutes={setReachMinutes}
                 showCoverage={showCoverage}
                 onToggleCoverage={() => setShowCoverage(v => !v)}
               />
@@ -743,6 +823,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                 onToggleSweeper={toggleSweeper}
                 onSetSweepJoin={setSweepJoin}
                 sweepsFor={sweepsFor}
+                sweepWarningsFor={sweepWarningsFor}
               />
             )}
             {tab === 'briefing' && (
@@ -777,7 +858,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
               showRunners={showRunners}
               showDensity={showDensity}
               coverage={coverage}
-              coverageMeters={coverageMeters}
+              reachMinutes={reachMinutes}
               sweepColors={sweepColors}
             />
 
@@ -834,6 +915,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
               setTab('team')
               focusStation(medicId, stationId)
             }}
+            onSetStandDown={setStandDown}
             collapsed={timelineCollapsed}
             onToggleCollapsed={() => setTimelineCollapsed(v => !v)}
           />

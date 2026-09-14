@@ -17,9 +17,9 @@ interface Props {
   hiddenDisciplineIds: Set<string>
   onToggleVisible: (id: string) => void
   coverage: Record<string, CoverageReport>
-  /** How far a medic is considered to cover, in metres. */
-  coverageMeters: number
-  onCoverageMeters: (meters: number) => void
+  /** How long a medic is given to get there. */
+  reachMinutes: number
+  onReachMinutes: (minutes: number) => void
   showCoverage: boolean
   onToggleCoverage: () => void
 }
@@ -92,8 +92,8 @@ export default function CoursePanel({
   hiddenDisciplineIds,
   onToggleVisible,
   coverage,
-  coverageMeters,
-  onCoverageMeters,
+  reachMinutes,
+  onReachMinutes,
   showCoverage,
   onToggleCoverage,
 }: Props) {
@@ -109,6 +109,13 @@ export default function CoursePanel({
     }
     return { onCourse, uncovered, occupied }
   }, [disciplines, fields, hiddenDisciplineIds, coverage])
+
+  // Whether any course's reach came off the router rather than a radius. Worth
+  // saying out loud: the two answers can differ by kilometres in a valley.
+  const routedSomewhere = useMemo(
+    () => disciplines.some(d => coverage[d.id]?.routed),
+    [disciplines, coverage],
+  )
 
   if (disciplines.length === 0) {
     return (
@@ -181,18 +188,27 @@ export default function CoursePanel({
           </span>
           <input
             type="range"
-            min={500}
-            max={15000}
-            step={500}
-            value={coverageMeters}
-            onChange={e => onCoverageMeters(Number(e.target.value))}
+            min={2}
+            max={45}
+            step={1}
+            value={reachMinutes}
+            onChange={e => onReachMinutes(Number(e.target.value))}
             className="flex-1 accent-sky-400"
-            title="How far a medic is counted as covering"
+            title="How long a medic is given to get there, driven on the road network"
           />
           <span className="text-[10px] font-bold tabular-nums w-10 text-right" style={{ color: '#94a3b8' }}>
-            {(coverageMeters / 1000).toFixed(1)}k
+            {reachMinutes}m
           </span>
         </div>
+        {routedSomewhere ? (
+          <div className="text-[9px] mt-1" style={{ color: '#475569' }}>
+            Measured on the road network — a ridge in the way counts against it.
+          </div>
+        ) : (
+          <div className="text-[9px] mt-1" style={{ color: '#f59e0b' }}>
+            Straight-line estimate — the routing engine has not answered yet.
+          </div>
+        )}
       </div>
 
       {disciplines.map(d => {

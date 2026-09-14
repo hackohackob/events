@@ -385,6 +385,7 @@ function sanitizePlanMedic(input: unknown): PlanMedic | null {
     color: planString(raw.color) || "#38bdf8",
     unit: planString(raw.unit) || undefined,
     stations,
+    standDownAt: planInstant(raw.standDownAt) || undefined,
     sweeps: sweeps.length > 0 ? sweeps : undefined,
     hidden: raw.hidden === true || undefined,
   };

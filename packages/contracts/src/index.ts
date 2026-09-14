@@ -1290,6 +1290,11 @@ export interface PlanMedic {
   /** Ordered by `arriveAt`; the planner re-sorts on every edit. */
   stations: PlanStation[];
   /**
+   * When this medic stops being available, ISO 8601. Unset means the last
+   * posting is held open-ended until the event stands everyone down.
+   */
+  standDownAt?: string;
+  /**
    * Disciplines this medic sweeps. Their position for that window is derived
    * from the field rather than posted.
    */

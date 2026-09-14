@@ -169,6 +169,50 @@ export class GraphHopperClient {
   }
 
   /**
+   * GET /isochrone — everywhere reachable from a point within a time budget,
+   * as nested polygons (innermost bucket first).
+   *
+   * This is what "in reach" actually means on a mountain: a valley 3 km away
+   * with a ridge in between is not covered, and a village 12 km down a good
+   * road is. Crow-flies distance cannot tell those apart; a time isochrone can.
+   */
+  async isochrone(
+    profile: RouteProfile,
+    point: LngLat,
+    seconds: number,
+    buckets: number,
+  ): Promise<LngLat[][]> {
+    const params = new URLSearchParams({
+      point: `${point[1]},${point[0]}`,
+      time_limit: String(Math.max(60, Math.round(seconds))),
+      profile: graphhopperProfile(profile),
+      buckets: String(Math.max(1, Math.min(5, buckets))),
+    });
+    if (this.apiKey) params.set("key", this.apiKey);
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/isochrone?${params.toString()}`);
+    } catch (error) {
+      this.logger.error(`GraphHopper unreachable at ${this.baseUrl}: ${String(error)}`);
+      throw new BadGatewayException("Routing engine is unreachable.");
+    }
+    const text = await response.text();
+    if (!response.ok) {
+      // A point off the network is a normal answer here, not an outage: a medic
+      // can legitimately be posted in the middle of a field.
+      this.logger.warn(`GraphHopper isochrone ${response.status}: ${text.slice(0, 200)}`);
+      return [];
+    }
+    const parsed = JSON.parse(text) as {
+      polygons?: Array<{ geometry?: { coordinates?: number[][][] } }>;
+    };
+    return (parsed.polygons ?? [])
+      .map((p) => (p.geometry?.coordinates?.[0] ?? []) as LngLat[])
+      .filter((ring) => ring.length >= 4);
+  }
+
+  /**
    * Best-effort single path. Returns null instead of throwing — the exit-point
    * search fires dozens of speculative probes where "no route that way" is a
    * normal, expected answer rather than an error.

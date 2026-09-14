@@ -201,7 +201,9 @@ export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }:
                                 // minute, so they turn around on arrival.
                                 ? `Straight on — leave ${formatTime(stop.departMs)}`
                                 : `On station ${formatDuration(stop.dwellMinutes ?? 0)} · leave ${formatTime(stop.departMs)}`
-                              : 'Hold until stand-down'}
+                              : it.standDownMs != null
+                                ? `Hold until stand-down ${formatTime(it.standDownMs)}`
+                                : 'Hold until stand-down'}
                           {stop.travelMinutes > 0
                             ? ` · ${stop.vehicleIcon ?? ''} ${formatDuration(stop.travelMinutes)} to get here`
                             : ''}
