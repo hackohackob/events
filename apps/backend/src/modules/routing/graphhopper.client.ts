@@ -186,7 +186,9 @@ export class GraphHopperClient {
       point: `${point[1]},${point[0]}`,
       time_limit: String(Math.max(60, Math.round(seconds))),
       profile: graphhopperProfile(profile),
-      buckets: String(Math.max(1, Math.min(5, buckets))),
+      // Eight, not five: the planner asks for twice its reach budget in six
+      // slices so it can grade how far PAST the budget somewhere is.
+      buckets: String(Math.max(1, Math.min(8, buckets))),
     });
     if (this.apiKey) params.set("key", this.apiKey);
 

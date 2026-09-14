@@ -68,9 +68,16 @@ export interface IsochroneResult {
 }
 
 /**
- * Everywhere a vehicle can reach from a point inside `minutes`. Null on any
- * failure — the planner falls back to a plain radius rather than showing
- * nothing, so a plan stays workable with the routing engine down.
+ * Everywhere a vehicle can reach from a point inside `minutes`.
+ *
+ * Measured out to TWICE the budget in six slices. Asked for the budget alone,
+ * the outermost ring is a cliff: somewhere eleven minutes away is drawn exactly
+ * like somewhere an hour away, and a village just past the contour reads as
+ * unreachable. The back three slices grade how far past the budget a place is,
+ * for the cost of the same single request.
+ *
+ * Null on any failure — the planner falls back to a plain radius rather than
+ * showing nothing, so a plan stays workable with the routing engine down.
  */
 export async function fetchIsochrone(
   eventId: string,
@@ -81,7 +88,7 @@ export async function fetchIsochrone(
   try {
     const { data } = await client.post<IsochroneResult>(
       "/routing/isochrone",
-      { lat: point.lat, lng: point.lng, vehicleType, minutes, buckets: 3 },
+      { lat: point.lat, lng: point.lng, vehicleType, minutes: minutes * 2, buckets: 6 },
       { headers: { "x-event-id": eventId } },
     );
     return data?.polygons?.length ? data : null;

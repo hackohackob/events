@@ -116,22 +116,31 @@ export function coverageFor(
         if (reach > 0) value = Math.abs(atMeters - atCourseMeters) / reach
       }
       if (medic.buckets) {
+        // Buckets divide TWICE the reach budget, so bucket k means "reachable
+        // in k/(count/2) of the budget": the back half grades how far PAST the
+        // budget a stretch is instead of calling everything beyond it red.
         const ratioOf = (buckets: Uint8Array, count: number) => {
           const bucket = buckets[i]
-          return bucket === 0 ? OUT_OF_REACH : bucket / count
+          return bucket === 0 ? OUT_OF_REACH : bucket / Math.max(1, count / 2)
         }
-        let routed = ratioOf(medic.buckets, medic.bucketCount ?? 3)
+        let routed = ratioOf(medic.buckets, medic.bucketCount ?? 6)
         if (medic.blendBuckets && medic.blendWeight != null) {
-          const other = ratioOf(medic.blendBuckets, medic.blendBucketCount ?? 3)
+          const other = ratioOf(medic.blendBuckets, medic.blendBucketCount ?? 6)
           const w = Math.max(0, Math.min(1, medic.blendWeight))
           routed = routed * (1 - w) + other * w
         }
         if (routed < value) value = routed
-      } else if (!medic.alongCourse) {
+      } else {
+        // No measured shape: fall back to the vehicle's own radius. This runs
+        // for sweepers too — the along-the-course term is a floor saying "the
+        // tail is covered", never a reason to skip the fallback and leave a
+        // sweeper scored on three kilometres of course while everyone else gets
+        // a proper estimate.
         const point = pointAtMeters(course, atMeters)
-        value = medic.radiusMeters > 0
+        const circle = medic.radiusMeters > 0
           ? haversineMeters(point, medic.position) / medic.radiusMeters
           : OUT_OF_REACH
+        if (circle < value) value = circle
       }
 
       if (value < best) best = value
