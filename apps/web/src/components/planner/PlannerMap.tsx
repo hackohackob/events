@@ -28,8 +28,10 @@ export interface PlannedMedicView {
    */
   legs: Array<{
     stationId: string
-    path: [number, number][]
     via: Array<{ lat: number; lng: number }>
+    /** The drawn line cut at its waypoints; each piece knows the order slot a
+     *  new waypoint grabbed there should take. */
+    segments: Array<{ path: [number, number][]; insertAt: number }>
   }>
 }
 
@@ -46,8 +48,13 @@ interface Props {
   onSelectMedic: (id: string | null) => void
   /** A map click chose a position for the selected medic — adds a posting. */
   onPlaceStation: (medicId: string, lngLat: [number, number]) => void
-  /** The drawn route was grabbed — bend this leg through here. */
-  onAddVia: (medicId: string, stationId: string, lngLat: [number, number]) => void
+  /** The drawn route was grabbed — bend this leg through here, at this slot. */
+  onAddVia: (
+    medicId: string,
+    stationId: string,
+    lngLat: [number, number],
+    insertAt: number,
+  ) => void
   onMoveVia: (medicId: string, stationId: string, index: number, lngLat: [number, number]) => void
   onRemoveVia: (medicId: string, stationId: string, index: number) => void
   /** A puck was dragged — relocates the posting the medic is currently on. */
@@ -193,7 +200,7 @@ export default function PlannerMap({
   const [dragSnapId, setDragSnapId] = useState<string | null>(null)
   /** A waypoint being pulled out of the drawn route, before it is committed. */
   const [viaDrag, setViaDrag] = useState<
-    { medicId: string; stationId: string; lngLat: [number, number] } | null
+    { medicId: string; stationId: string; insertAt: number; lngLat: [number, number] } | null
   >(null)
   /** The drag ends in a click; that click must not also post a station. */
   const suppressClick = useRef(false)
@@ -287,17 +294,19 @@ export default function PlannerMap({
 
   // One feature per leg, carrying the station it arrives at, so a click on the
   // drawn route knows which journey it landed on.
+  // One feature per PIECE of each leg — the stretches between waypoints — so a
+  // grab on the drawn line knows both which journey and where in its order.
   const selectedRoute = useMemo(() => {
     if (!selectedView || selectedView.legs.length === 0) return null
     return {
       type: 'FeatureCollection' as const,
-      features: selectedView.legs
-        .filter(leg => leg.path.length > 1)
-        .map(leg => ({
+      features: selectedView.legs.flatMap(leg =>
+        leg.segments.map(segment => ({
           type: 'Feature' as const,
-          properties: { stationId: leg.stationId },
-          geometry: { type: 'LineString' as const, coordinates: leg.path },
+          properties: { stationId: leg.stationId, insertAt: segment.insertAt },
+          geometry: { type: 'LineString' as const, coordinates: segment.path },
         })),
+      ),
     }
   }, [selectedView])
 
@@ -323,11 +332,17 @@ export default function PlannerMap({
         }) ?? []
       const stationId = hits[0]?.properties?.stationId
       if (typeof stationId !== 'string') return
+      const insertAt = Number(hits[0]?.properties?.insertAt)
 
       e.preventDefault()
       map?.dragPan.disable()
       suppressClick.current = true
-      setViaDrag({ medicId: selectedMedicId, stationId, lngLat: [e.lngLat.lng, e.lngLat.lat] })
+      setViaDrag({
+        medicId: selectedMedicId,
+        stationId,
+        insertAt: Number.isFinite(insertAt) ? insertAt : 0,
+        lngLat: [e.lngLat.lng, e.lngLat.lat],
+      })
     },
     [selectedMedicId],
   )
@@ -343,7 +358,7 @@ export default function PlannerMap({
   const handleMapMouseUp = useCallback(() => {
     if (!viaDrag) return
     mapRef.current?.getMap()?.dragPan.enable()
-    onAddVia(viaDrag.medicId, viaDrag.stationId, viaDrag.lngLat)
+    onAddVia(viaDrag.medicId, viaDrag.stationId, viaDrag.lngLat, viaDrag.insertAt)
     setViaDrag(null)
   }, [viaDrag, onAddVia])
 

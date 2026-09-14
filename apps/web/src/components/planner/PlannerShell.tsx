@@ -44,6 +44,7 @@ import {
 
 import { checkSweep, type SweepWarning } from '@/lib/planner/sweep-check'
 import { bucketCount } from '@/lib/planner/isochrone'
+import { splitRouteAtVias } from '@/lib/planner/route-segments'
 import { haversineMeters, nearestOnCourse } from '@/lib/planner/course'
 import { vehicleSpeedKmh } from '@/lib/planner/travel'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
@@ -191,14 +192,12 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
             .filter(seg => seg.kind === 'move')
             .map(seg => {
               const station = timeline.stations.find(st => st.id === seg.stationId)
-              return {
-                stationId: seg.stationId,
-                path:
-                  seg.path && seg.path.length > 1
-                    ? seg.path
-                    : ([seg.from, seg.to].filter(Boolean) as [number, number][]),
-                via: station?.via ?? [],
-              }
+              const via = station?.via ?? []
+              const path =
+                seg.path && seg.path.length > 1
+                  ? seg.path
+                  : ([seg.from, seg.to].filter(Boolean) as [number, number][])
+              return { stationId: seg.stationId, via, segments: splitRouteAtVias(path, via) }
             }),
         }
       }),
@@ -547,56 +546,40 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
    * that already has two waypoints puts the new one between them rather than on
    * the end, which is what the hand expects.
    */
+  /**
+   * Bend a journey through a point, at the place in the order it was grabbed.
+   *
+   * `insertAt` comes from the piece of the drawn line that was taken hold of,
+   * so pulling the stretch after via 1 makes the new point via 2. Choosing the
+   * slot by cheapest insertion instead — which is what this did — is free to
+   * reorder the waypoints and route the medic to the second one first, which is
+   * not what anybody drew.
+   */
   const addVia = useCallback(
-    (medicId: string, stationId: string, lngLat: [number, number]) => {
+    (medicId: string, stationId: string, lngLat: [number, number], insertAt: number) => {
       mutate(current => ({
         ...current,
         medics: current.medics.map(medic => {
           if (medic.id !== medicId) return medic
-          const stations = [...medic.stations].sort(
-            (a, b) => new Date(a.arriveAt).getTime() - new Date(b.arriveAt).getTime(),
-          )
-          const index = stations.findIndex(s => s.id === stationId)
-          const station = stations[index]
-          const previous = stations[index - 1]
-          if (!station || !previous) return medic
-
-          const point = { lat: lngLat[1], lng: lngLat[0] }
-          const existing = station.via ?? []
-          const legOf = (list: Array<{ lat: number; lng: number }>) => {
-            const chain = [
-              [previous.lng, previous.lat] as [number, number],
-              ...list.map(v => [v.lng, v.lat] as [number, number]),
-              [station.lng, station.lat] as [number, number],
-            ]
-            let total = 0
-            for (let i = 1; i < chain.length; i += 1) total += haversineMeters(chain[i - 1], chain[i])
-            return total
-          }
-          let best = existing.length
-          let bestCost = Number.POSITIVE_INFINITY
-          for (let slot = 0; slot <= existing.length; slot += 1) {
-            const candidate = [...existing.slice(0, slot), point, ...existing.slice(slot)]
-            const cost = legOf(candidate)
-            if (cost < bestCost) {
-              bestCost = cost
-              best = slot
-            }
-          }
-          const via = [...existing.slice(0, best), point, ...existing.slice(best)]
           return {
             ...medic,
-            stations: medic.stations.map(s =>
-              s.id === stationId
-                ? {
-                    ...s,
-                    via,
-                    // The journey changed shape; its old duration is stale.
-                    travelMinutes: s.travelSource === 'manual' ? s.travelMinutes : undefined,
-                    travelSource: s.travelSource === 'manual' ? s.travelSource : undefined,
-                  }
-                : s,
-            ),
+            stations: medic.stations.map(s => {
+              if (s.id !== stationId) return s
+              const existing = s.via ?? []
+              const slot = Math.max(0, Math.min(existing.length, insertAt))
+              const via = [
+                ...existing.slice(0, slot),
+                { lat: lngLat[1], lng: lngLat[0] },
+                ...existing.slice(slot),
+              ]
+              return {
+                ...s,
+                via,
+                // The journey changed shape; its old duration is stale.
+                travelMinutes: s.travelSource === 'manual' ? s.travelMinutes : undefined,
+                travelSource: s.travelSource === 'manual' ? s.travelSource : undefined,
+              }
+            }),
           }
         }),
       }))
