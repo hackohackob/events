@@ -93,20 +93,27 @@ export function coverageFor(
     let best = OUT_OF_REACH
 
     for (const medic of medics) {
-      let value: number
+      let value = OUT_OF_REACH
+
+      // A sweeper riding this course reaches along it by definition. Combined
+      // with, not instead of, the routed shape: the ride covers the course, the
+      // isochrone covers everywhere the course passes near.
       if (medic.alongCourse) {
         const [atCourseMeters, reach] = medic.alongCourse
-        value = reach > 0 ? Math.abs(atMeters - atCourseMeters) / reach : OUT_OF_REACH
-      } else if (medic.buckets) {
+        if (reach > 0) value = Math.abs(atMeters - atCourseMeters) / reach
+      }
+      if (medic.buckets) {
         const bucket = medic.buckets[i]
         const count = medic.bucketCount ?? 3
-        value = bucket === 0 ? OUT_OF_REACH : bucket / count
-      } else {
+        const routed = bucket === 0 ? OUT_OF_REACH : bucket / count
+        if (routed < value) value = routed
+      } else if (!medic.alongCourse) {
         const point = pointAtMeters(course, atMeters)
         value = medic.radiusMeters > 0
           ? haversineMeters(point, medic.position) / medic.radiusMeters
           : OUT_OF_REACH
       }
+
       if (value < best) best = value
       if (best <= 0.34) break
     }

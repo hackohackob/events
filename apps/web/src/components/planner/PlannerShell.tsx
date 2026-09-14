@@ -64,6 +64,9 @@ const TAB_LABEL: Record<Tab, string> = {
 /** Arrivals land on a five-minute grid — nobody briefs "arrive 09:07". */
 const TIME_GRID_MS = 5 * 60_000
 
+/** How far along their own course a sweeper is credited with covering. */
+const SWEEP_ALONG_COURSE_CAP_METERS = 3000
+
 export default function PlannerShell({ eventId }: { eventId: string }) {
   const [showCoverage, setShowCoverage] = useState(true)
   const [reachMinutes, setReachMinutes] = useState(DEFAULT_REACH_MINUTES)
@@ -214,16 +217,29 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
         const position = v.position!.position
         const reachMeters = (vehicleSpeedKmh(v.vehicleType) * 1000 * reachMinutes) / 60
 
-        if (v.position!.phase === 'sweeping' && v.position!.disciplineId === d.id) {
-          const { meters } = nearestOnCourse(d.course, position)
-          return { position, radiusMeters: reachMeters, alongCourse: [meters, reachMeters] }
-        }
+        // A sweeper is on this course, so the course is their road: they reach
+        // along it whatever the terrain around it does. That runs alongside the
+        // routed shape rather than replacing it — everywhere else they can get
+        // to still has to be measured on the network like anyone else.
+        const sweepingHere =
+          v.position!.phase === 'sweeping' && v.position!.disciplineId === d.id
+        const alongCourse: [number, number] | undefined = sweepingHere
+          ? [
+              nearestOnCourse(d.course, position).meters,
+              // Capped deliberately. This term exists to say "the sweeper is
+              // with the tail", not to claim a valley at open-road speed on
+              // ground the vehicle crawls over. Anything beyond it has to be
+              // earned from the isochrone, which measures the real ways.
+              Math.min(reachMeters, SWEEP_ALONG_COURSE_CAP_METERS),
+            ]
+          : undefined
 
         const anchor = reachAnchorNear(position, v.vehicleType)
-        if (!anchor) return { position, radiusMeters: reachMeters }
+        if (!anchor) return { position, radiusMeters: reachMeters, alongCourse }
         return {
           position,
           radiusMeters: reachMeters,
+          alongCourse,
           buckets: reachBuckets(d.id, d.course, anchor.key, anchor.shape),
           bucketCount: anchor.shape.rings.length,
         }

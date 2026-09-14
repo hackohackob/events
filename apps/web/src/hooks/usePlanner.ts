@@ -593,6 +593,9 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
    *  jumping; capped so one very long leg cannot flood the router. */
   const ANCHOR_SPACING_METERS = 1000
   const MAX_ANCHORS_PER_LEG = 24
+  /** A swept course is long; sample it more coarsely than a road journey. */
+  const SWEEP_ANCHOR_SPACING_METERS = 2000
+  const MAX_ANCHORS_PER_SWEEP = 45
   /** Isochrones in flight at once. Local GraphHopper answers one in ~100 ms. */
   const REACH_CONCURRENCY = 4
 
@@ -623,6 +626,26 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
 
       for (const station of stations) {
         want(stationJobs, [station.lng, station.lat], planVehicleAt(medic, new Date(station.arriveAt).getTime()))
+      }
+
+      // A sweep is a journey too — the longest one on the board. Skipping it
+      // left a sweeper falling back to a circle for every course except the one
+      // under their wheels, which is how a unit at Targovishte came to claim it
+      // covered Bostanite with a mountain in between.
+      for (const sweep of sweeps) {
+        const discipline = disciplines.find(d => d.id === sweep.disciplineId)
+        if (!discipline?.hasCourse) continue
+        const vehicle = planVehicleAt(medic, sweep.startMs)
+        const course = discipline.course
+        const from = nearestOnCourse(course, sweep.startPoint).meters
+        const span = Math.max(0, course.totalMeters - from)
+        const count = Math.min(
+          MAX_ANCHORS_PER_SWEEP,
+          Math.max(1, Math.floor(span / SWEEP_ANCHOR_SPACING_METERS)),
+        )
+        for (let a = 0; a <= count; a += 1) {
+          want(legJobs, pointAtMeters(course, from + (span * a) / count), vehicle)
+        }
       }
 
       // Points along each journey, so a medic in transit is measured too.
@@ -680,7 +703,7 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
     return () => {
       cancelled = true
     }
-  }, [plan, eventId, reachMinutes, sweepsFor, minTravelMinutes])
+  }, [plan, eventId, reachMinutes, sweepsFor, minTravelMinutes, disciplines])
 
   /**
    * The measured shape closest to a position, for that vehicle. `tolerance` is
