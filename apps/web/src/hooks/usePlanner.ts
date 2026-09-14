@@ -38,7 +38,7 @@ import {
   type SweepWindow,
 } from '@/lib/planner/schedule'
 import { estimateTravelMinutes } from '@/lib/planner/travel'
-import { buildReachShape, reachKey, type ReachShape } from '@/lib/planner/isochrone'
+import { bucketsForCourse, buildReachShape, reachKey, type ReachShape } from '@/lib/planner/isochrone'
 import { sampleChords, type SweepFit } from '@/lib/planner/sweep-check'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
@@ -116,6 +116,31 @@ export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
 /** Stable id for a discipline — the plan keys its schedule off this. */
 export function disciplineKey(dayDate: string, name: string): string {
   return `${dayDate}::${name}`
+}
+
+/** The point a given fraction along a polyline, by distance. */
+function pointAlongPath(path: Array<[number, number]>, fraction: number): [number, number] {
+  if (path.length === 0) return [0, 0]
+  if (path.length === 1) return path[0]
+  const steps: number[] = [0]
+  let total = 0
+  for (let i = 1; i < path.length; i += 1) {
+    total += haversineMeters(path[i - 1], path[i])
+    steps.push(total)
+  }
+  if (total <= 0) return path[0]
+  const target = total * Math.max(0, Math.min(1, fraction))
+  for (let i = 1; i < steps.length; i += 1) {
+    if (steps[i] >= target) {
+      const span = steps[i] - steps[i - 1]
+      const t = span > 0 ? (target - steps[i - 1]) / span : 0
+      return [
+        path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t,
+        path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t,
+      ]
+    }
+  }
+  return path[path.length - 1]
 }
 
 function legKey(from: { lat: number; lng: number }, to: { lat: number; lng: number }, vehicle: string): string {
@@ -549,28 +574,65 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
 
   // ── Reach (routed isochrones) ───────────────────────────────────────────
   //
-  // Only postings are measured on the network: they are where a medic actually
-  // stands, they are few, and they do not move while the clock runs. A medic in
-  // transit or riding a sweep falls back to a radius — there is no sensible way
-  // to ask the router about a position that changes every frame.
+  // Every reach answer on the board has to be the same KIND of answer. Mixing a
+  // routed isochrone for a parked medic with a crow-flies circle for a moving
+  // one makes coverage lurch the moment someone arrives — the circle claims a
+  // valley the road never reaches, then the isochrone takes it away again.
+  //
+  // So isochrones are measured at anchors: every posting, plus points spaced
+  // along each journey. A medic anywhere near an anchor uses that anchor's
+  // shape, which keeps the measure consistent from the moment they set off to
+  // the moment they arrive.
   const reachCache = useRef<Map<string, ReachShape>>(new Map())
+  const reachAnchors = useRef<Array<{ key: string; point: [number, number]; vehicle: VehicleType }>>([])
   const reachAttempted = useRef<Set<string>>(new Set())
   const [reachTick, setReachTick] = useState(0)
+
+  /** Spacing between journey anchors. Fine enough that a medic is never far
+   *  from one, coarse enough not to flood the router on a 40 km leg. */
+  const ANCHOR_SPACING_METERS = 2500
+  const MAX_ANCHORS_PER_LEG = 6
 
   useEffect(() => {
     if (!plan || !eventId || !Number.isFinite(reachMinutes)) return
     let cancelled = false
 
     const jobs: Array<{ point: [number, number]; vehicle: VehicleType; key: string }> = []
+    const want = (point: [number, number], vehicle: VehicleType) => {
+      const key = reachKey(point, vehicle, reachMinutes)
+      if (reachAttempted.current.has(key) || jobs.some(j => j.key === key)) return
+      jobs.push({ point, vehicle, key })
+    }
+
     for (const medic of plan.medics) {
       if (medic.hidden) continue
-      for (const station of medic.stations) {
-        const vehicle = planVehicleAt(medic, new Date(station.arriveAt).getTime())
-        const point: [number, number] = [station.lng, station.lat]
-        const key = reachKey(point, vehicle, reachMinutes)
-        if (reachAttempted.current.has(key)) continue
-        if (jobs.some(j => j.key === key)) continue
-        jobs.push({ point, vehicle, key })
+      const sweeps = sweepsFor(medic)
+      const stations = plannedStations(medic, sweeps)
+
+      for (const station of stations) {
+        want([station.lng, station.lat], planVehicleAt(medic, new Date(station.arriveAt).getTime()))
+      }
+
+      // Points along each journey, so a medic in transit is measured too.
+      for (let i = 1; i < stations.length; i += 1) {
+        const from = stations[i - 1]
+        const to = stations[i]
+        if (from.sweep?.edge === 'start' && to.sweep?.edge === 'end') continue
+        if (to.noTravel) continue
+        const vehicle = legVehicle(medic, from, to, minTravelMinutes)
+        const path = pathCache.current.get(legKey(from, to, vehicle)) ?? [
+          [from.lng, from.lat],
+          [to.lng, to.lat],
+        ]
+        let legMeters = 0
+        for (let p = 1; p < path.length; p += 1) legMeters += haversineMeters(path[p - 1], path[p])
+        const count = Math.min(
+          MAX_ANCHORS_PER_LEG,
+          Math.max(0, Math.floor(legMeters / ANCHOR_SPACING_METERS) - 1),
+        )
+        for (let a = 1; a <= count; a += 1) {
+          want(pointAlongPath(path, a / (count + 1)), vehicle)
+        }
       }
     }
     if (jobs.length === 0) return
@@ -586,7 +648,13 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
           reachMinutes,
         )
         if (cancelled) return
-        if (result) reachCache.current.set(job.key, buildReachShape(result.polygons))
+        if (result) {
+          reachCache.current.set(job.key, buildReachShape(result.polygons))
+          reachAnchors.current = [
+            ...reachAnchors.current.filter(a => a.key !== job.key),
+            { key: job.key, point: job.point, vehicle: job.vehicle },
+          ]
+        }
         setReachTick(t => t + 1)
       }
     })()
@@ -594,12 +662,51 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
     return () => {
       cancelled = true
     }
-  }, [plan, eventId, reachMinutes])
+  }, [plan, eventId, reachMinutes, sweepsFor, minTravelMinutes])
 
-  const reachShapeFor = useCallback(
-    (point: [number, number], vehicle: VehicleType): ReachShape | undefined =>
-      reachCache.current.get(reachKey(point, vehicle, reachMinutes)),
-    [reachMinutes, reachTick],
+  /**
+   * The measured shape closest to a position, for that vehicle. `tolerance` is
+   * how far the medic may be from the anchor before the answer stops being
+   * worth anything and the caller falls back to a circle.
+   */
+  const reachAnchorNear = useCallback(
+    (
+      point: [number, number],
+      vehicle: VehicleType,
+      toleranceMeters = ANCHOR_SPACING_METERS,
+    ): { key: string; shape: ReachShape } | undefined => {
+      let best: { key: string; shape: ReachShape } | undefined
+      let bestDistance = toleranceMeters
+      for (const anchor of reachAnchors.current) {
+        if (anchor.vehicle !== vehicle) continue
+        const d = haversineMeters(anchor.point, point)
+        if (d > bestDistance) continue
+        const shape = reachCache.current.get(anchor.key)
+        if (!shape) continue
+        best = { key: anchor.key, shape }
+        bestDistance = d
+      }
+      return best
+    },
+    [reachTick],
+  )
+
+  /**
+   * Which course bins an anchor's isochrone covers. Cached per course per
+   * anchor: the polygons never change once measured, and re-testing 96 points
+   * against every ring for every medic on every frame would not hold 60 fps.
+   */
+  const bucketCache = useRef<Map<string, Uint8Array>>(new Map())
+  const reachBuckets = useCallback(
+    (courseId: string, course: CourseModel, anchorKey: string, shape: ReachShape): Uint8Array => {
+      const key = `${courseId}|${anchorKey}`
+      const cached = bucketCache.current.get(key)
+      if (cached) return cached
+      const built = bucketsForCourse(course, shape)
+      bucketCache.current.set(key, built)
+      return built
+    },
+    [],
   )
 
   // ── Can the sweeper's vehicle follow the course? ────────────────────────
@@ -723,7 +830,8 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
     minTravelMinutes,
     pathLookup,
     durationLookup,
-    reachShapeFor,
+    reachAnchorNear,
+    reachBuckets,
     sweepFitFor,
     sweepWindows,
     sweepsFor,

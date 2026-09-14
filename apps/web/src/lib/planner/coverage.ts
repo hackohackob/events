@@ -23,14 +23,17 @@ const OUT_OF_REACH = 2.2
 
 export interface CoverageMedic {
   position: [number, number]
-  /**
-   * Per-bin reach buckets from a routed isochrone (1 = innermost). Present for
-   * medics standing still long enough to have been measured.
-   */
+  /** Per-bin reach buckets from a routed isochrone (1 = innermost). */
   buckets?: Uint8Array
   /** How many buckets the isochrone was cut into. */
   bucketCount?: number
-  /** Crow-flies fallback for medics on the move, metres. */
+  /**
+   * A sweeper is ON this course, so their road IS the course: reach is measured
+   * as distance along it from where they are, not as a shape around them.
+   * `[metresAlongCourse, metresOfReach]`.
+   */
+  alongCourse?: [number, number]
+  /** Last resort for a position nothing has been measured near, metres. */
   radiusMeters: number
 }
 
@@ -73,7 +76,7 @@ export function coverageFor(
   const binMeters = course.totalMeters / DENSITY_BINS
   const ratio = new Array<number>(DENSITY_BINS).fill(OUT_OF_REACH)
   const occupied = new Array<boolean>(DENSITY_BINS).fill(false)
-  const routed = medics.some(m => m.buckets != null)
+  const routed = medics.some(m => m.buckets != null || m.alongCourse != null)
 
   const hasField = field.onCourse > 0 && field.tailMeters >= 0
   const fieldFrom = hasField ? Math.max(0, field.tailMeters) : 0
@@ -91,7 +94,10 @@ export function coverageFor(
 
     for (const medic of medics) {
       let value: number
-      if (medic.buckets) {
+      if (medic.alongCourse) {
+        const [atCourseMeters, reach] = medic.alongCourse
+        value = reach > 0 ? Math.abs(atMeters - atCourseMeters) / reach : OUT_OF_REACH
+      } else if (medic.buckets) {
         const bucket = medic.buckets[i]
         const count = medic.bucketCount ?? 3
         value = bucket === 0 ? OUT_OF_REACH : bucket / count

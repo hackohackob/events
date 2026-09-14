@@ -41,8 +41,9 @@ import {
   type CoverageMedic,
   type CoverageReport,
 } from '@/lib/planner/coverage'
-import { bucketsForCourse } from '@/lib/planner/isochrone'
+
 import { checkSweep, type SweepWarning } from '@/lib/planner/sweep-check'
+import { nearestOnCourse } from '@/lib/planner/course'
 import { vehicleSpeedKmh } from '@/lib/planner/travel'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
 import PlannerMap, { type PlannedMedicView } from './PlannerMap'
@@ -76,7 +77,8 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
     snapTarget,
     pathLookup,
     durationLookup,
-    reachShapeFor,
+    reachAnchorNear,
+    reachBuckets,
     sweepFitFor,
     sweepsFor,
     minTravelMinutes,
@@ -189,11 +191,11 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
   /**
    * Reach analysis, per course.
    *
-   * A posted medic is measured on the road network — their isochrone is indexed
-   * against the course once, when it arrives — so a ridge between them and the
-   * course counts against them. Anyone on the move gets a crow-flies circle
-   * sized from their vehicle's speed, which is the best that can be said about
-   * a position that changes every frame.
+   * Every medic on the board is measured the same way, whether they are parked
+   * or driving: the nearest isochrone anchor to where they are. Journeys carry
+   * anchors of their own, so coverage no longer lurches the moment someone
+   * arrives somewhere. A sweeper is the one exception — they are ON the course,
+   * so their reach runs along it rather than radiating from it.
    */
   const coverage = useMemo(() => {
     const out: Record<string, CoverageReport> = {}
@@ -210,23 +212,35 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
       }
       const medicsHere: CoverageMedic[] = onDuty.map(v => {
         const position = v.position!.position
-        const radiusMeters = (vehicleSpeedKmh(v.vehicleType) * 1000 * reachMinutes) / 60
-        // Only a medic standing on a posting has a measured shape: `position`
-        // equals the station, so the same key finds it.
-        const shape =
-          v.position!.phase === 'holding' ? reachShapeFor(position, v.vehicleType) : undefined
-        if (!shape) return { position, radiusMeters }
+        const reachMeters = (vehicleSpeedKmh(v.vehicleType) * 1000 * reachMinutes) / 60
+
+        if (v.position!.phase === 'sweeping' && v.position!.disciplineId === d.id) {
+          const { meters } = nearestOnCourse(d.course, position)
+          return { position, radiusMeters: reachMeters, alongCourse: [meters, reachMeters] }
+        }
+
+        const anchor = reachAnchorNear(position, v.vehicleType)
+        if (!anchor) return { position, radiusMeters: reachMeters }
         return {
           position,
-          radiusMeters,
-          buckets: bucketsForCourse(d.course, shape),
-          bucketCount: shape.rings.length,
+          radiusMeters: reachMeters,
+          buckets: reachBuckets(d.id, d.course, anchor.key, anchor.shape),
+          bucketCount: anchor.shape.rings.length,
         }
       })
       out[d.id] = coverageFor(d.course, fields[d.id] ?? EMPTY_FIELD, medicsHere)
     }
     return out
-  }, [showCoverage, medicViews, disciplines, fields, hiddenDisciplineIds, reachMinutes, reachShapeFor])
+  }, [
+    showCoverage,
+    medicViews,
+    disciplines,
+    fields,
+    hiddenDisciplineIds,
+    reachMinutes,
+    reachAnchorNear,
+    reachBuckets,
+  ])
 
   /**
    * Whether each medic's vehicle can actually do the sweep they are down for.
