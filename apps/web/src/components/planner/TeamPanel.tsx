@@ -13,9 +13,9 @@ import {
   UserPlus,
   X,
 } from 'lucide-react'
-import { VEHICLE_TYPES, VEHICLE_TYPE_META, planVehicleAt } from '@events/contracts'
-import type { PlanMedic, PlanStation, VehicleType } from '@events/contracts'
-import type { MedicTimeline } from '@/lib/planner/schedule'
+import { VEHICLE_TYPES, VEHICLE_TYPE_META, planSweeps, planVehicleAt } from '@events/contracts'
+import type { PlanMedic, PlanStation, PlanSweepJoin, VehicleType } from '@events/contracts'
+import type { MedicTimeline, ResolvedSweep } from '@/lib/planner/schedule'
 import { formatDuration, formatStamp, formatTime } from '@/lib/planner/itinerary'
 
 interface Props {
@@ -37,6 +37,9 @@ interface Props {
   /** Disciplines available to sweep. */
   disciplines: Array<{ id: string; name: string; color: string; hasCourse: boolean }>
   onToggleSweeper: (medicId: string, disciplineId: string) => void
+  onSetSweepJoin: (medicId: string, disciplineId: string, joinFrom: PlanSweepJoin) => void
+  /** The medic's sweeps with their join point already worked out. */
+  sweepsFor: (medic: PlanMedic) => ResolvedSweep[]
 }
 
 function toLocalInput(iso: string): string {
@@ -62,6 +65,8 @@ export default function TeamPanel({
   onRemoveVehicleChange,
   disciplines,
   onToggleSweeper,
+  onSetSweepJoin,
+  sweepsFor,
 }: Props) {
   const [editingStation, setEditingStation] = useState<string | null>(null)
 
@@ -124,9 +129,9 @@ export default function TeamPanel({
                     {medic.name}
                   </span>
                   <span className="flex items-center gap-2 text-[10px]" style={{ color: '#64748b' }}>
-                    {(medic.sweeperFor?.length ?? 0) > 0 && (
+                    {planSweeps(medic).length > 0 && (
                       <span style={{ color: medic.color }}>
-                        sweeps {medic.sweeperFor!.length === 1 ? '1 course' : `${medic.sweeperFor!.length} courses`} ·
+                        sweeps {planSweeps(medic).length === 1 ? '1 course' : `${planSweeps(medic).length} courses`} ·
                       </span>
                     )}
                     <span>{stations.length} {stations.length === 1 ? 'position' : 'positions'}</span>
@@ -229,7 +234,7 @@ export default function TeamPanel({
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {disciplines.map(d => {
-                        const on = medic.sweeperFor?.includes(d.id) ?? false
+                        const on = planSweeps(medic).some(s => s.disciplineId === d.id)
                         return (
                           <button
                             key={d.id}
@@ -256,6 +261,51 @@ export default function TeamPanel({
                         )
                       })}
                     </div>
+
+                    {/* How each sweep starts. "From my post" is the normal
+                        case — the medic works a position and picks up the tail
+                        when it reaches them — so the time is computed, not
+                        typed: it is whenever the last participant gets there. */}
+                    {sweepsFor(medic).map(sweep => (
+                      <div
+                        key={sweep.disciplineId}
+                        className="mt-1.5 px-2 py-1.5 rounded-xl"
+                        style={{ background: `${sweep.color}12`, border: `1px solid ${sweep.color}33` }}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold flex-1 truncate" style={{ color: sweep.color }}>
+                            {sweep.label}
+                          </span>
+                          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(148,163,184,0.16)' }}>
+                            {(
+                              [
+                                ['post', 'From my post'],
+                                ['start', 'From the gun'],
+                              ] as Array<[PlanSweepJoin, string]>
+                            ).map(([value, text]) => (
+                              <button
+                                key={value}
+                                onClick={() => onSetSweepJoin(medic.id, sweep.disciplineId, value)}
+                                className="px-2 py-0.5 text-[9px] font-bold transition-colors"
+                                style={{
+                                  background: sweep.joinFrom === value ? `${sweep.color}33` : 'transparent',
+                                  color: sweep.joinFrom === value ? sweep.color : '#64748b',
+                                }}
+                              >
+                                {text}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-[9px] mt-1" style={{ color: sweep.fellBackToStart ? '#f59e0b' : '#64748b' }}>
+                          {sweep.fellBackToStart
+                            ? 'No post is manned before the tail passes — joining at the gun instead'
+                            : sweep.joinFrom === 'post'
+                              ? `Last runner reaches ${sweep.postLabel} at ${formatTime(sweep.startMs)} · clear ${formatTime(sweep.endMs)}`
+                              : `Off the line ${formatTime(sweep.startMs)} · clear ${formatTime(sweep.endMs)}`}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
@@ -276,7 +326,9 @@ export default function TeamPanel({
                       const arriveMs = new Date(station.arriveAt).getTime()
                       const move = timeline?.segments.find(s => s.kind === 'move' && s.stationId === station.id)
                       const editing = editingStation === station.id
-                      const sweep = (station as { sweep?: { edge: 'start' | 'end' } }).sweep
+                      const sweep = (station as {
+                        sweep?: { edge: 'start' | 'end'; joinFrom?: PlanSweepJoin }
+                      }).sweep
                       if (sweep) {
                         // A sweep endpoint is owned by the discipline's schedule
                         // — re-timing it here would just be overwritten.
@@ -297,7 +349,11 @@ export default function TeamPanel({
                               className="flex-1 min-w-0 text-left"
                             >
                               <span className="block text-xs font-bold truncate" style={{ color: '#e2e8f0' }}>
-                                {sweep.edge === 'start' ? 'Start sweeping' : 'Sweep complete'} — {station.label.replace(/ (start|finish)$/, '')}
+                                {sweep.edge === 'end'
+                                  ? `Sweep complete — ${station.label.replace(/ finish$/, '')}`
+                                  : sweep.joinFrom === 'post'
+                                    ? `Last runner here — go with them (${station.label.replace(/ tail$/, '')})`
+                                    : `Start sweeping — ${station.label.replace(/ start$/, '')}`}
                               </span>
                               <span className="flex items-center gap-1.5 text-[10px]" style={{ color: '#64748b' }}>
                                 <Clock className="w-2.5 h-2.5" />

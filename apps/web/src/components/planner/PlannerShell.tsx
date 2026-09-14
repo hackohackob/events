@@ -19,9 +19,10 @@ import type {
   PlanDisciplineSchedule,
   PlanMedic,
   PlanStation,
+  PlanSweepJoin,
   VehicleType,
 } from '@events/contracts'
-import { planMedicColor, planVehicleAt } from '@events/contracts'
+import { planMedicColor, planSweeps, planVehicleAt } from '@events/contracts'
 import { usePlanner } from '@/hooks/usePlanner'
 import type { BaseLayer } from '@/lib/map-styles'
 import { fieldAt, EMPTY_FIELD, type FieldState } from '@/lib/planner/field'
@@ -30,6 +31,7 @@ import {
   resolveMedicTimeline,
   type MedicTimeline,
   type ResolveOptions,
+  type ResolvedSweep,
 } from '@/lib/planner/schedule'
 import { formatTime } from '@/lib/planner/itinerary'
 import { coverageFor, DEFAULT_COVERAGE_METERS, EMPTY_COVERAGE, type CoverageReport } from '@/lib/planner/coverage'
@@ -268,11 +270,36 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
         ...current,
         medics: current.medics.map(medic => {
           if (medic.id !== medicId) return medic
-          const now = medic.sweeperFor ?? []
-          const next = now.includes(disciplineId)
-            ? now.filter(id => id !== disciplineId)
-            : [...now, disciplineId]
-          return { ...medic, sweeperFor: next.length > 0 ? next : undefined }
+          const now = planSweeps(medic)
+          const next = now.some(s => s.disciplineId === disciplineId)
+            ? now.filter(s => s.disciplineId !== disciplineId)
+            : [
+                ...now,
+                {
+                  disciplineId,
+                  // A medic who already has postings almost always picks the
+                  // tail up at one of them; only a unit with nothing on the
+                  // board is a dedicated off-the-line sweeper.
+                  joinFrom: medic.stations.length > 0 ? ('post' as const) : ('start' as const),
+                },
+              ]
+          return { ...medic, sweeps: next.length > 0 ? next : undefined, sweeperFor: undefined }
+        }),
+      }))
+    },
+    [mutate],
+  )
+
+  const setSweepJoin = useCallback(
+    (medicId: string, disciplineId: string, joinFrom: PlanSweepJoin) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic => {
+          if (medic.id !== medicId) return medic
+          const next = planSweeps(medic).map(s =>
+            s.disciplineId === disciplineId ? { ...s, joinFrom } : s,
+          )
+          return { ...medic, sweeps: next, sweeperFor: undefined }
         }),
       }))
     },
@@ -714,6 +741,8 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                   hasCourse: d.hasCourse,
                 }))}
                 onToggleSweeper={toggleSweeper}
+                onSetSweepJoin={setSweepJoin}
+                sweepsFor={sweepsFor}
               />
             )}
             {tab === 'briefing' && (

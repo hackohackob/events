@@ -9,17 +9,26 @@ import type {
   PlanStation,
   VehicleType,
 } from '@events/contracts'
-import { EMPTY_EVENT_PLAN, normalizeVehicleType, planMedicColor } from '@events/contracts'
+import { EMPTY_EVENT_PLAN, normalizeVehicleType, planMedicColor, planSweeps } from '@events/contracts'
 import { fetchEventById, type ApiEventSummary } from '@/api/events'
 import { getMedicRoster } from '@/api/medics'
 import { fetchPlan, routeLeg, savePlan } from '@/api/plan'
 import { fetchGpxTrack } from '@/lib/gpx'
-import { buildCourse, haversineMeters, pointAtMeters, type CourseModel } from '@/lib/planner/course'
+import {
+  buildCourse,
+  haversineMeters,
+  nearestOnCourse,
+  pointAtMeters,
+  timeFractionAtMeters,
+  type CourseModel,
+} from '@/lib/planner/course'
 import { buildFieldShape, fieldAt, scheduleEndMs, type FieldShape } from '@/lib/planner/field'
 import {
   DEFAULT_MIN_TRAVEL_MINUTES,
   legVehicle,
   plannedStations,
+  resolveSweep,
+  type ResolvedSweep,
   type SweepWindow,
 } from '@/lib/planner/schedule'
 import { estimateTravelMinutes } from '@/lib/planner/travel'
@@ -378,23 +387,33 @@ export function usePlanner(eventId: string) {
     const out: Record<string, SweepWindow> = {}
     for (const d of disciplines) {
       if (!d.hasCourse) continue
-      const startMs = new Date(d.schedule.startAt).getTime()
-      if (!Number.isFinite(startMs)) continue
+      const gunMs = new Date(d.schedule.startAt).getTime()
+      if (!Number.isFinite(gunMs)) continue
       const coords = d.course.coordinates
+      const terrain = (d.schedule.pacing ?? 'terrain') === 'terrain'
+      const waveOffset = d.schedule.startWindowMinutes ?? 0
       out[d.id] = {
         disciplineId: d.id,
         label: d.name,
         color: d.color,
-        startMs,
+        gunMs,
         endMs: scheduleEndMs(d.schedule),
-        startPoint: coords[0],
+        courseStart: coords[0],
         endPoint: coords[coords.length - 1],
         positionAt: (atMs: number) => {
           const state = fieldAt(d.schedule, d.shape, d.course, atMs)
           if (state.onCourse <= 0 || state.tailMeters < 0) {
-            return atMs <= startMs ? coords[0] : coords[coords.length - 1]
+            return atMs <= gunMs ? coords[0] : coords[coords.length - 1]
           }
           return pointAtMeters(d.course, state.tailMeters)
+        },
+        // The back of the field is the slowest runner: off last in a waved
+        // start, and taking the full cut-off to cover the whole course. That
+        // makes the pass time a direct calculation rather than a search.
+        tailReaches: (point: [number, number]) => {
+          const { meters } = nearestOnCourse(d.course, point)
+          const fraction = timeFractionAtMeters(d.course, meters, terrain)
+          return gunMs + (waveOffset + d.schedule.slowestMinutes * fraction) * 60000
         },
       }
     }
@@ -402,10 +421,13 @@ export function usePlanner(eventId: string) {
   }, [disciplines])
 
   const sweepsFor = useCallback(
-    (medic: PlanMedic): SweepWindow[] =>
-      (medic.sweeperFor ?? [])
-        .map(id => sweepWindows[id])
-        .filter((w): w is SweepWindow => w != null)
+    (medic: PlanMedic): ResolvedSweep[] =>
+      planSweeps(medic)
+        .map(assignment => {
+          const window = sweepWindows[assignment.disciplineId]
+          return window ? resolveSweep(medic, window, assignment.joinFrom) : null
+        })
+        .filter((s): s is ResolvedSweep => s != null)
         .sort((a, b) => a.startMs - b.startMs),
     [sweepWindows],
   )

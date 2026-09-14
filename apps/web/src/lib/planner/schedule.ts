@@ -13,7 +13,13 @@
  * (so for that window their position is the back of the field, not a post).
  */
 
-import type { PlanMedic, PlanStation, PlanTravelSource, VehicleType } from '@events/contracts'
+import type {
+  PlanMedic,
+  PlanStation,
+  PlanSweepJoin,
+  PlanTravelSource,
+  VehicleType,
+} from '@events/contracts'
 import { planVehicleAt } from '@events/contracts'
 import { haversineMeters } from './course'
 import { estimateTravelMinutes } from './travel'
@@ -70,17 +76,104 @@ export interface SweepWindow {
   disciplineId: string
   label: string
   color: string
+  /** The gun. Where a `start` sweeper joins. */
+  gunMs: number
+  /** When the last participant is off the course. */
+  endMs: number
+  courseStart: [number, number]
+  endPoint: [number, number]
+  /** Where the back of the field is at an instant. */
+  positionAt: (atMs: number) => [number, number]
+  /** When the back of the field reaches a point beside the course. */
+  tailReaches: (point: [number, number]) => number
+}
+
+/**
+ * A sweep, resolved against one medic's own postings.
+ *
+ * `post` sweeps have no fixed start: the medic works their post and becomes the
+ * sweeper the moment the last participant reaches them, so the start time falls
+ * out of the schedule rather than being typed in.
+ */
+export interface ResolvedSweep {
+  disciplineId: string
+  label: string
+  color: string
+  joinFrom: PlanSweepJoin
+  /** When this medic joins the tail. */
   startMs: number
   endMs: number
+  /** Where they join from. */
   startPoint: [number, number]
   endPoint: [number, number]
   positionAt: (atMs: number) => [number, number]
+  /** The posting they wait at, when joining from one. */
+  postStationId?: string
+  postLabel?: string
+  /** Set when `post` was asked for but no posting qualified. */
+  fellBackToStart?: boolean
+}
+
+/**
+ * Work out when and where a medic picks up the tail.
+ *
+ * For a post join the candidate is the latest posting the medic is already
+ * standing at by the time the tail passes it — "I'm on Point 2 until the last
+ * runner comes through, then I go with them". If nothing qualifies (every
+ * posting is made after the tail has already gone by) the sweep falls back to
+ * the gun, and says so, rather than quietly inventing a time.
+ */
+export function resolveSweep(
+  medic: PlanMedic,
+  window: SweepWindow,
+  joinFrom: PlanSweepJoin,
+): ResolvedSweep {
+  const base: ResolvedSweep = {
+    disciplineId: window.disciplineId,
+    label: window.label,
+    color: window.color,
+    joinFrom,
+    startMs: window.gunMs,
+    endMs: window.endMs,
+    startPoint: window.courseStart,
+    endPoint: window.endPoint,
+    positionAt: window.positionAt,
+  }
+  if (joinFrom === 'start') return base
+
+  let best: { station: PlanStation; atMs: number } | null = null
+  for (const station of medic.stations) {
+    const arrive = ms(station.arriveAt)
+    if (!Number.isFinite(arrive)) continue
+    const passes = window.tailReaches([station.lng, station.lat])
+    if (!Number.isFinite(passes) || passes > window.endMs) continue
+    // They have to be standing there before the tail goes through.
+    if (arrive > passes) continue
+    if (!best || arrive > ms(best.station.arriveAt)) best = { station, atMs: passes }
+  }
+
+  if (!best) return { ...base, fellBackToStart: true }
+  return {
+    ...base,
+    startMs: best.atMs,
+    // They step onto the course from where they were standing, so the handover
+    // is drawn at the post rather than jumping to the projected course point.
+    startPoint: [best.station.lng, best.station.lat],
+    postStationId: best.station.id,
+    postLabel: best.station.label,
+  }
 }
 
 /** A station as the scheduler sees it — a real posting, or a sweep endpoint. */
 export interface PlannedStation extends PlanStation {
   /** Set on the two synthetic stations that bracket a sweep. */
-  sweep?: { disciplineId: string; edge: 'start' | 'end' }
+  sweep?: { disciplineId: string; edge: 'start' | 'end'; joinFrom?: PlanSweepJoin }
+  /**
+   * No journey precedes this one — the medic is already standing here. Set on
+   * the start of a sweep taken up from a post, where charging a minimum travel
+   * time would invent a conflict out of thin air.
+   */
+  noTravel?: boolean
 }
 
 /** Routed geometries live in memory only — the plan stores durations, not shapes. */
@@ -101,7 +194,7 @@ export interface ResolveOptions {
    */
   durations?: (from: PlanStation, to: PlanStation, vehicle: VehicleType) => number | undefined
   /** Sweeps this medic is on, already resolved against the discipline schedules. */
-  sweeps?: SweepWindow[]
+  sweeps?: ResolvedSweep[]
 }
 
 export const DEFAULT_MIN_TRAVEL_MINUTES = 10
@@ -120,18 +213,20 @@ export function vehicleAt(medic: PlanMedic, atMs: number): VehicleType {
  * endpoints of each sweep. Sweep endpoints are synthetic — they exist so the
  * legs into and out of a sweep are costed like any other move.
  */
-export function plannedStations(medic: PlanMedic, sweeps: SweepWindow[] = []): PlannedStation[] {
+export function plannedStations(medic: PlanMedic, sweeps: ResolvedSweep[] = []): PlannedStation[] {
   const out: PlannedStation[] = medic.stations.filter(s => Number.isFinite(ms(s.arriveAt)))
 
   const synthetic: PlannedStation[] = []
   for (const sweep of sweeps) {
+    const fromPost = sweep.joinFrom === 'post' && sweep.postStationId != null
     synthetic.push({
       id: `sweep:${sweep.disciplineId}:start`,
       arriveAt: new Date(sweep.startMs).toISOString(),
       lng: sweep.startPoint[0],
       lat: sweep.startPoint[1],
-      label: `${sweep.label} start`,
-      sweep: { disciplineId: sweep.disciplineId, edge: 'start' },
+      label: fromPost ? `${sweep.label} tail` : `${sweep.label} start`,
+      sweep: { disciplineId: sweep.disciplineId, edge: 'start', joinFrom: sweep.joinFrom },
+      noTravel: fromPost || undefined,
     })
     synthetic.push({
       id: `sweep:${sweep.disciplineId}:end`,
@@ -154,7 +249,7 @@ export function plannedStations(medic: PlanMedic, sweeps: SweepWindow[] = []): P
 }
 
 /** Stations in the order they happen, sweeps included. */
-export function sortedStations(medic: PlanMedic, sweeps: SweepWindow[] = []): PlannedStation[] {
+export function sortedStations(medic: PlanMedic, sweeps: ResolvedSweep[] = []): PlannedStation[] {
   return plannedStations(medic, sweeps)
 }
 
@@ -258,6 +353,22 @@ export function resolveMedicTimeline(medic: PlanMedic, options: ResolveOptions =
         from: [prev.lng, prev.lat],
         to: [station.lng, station.lat],
       })
+      continue
+    }
+
+    if (station.noTravel) {
+      // Standing still until the tail arrives: one continuous hold at the post,
+      // no journey and therefore no minimum travel time to fall foul of.
+      if (arrive - prevArrive >= 60000) {
+        segments.push({
+          kind: 'hold',
+          fromMs: prevArrive,
+          toMs: arrive,
+          stationId: prev.id,
+          label: prev.label,
+          to: [prev.lng, prev.lat],
+        })
+      }
       continue
     }
 
@@ -384,7 +495,7 @@ function walkPath(path: [number, number][], fraction: number): [number, number] 
 export function medicPositionAt(
   timeline: MedicTimeline,
   atMs: number,
-  sweeps: SweepWindow[] = [],
+  sweeps: ResolvedSweep[] = [],
 ): MedicPosition | null {
   const stations = timeline.stations
   if (stations.length === 0) return null

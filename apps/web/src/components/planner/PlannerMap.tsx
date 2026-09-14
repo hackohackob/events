@@ -11,7 +11,6 @@ import { PoiIcon } from '@/lib/poi-icons'
 import { POI_CONFIGS } from '@/lib/constants'
 import type { PointOfInterest } from '@/lib/types'
 import { DENSITY_BINS, type FieldState } from '@/lib/planner/field'
-import { pointAtMeters } from '@/lib/planner/course'
 import type { PlannerDiscipline } from '@/hooks/usePlanner'
 import type { CoverageReport } from '@/lib/planner/coverage'
 import type { MedicPosition } from '@/lib/planner/schedule'
@@ -50,6 +49,17 @@ interface Props {
   coverageMeters: number
   /** Sweep windows, so a sweeping medic's puck reads differently. */
   sweepColors: Record<string, string>
+}
+
+/** "Nurse Elena D." → "NE". Two letters is what fits legibly at puck size. */
+function initials(name: string): string {
+  const parts = name
+    .replace(/[^\p{L}\p{N} .'-]/gu, '')
+    .split(/[\s.]+/)
+    .filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
 // ─── Course painting ─────────────────────────────────────────────────────────
@@ -218,36 +228,6 @@ export default function PlannerMap({
     return { type: 'FeatureCollection' as const, features }
   }, [visible, fields, showRunners])
 
-  /** Leader + tail badges, so "who is still out there" is legible at a glance. */
-  const edgeMarkers = useMemo(
-    () =>
-      visible.flatMap(d => {
-        const field = fields[d.id]
-        if (!field || field.onCourse <= 0) return []
-        const out: Array<{ key: string; lngLat: [number, number]; label: string; color: string; kind: 'leader' | 'tail' }> = []
-        if (field.leaderMeters >= 0) {
-          out.push({
-            key: `${d.id}-leader`,
-            lngLat: pointAtMeters(d.course, field.leaderMeters),
-            label: `${(field.leaderMeters / 1000).toFixed(1)} km`,
-            color: d.color,
-            kind: 'leader',
-          })
-        }
-        if (field.tailMeters >= 0 && field.tailMeters < field.leaderMeters - 200) {
-          out.push({
-            key: `${d.id}-tail`,
-            lngLat: pointAtMeters(d.course, field.tailMeters),
-            label: `${(field.tailMeters / 1000).toFixed(1)} km`,
-            color: d.color,
-            kind: 'tail',
-          })
-        }
-        return out
-      }),
-    [visible, fields],
-  )
-
   const coverageGaps = useMemo(
     () => ({
       type: 'FeatureCollection' as const,
@@ -369,17 +349,17 @@ export default function PlannerMap({
       {/* ── Individual runners ──────────────────────────────────────────── */}
       {runnerDots && (
         <Source id="planner-runners" type="geojson" data={runnerDots}>
+          {/* Deliberately tiny and unstroked: at the gun the whole field sits
+              in a few hundred metres, and fat dots there paint over the very
+              gradient they are meant to annotate. */}
           <Layer
             id="planner-runner-dots"
             source="planner-runners"
             type="circle"
             paint={{
-              'circle-radius': 2.6,
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.1, 12, 1.5, 16, 2.2],
               'circle-color': '#ffffff',
-              'circle-opacity': 0.75,
-              'circle-stroke-width': 1,
-              'circle-stroke-color': ['get', 'color'],
-              'circle-stroke-opacity': 0.9,
+              'circle-opacity': 0.8,
             }}
           />
         </Source>
@@ -480,23 +460,6 @@ export default function PlannerMap({
         )
       })}
 
-      {/* ── Field edges ─────────────────────────────────────────────────── */}
-      {edgeMarkers.map(edge => (
-        <Marker key={edge.key} longitude={edge.lngLat[0]} latitude={edge.lngLat[1]} anchor="center">
-          <div
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap"
-            style={{
-              background: 'rgba(2,8,18,0.82)',
-              border: `1px solid ${edge.color}`,
-              color: edge.color,
-              transform: 'translateY(-14px)',
-            }}
-          >
-            {edge.kind === 'leader' ? '▲' : '▼'} {edge.label}
-          </div>
-        </Marker>
-      ))}
-
       {/* ── Station pins for the selected medic ─────────────────────────── */}
       {selectedView?.routePoints.map((point, i) => (
         <Marker key={point.id} longitude={point.lng} latitude={point.lat} anchor="center">
@@ -573,8 +536,12 @@ export default function PlannerMap({
                   style={{ width: 34, height: 34, border: `2px dashed ${sweepColor}`, opacity: 0.9 }}
                 />
               )}
+              {/* Initials, not a vehicle glyph: on a board with a dozen units
+                  the question is always "who is that", and every second one
+                  was the same ambulance emoji. The vehicle rides along as a
+                  corner chip, because it still sets the travel times. */}
               <span
-                className="flex items-center justify-center rounded-full text-[13px] transition-all"
+                className="relative flex items-center justify-center rounded-full transition-all"
                 style={{
                   width: selected ? 38 : 30,
                   height: selected ? 38 : 30,
@@ -584,9 +551,28 @@ export default function PlannerMap({
                     ? `0 0 0 4px ${view.medic.color}22, 0 6px 18px rgba(0,0,0,0.6)`
                     : '0 3px 10px rgba(0,0,0,0.5)',
                   opacity: offDuty ? 0.5 : 1,
+                  color: view.medic.color,
+                  fontSize: selected ? 13 : 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.02em',
                 }}
               >
-                {meta.icon}
+                {initials(view.medic.name)}
+                <span
+                  className="absolute flex items-center justify-center rounded-full"
+                  style={{
+                    right: -3,
+                    bottom: -3,
+                    width: 14,
+                    height: 14,
+                    fontSize: 8,
+                    background: 'rgba(2,8,18,0.96)',
+                    border: `1px solid ${view.medic.color}66`,
+                  }}
+                  title={meta.label}
+                >
+                  {meta.icon}
+                </span>
               </span>
               {(selected || hovered) && (
                 <div

@@ -6,7 +6,7 @@
  * exactly the same timeline the map preview plays.
  */
 
-import type { PlanMedic, VehicleType } from '@events/contracts'
+import type { PlanMedic, PlanSweepJoin, VehicleType } from '@events/contracts'
 import { VEHICLE_TYPE_META, planVehicleAt } from '@events/contracts'
 import { resolveMedicTimeline, type ResolveOptions } from './schedule'
 
@@ -15,6 +15,10 @@ export type ItineraryStopKind = 'post' | 'sweep-start' | 'sweep-end'
 export interface ItineraryStop {
   stationId: string
   kind: ItineraryStopKind
+  /** Sweep stops only: whether they joined at the gun or from a post. */
+  sweepJoin?: PlanSweepJoin
+  /** This post ends by handing over to a sweep, not by driving somewhere. */
+  handsOverToSweep?: boolean
   arriveMs: number
   /** When they have to leave for the next stop; null at the last one. */
   departMs: number | null
@@ -77,12 +81,21 @@ export function buildItinerary(medic: PlanMedic, options: ResolveOptions = {}): 
           s => (s.kind === 'move' || s.kind === 'sweep') && s.stationId === nextStation.id,
         )
       : undefined
-    const departMs = nextLeg ? nextLeg.fromMs : null
+    // Picking up the tail from a post involves no journey, so there is no leg
+    // to read a departure off — they stop holding the instant the tail arrives.
+    const handsOverToSweep = nextStation?.noTravel === true && nextStation.sweep != null
+    const departMs = nextLeg
+      ? nextLeg.fromMs
+      : handsOverToSweep
+        ? new Date(nextStation!.arriveAt).getTime()
+        : null
     const legVehicle = move?.vehicleType ?? planVehicleAt(medic, arriveMs)
     const legMeta = vehicleMeta(legVehicle)
     return {
       stationId: station.id,
       kind: station.sweep ? (station.sweep.edge === 'start' ? 'sweep-start' : 'sweep-end') : 'post',
+      sweepJoin: station.sweep?.joinFrom,
+      handsOverToSweep: handsOverToSweep || undefined,
       arriveMs,
       departMs,
       label: station.label,
@@ -174,14 +187,19 @@ export function itineraryToText(itinerary: MedicItinerary, eventTitle: string): 
       ? ` (${formatDuration(stop.travelMinutes)}${stop.vehicleIcon ? ` ${stop.vehicleIcon}` : ''})`
       : ''
     if (stop.kind === 'sweep-start') {
-      text.push(`  ${formatTime(stop.arriveMs)}  START SWEEPING ${stop.label.replace(/ start$/, '')}${travel}`)
+      const course = stop.label.replace(/ (start|tail)$/, '')
+      text.push(
+        stop.sweepJoin === 'post'
+          ? `  ${formatTime(stop.arriveMs)}  LAST RUNNER REACHES YOU — go with them (${course})`
+          : `  ${formatTime(stop.arriveMs)}  START SWEEPING ${course}${travel}`,
+      )
       text.push('           ↳ stay with the last participant')
     } else if (stop.kind === 'sweep-end') {
       text.push(`  ${formatTime(stop.arriveMs)}  sweep complete — ${stop.label.replace(/ finish$/, '')}`)
     } else {
       text.push(`  ${formatTime(stop.arriveMs)}  ${stop.label}${travel}`)
       if (stop.note) text.push(`           ↳ ${stop.note}`)
-      if (stop.departMs != null && (stop.dwellMinutes ?? 0) >= 1) {
+      if (stop.departMs != null && (stop.dwellMinutes ?? 0) >= 1 && !stop.handsOverToSweep) {
         text.push(`  ${formatTime(stop.departMs)}  leave ${stop.label}`)
       }
     }

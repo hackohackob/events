@@ -132,6 +132,27 @@ export function metersAtTimeFraction(
   return course.cumulative[i] + (course.cumulative[next] - course.cumulative[i]) * t
 }
 
+/**
+ * Inverse of {@link metersAtTimeFraction}: the share of a runner's total time
+ * that has gone by the time they reach `meters`. Used to work out when the back
+ * of the field will reach a given post.
+ */
+export function timeFractionAtMeters(
+  course: CourseModel,
+  meters: number,
+  terrain: boolean,
+): number {
+  if (course.totalMeters <= 0) return 0
+  const m = Math.max(0, Math.min(course.totalMeters, meters))
+  if (!terrain || !course.hasElevation || course.totalEffort <= 0) return m / course.totalMeters
+  const i = lowerBound(course.cumulative, m)
+  const next = Math.min(i + 1, course.cumulative.length - 1)
+  const span = course.cumulative[next] - course.cumulative[i]
+  const t = span > 0 ? (m - course.cumulative[i]) / span : 0
+  const effort = course.effort[i] + (course.effort[next] - course.effort[i]) * t
+  return effort / course.totalEffort
+}
+
 /** Nearest point on the course to a coordinate — used for "km 43.2" readouts. */
 export function nearestOnCourse(
   course: CourseModel,

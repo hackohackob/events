@@ -554,6 +554,7 @@ export default function PlannerTimeline({
                                 cursor: 'pointer',
                               }}
                               title={`Sweeping ${segment.label} — with the last participant, ${formatTime(segment.fromMs)} to ${formatTime(segEnd)}`}
+                              data-discipline={segment.disciplineId}
                             >
                               <Waves className="w-2.5 h-2.5 flex-shrink-0" style={{ color }} />
                               {width > 60 && (

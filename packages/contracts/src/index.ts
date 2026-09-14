@@ -1254,6 +1254,27 @@ export interface PlanVehicleChange {
   vehicleType: VehicleType;
 }
 
+/**
+ * When a sweeper joins the back of the field.
+ *
+ * `start` is the dedicated sweeper: off the line with the gun, last man on the
+ * course from the first minute. `post` is how it is usually done — the medic
+ * works a post like anyone else and only becomes the sweeper when the last
+ * participant reaches them, then goes with them to the finish.
+ */
+export type PlanSweepJoin = "start" | "post";
+
+export interface PlanSweepAssignment {
+  disciplineId: string;
+  joinFrom: PlanSweepJoin;
+}
+
+/** Every sweep a medic is on, including plans written before `sweeps` existed. */
+export function planSweeps(medic: PlanMedic): PlanSweepAssignment[] {
+  if (medic.sweeps && medic.sweeps.length > 0) return medic.sweeps;
+  return (medic.sweeperFor ?? []).map((disciplineId) => ({ disciplineId, joinFrom: "start" as const }));
+}
+
 /** A medic (or vehicle/crew) as it appears in the plan. */
 export interface PlanMedic {
   id: string;
@@ -1269,10 +1290,11 @@ export interface PlanMedic {
   /** Ordered by `arriveAt`; the planner re-sorts on every edit. */
   stations: PlanStation[];
   /**
-   * Disciplines this medic sweeps: they ride the back of that field from the
-   * start to the moment the last participant is off the course, so their
-   * position is derived rather than posted.
+   * Disciplines this medic sweeps. Their position for that window is derived
+   * from the field rather than posted.
    */
+  sweeps?: PlanSweepAssignment[];
+  /** @deprecated Superseded by {@link sweeps}; read for plans saved before it. */
   sweeperFor?: string[];
   hidden?: boolean;
 }

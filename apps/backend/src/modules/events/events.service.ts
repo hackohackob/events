@@ -7,6 +7,7 @@ import type {
   PlanDisciplineSchedule,
   PlanMedic,
   PlanStation,
+  PlanSweepAssignment,
   PlanVehicleChange,
   TrackGeoJson,
 } from "@events/contracts";
@@ -356,9 +357,25 @@ function sanitizePlanMedic(input: unknown): PlanMedic | null {
         .filter((c): c is PlanVehicleChange => c !== null)
         .sort((a, b) => a.at.localeCompare(b.at))
     : [];
-  const sweeperFor = Array.isArray(raw.sweeperFor)
-    ? Array.from(new Set(raw.sweeperFor.map((d) => planString(d)).filter(Boolean)))
-    : [];
+  // Accepts both shapes: the typed list, and the plain discipline ids written
+  // before a sweeper could join from a post.
+  const sweepSource: unknown[] = Array.isArray(raw.sweeps)
+    ? raw.sweeps
+    : Array.isArray(raw.sweeperFor)
+      ? raw.sweeperFor
+      : [];
+  const seen = new Set<string>();
+  const sweeps: PlanSweepAssignment[] = [];
+  for (const entry of sweepSource) {
+    const row = typeof entry === "string" ? { disciplineId: entry } : (entry as Record<string, unknown>);
+    const disciplineId = planString(row?.disciplineId);
+    if (!disciplineId || seen.has(disciplineId)) continue;
+    seen.add(disciplineId);
+    sweeps.push({
+      disciplineId,
+      joinFrom: planString(row?.joinFrom) === "post" ? "post" : "start",
+    });
+  }
   return {
     id,
     medicId: planString(raw.medicId) || undefined,
@@ -368,7 +385,7 @@ function sanitizePlanMedic(input: unknown): PlanMedic | null {
     color: planString(raw.color) || "#38bdf8",
     unit: planString(raw.unit) || undefined,
     stations,
-    sweeperFor: sweeperFor.length > 0 ? sweeperFor : undefined,
+    sweeps: sweeps.length > 0 ? sweeps : undefined,
     hidden: raw.hidden === true || undefined,
   };
 }

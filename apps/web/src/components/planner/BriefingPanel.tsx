@@ -138,7 +138,9 @@ export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }:
                 const sweeping = stop.kind !== 'post'
                 const title =
                   stop.kind === 'sweep-start'
-                    ? `Start sweeping ${stop.label.replace(/ start$/, '')}`
+                    ? stop.sweepJoin === 'post'
+                      ? `Last runner reaches you — go with them (${stop.label.replace(/ tail$/, '')})`
+                      : `Start sweeping ${stop.label.replace(/ start$/, '')}`
                     : stop.kind === 'sweep-end'
                       ? `Sweep complete — ${stop.label.replace(/ finish$/, '')}`
                       : `${i === 0 ? 'Be at ' : 'Move to '}${stop.label}`
@@ -191,6 +193,8 @@ export default function BriefingPanel({ medics, resolveOptionsFor, eventTitle }:
                         <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>
                           {stop.kind === 'sweep-start'
                             ? `Stay with the last participant · ${formatDuration(stop.dwellMinutes ?? 0)} on course`
+                            : stop.handsOverToSweep && stop.departMs != null
+                              ? `On station ${formatDuration(stop.dwellMinutes ?? 0)} · tail arrives ${formatTime(stop.departMs)}`
                             : stop.departMs != null
                               ? (stop.dwellMinutes ?? 0) < 1
                                 // Nothing to wait for: the next leg needs every
