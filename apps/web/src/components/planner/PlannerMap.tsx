@@ -88,7 +88,12 @@ function mix(a: [number, number, number], b: [number, number, number], t: number
  */
 function densityColor(hex: string, density: number, forGlow = false): string {
   const base = hexToRgb(hex)
-  if (density <= 0.002) return forGlow ? TRANSPARENT : rgba(base, 0.34)
+  // Empty course paints NOTHING, here as in the glow. Courses are drawn one
+  // after another, so a stretch one course has nobody on would otherwise lay
+  // its idle wash straight over a neighbouring course's live colour — which is
+  // why shared sections, and the out-and-back of a single loop, went muddy. The
+  // route itself is already drawn by the casing and base beneath.
+  if (density <= 0.002) return TRANSPARENT
   const heat = Math.min(1, density * 1.45)
   const hot: [number, number, number] = [255, 246, 214]
   return rgba(mix(base, hot, Math.pow(heat, 1.6)), 0.6 + 0.4 * Math.min(1, density * 2.2))
@@ -115,13 +120,15 @@ const IDLE_COURSE: [number, number, number] = [148, 163, 184]
 const TRANSPARENT = 'rgba(0,0,0,0)'
 
 /**
- * `forGlow` drops the idle slate entirely. The glow is twenty pixels wide and
- * heavily blurred, so a grey stretch of one course spreads right across a
- * neighbouring course's gradient and greys it out — which is exactly what makes
- * two routes sharing a valley unreadable. Only stretches that carry people glow.
+ * Only stretches carrying people are painted at all — in the line as well as in
+ * the glow. Courses are drawn one after another, so an idle wash from whichever
+ * course happens to be drawn last would sit over a live one beneath it, and
+ * every shared section would read as muted. Where nobody is on the course the
+ * neutral line underneath shows through instead, which says the same thing
+ * without taking a colour away from anyone.
  */
-function reachColor(ratio: number, occupied: boolean, forGlow = false): string {
-  if (!occupied) return forGlow ? TRANSPARENT : rgba(IDLE_COURSE, 0.42)
+function reachColor(ratio: number, occupied: boolean, _forGlow = false): string {
+  if (!occupied) return TRANSPARENT
   if (!Number.isFinite(ratio)) return rgba(REACH_RAMP[REACH_RAMP.length - 1][1], 0.98)
   for (let i = 1; i < REACH_RAMP.length; i += 1) {
     const [stop, color] = REACH_RAMP[i]
@@ -323,9 +330,12 @@ export default function PlannerMap({
           type="line"
           layout={{ 'line-cap': 'round', 'line-join': 'round' }}
           paint={{
-            'line-color': track.reachMode ? '#64748b' : track.color,
-            'line-width': 4.5,
-            'line-opacity': track.hasSeries ? 0.45 : 0.9,
+            'line-color': track.reachMode ? '#7c8ba1' : track.color,
+            // Carries the idle stretches on its own now, so it has to read as a
+            // route in its own right — same weight the gradient line has, or an
+            // empty course looks like a thinner, lesser thing than a busy one.
+            'line-width': 6,
+            'line-opacity': track.hasSeries ? 0.72 : 0.9,
           }}
         />
       ))}
