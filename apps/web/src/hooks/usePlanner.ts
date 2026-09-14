@@ -594,14 +594,27 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
   const reachAttempted = useRef<Set<string>>(new Set())
   const [reachTick, setReachTick] = useState(0)
 
-  /** Spacing between journey anchors. Close enough that the reach shape steps
-   *  along with the medic instead of holding still for ten minutes and then
-   *  jumping; capped so one very long leg cannot flood the router. */
+  /** Spacing between reach measurements along a journey. Close enough that the
+   *  shape steps with the medic instead of holding still and then jumping. */
   const ANCHOR_SPACING_METERS = 1000
   const MAX_ANCHORS_PER_LEG = 24
-  /** A swept course is long; sample it more coarsely than a road journey. */
-  const SWEEP_ANCHOR_SPACING_METERS = 2000
-  const MAX_ANCHORS_PER_SWEEP = 45
+  /**
+   * A sweep is measured at the same spacing as a journey, and with a cap high
+   * enough that it never falls back to a coarser one.
+   *
+   * It used to be sampled at two kilometres on the reasoning that a swept
+   * course is long — which had it exactly backwards: the sweeper covers more
+   * ground than anyone on the board, over a whole day, so it is the LAST place
+   * to economise. It was the only medic on a coarser grid than everyone else.
+   */
+  const SWEEP_ANCHOR_SPACING_METERS = 1000
+  const MAX_ANCHORS_PER_SWEEP = 150
+  /**
+   * How far a medic may be from a measurement before it stops being about them.
+   * Comfortably over half the widest spacing that can occur — a journey long
+   * enough to hit its cap spreads wider than the nominal kilometre.
+   */
+  const REACH_TOLERANCE_METERS = 2500
   /** Isochrones in flight at once. Local GraphHopper answers one in ~100 ms. */
   const REACH_CONCURRENCY = 4
 
@@ -732,18 +745,12 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
    * reaches furthest means the picture changes only as one anchor drops out of
    * range and another comes in, a small increment at a time.
    *
-   * `tolerance` is twice the widest anchor spacing in play — the sweep one, not
-   * the journey one. Sized to the journey spacing it would never find a second
-   * anchor for a sweeper, whose anchors sit two kilometres apart, and the
-   * blending would silently do nothing for exactly the medic who moves most
-   * slowly and steadily. Distance weighting keeps a far second anchor from
-   * pulling the answer around.
    */
   const reachAnchorsNear = useCallback(
     (
       point: [number, number],
       vehicle: VehicleType,
-      toleranceMeters = SWEEP_ANCHOR_SPACING_METERS * 2,
+      toleranceMeters = REACH_TOLERANCE_METERS,
     ): Array<{ key: string; shape: ReachShape; distance: number }> => {
       const near: Array<{ key: string; shape: ReachShape; distance: number }> = []
       for (const anchor of reachAnchors.current) {
