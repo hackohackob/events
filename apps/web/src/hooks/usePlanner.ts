@@ -588,20 +588,32 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
   const reachAttempted = useRef<Set<string>>(new Set())
   const [reachTick, setReachTick] = useState(0)
 
-  /** Spacing between journey anchors. Fine enough that a medic is never far
-   *  from one, coarse enough not to flood the router on a 40 km leg. */
-  const ANCHOR_SPACING_METERS = 2500
-  const MAX_ANCHORS_PER_LEG = 6
+  /** Spacing between journey anchors. Close enough that the reach shape steps
+   *  along with the medic instead of holding still for ten minutes and then
+   *  jumping; capped so one very long leg cannot flood the router. */
+  const ANCHOR_SPACING_METERS = 1000
+  const MAX_ANCHORS_PER_LEG = 24
+  /** Isochrones in flight at once. Local GraphHopper answers one in ~100 ms. */
+  const REACH_CONCURRENCY = 4
 
   useEffect(() => {
     if (!plan || !eventId || !Number.isFinite(reachMinutes)) return
     let cancelled = false
 
-    const jobs: Array<{ point: [number, number]; vehicle: VehicleType; key: string }> = []
-    const want = (point: [number, number], vehicle: VehicleType) => {
+    // Postings first: they are where a medic spends most of the plan, so their
+    // shapes should land before the ones that only matter mid-journey.
+    const stationJobs: Array<{ point: [number, number]; vehicle: VehicleType; key: string }> = []
+    const legJobs: Array<{ point: [number, number]; vehicle: VehicleType; key: string }> = []
+    const seen = new Set<string>()
+    const want = (
+      into: Array<{ point: [number, number]; vehicle: VehicleType; key: string }>,
+      point: [number, number],
+      vehicle: VehicleType,
+    ) => {
       const key = reachKey(point, vehicle, reachMinutes)
-      if (reachAttempted.current.has(key) || jobs.some(j => j.key === key)) return
-      jobs.push({ point, vehicle, key })
+      if (reachAttempted.current.has(key) || seen.has(key)) return
+      seen.add(key)
+      into.push({ point, vehicle, key })
     }
 
     for (const medic of plan.medics) {
@@ -610,7 +622,7 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
       const stations = plannedStations(medic, sweeps)
 
       for (const station of stations) {
-        want([station.lng, station.lat], planVehicleAt(medic, new Date(station.arriveAt).getTime()))
+        want(stationJobs, [station.lng, station.lat], planVehicleAt(medic, new Date(station.arriveAt).getTime()))
       }
 
       // Points along each journey, so a medic in transit is measured too.
@@ -631,32 +643,38 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
           Math.max(0, Math.floor(legMeters / ANCHOR_SPACING_METERS) - 1),
         )
         for (let a = 1; a <= count; a += 1) {
-          want(pointAlongPath(path, a / (count + 1)), vehicle)
+          want(legJobs, pointAlongPath(path, a / (count + 1)), vehicle)
         }
       }
     }
+    const jobs = [...stationJobs, ...legJobs]
     if (jobs.length === 0) return
 
     void (async () => {
-      for (const job of jobs) {
-        if (cancelled) return
-        reachAttempted.current.add(job.key)
-        const result = await fetchIsochrone(
-          eventId,
-          { lat: job.point[1], lng: job.point[0] },
-          job.vehicle,
-          reachMinutes,
-        )
-        if (cancelled) return
-        if (result) {
-          reachCache.current.set(job.key, buildReachShape(result.polygons))
-          reachAnchors.current = [
-            ...reachAnchors.current.filter(a => a.key !== job.key),
-            { key: job.key, point: job.point, vehicle: job.vehicle },
-          ]
+      let next = 0
+      const worker = async () => {
+        while (!cancelled) {
+          const job = jobs[next++]
+          if (!job) return
+          reachAttempted.current.add(job.key)
+          const result = await fetchIsochrone(
+            eventId,
+            { lat: job.point[1], lng: job.point[0] },
+            job.vehicle,
+            reachMinutes,
+          )
+          if (cancelled) return
+          if (result) {
+            reachCache.current.set(job.key, buildReachShape(result.polygons))
+            reachAnchors.current = [
+              ...reachAnchors.current.filter(a => a.key !== job.key),
+              { key: job.key, point: job.point, vehicle: job.vehicle },
+            ]
+            setReachTick(t => t + 1)
+          }
         }
-        setReachTick(t => t + 1)
       }
+      await Promise.all(Array.from({ length: REACH_CONCURRENCY }, worker))
     })()
 
     return () => {
@@ -668,12 +686,16 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
    * The measured shape closest to a position, for that vehicle. `tolerance` is
    * how far the medic may be from the anchor before the answer stops being
    * worth anything and the caller falls back to a circle.
+   *
+   * Set at twice the nominal anchor spacing on purpose: a leg long enough to hit
+   * the per-leg anchor cap ends up more thinly spaced than that, and a slightly
+   * stale network measurement still beats a circle drawn across a mountain.
    */
   const reachAnchorNear = useCallback(
     (
       point: [number, number],
       vehicle: VehicleType,
-      toleranceMeters = ANCHOR_SPACING_METERS,
+      toleranceMeters = ANCHOR_SPACING_METERS * 2,
     ): { key: string; shape: ReachShape } | undefined => {
       let best: { key: string; shape: ReachShape } | undefined
       let bestDistance = toleranceMeters

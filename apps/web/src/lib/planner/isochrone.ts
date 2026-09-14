@@ -52,6 +52,34 @@ function pointInRing(point: [number, number], ring: Ring): boolean {
 }
 
 /**
+ * How far off the routable network a medic still covers.
+ *
+ * GraphHopper builds an isochrone polygon as a hull of reachable NODES, so
+ * along a road with no side branches it degenerates to a ribbon barely wider
+ * than the road itself. A course running twenty metres to the side of that road
+ * then tests as out of reach, which is nonsense — the medic parks and walks.
+ * Every bin that misses is therefore retested on a small ring around itself.
+ */
+export const ACCESS_TOLERANCE_METERS = 120
+
+/** Eight compass offsets at the tolerance, in degrees, for a given latitude. */
+function toleranceOffsets(lat: number): Array<[number, number]> {
+  const dLat = ACCESS_TOLERANCE_METERS / 111_320
+  const dLng = ACCESS_TOLERANCE_METERS / (111_320 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)))
+  const diag = Math.SQRT1_2
+  return [
+    [dLng, 0],
+    [-dLng, 0],
+    [0, dLat],
+    [0, -dLat],
+    [dLng * diag, dLat * diag],
+    [dLng * diag, -dLat * diag],
+    [-dLng * diag, dLat * diag],
+    [-dLng * diag, -dLat * diag],
+  ]
+}
+
+/**
  * Which reach bucket each course bin falls in: 1 for the innermost (quickest)
  * polygon, up to `rings.length`, and 0 for bins nobody can get to in time.
  *
@@ -63,16 +91,27 @@ export function bucketsForCourse(course: CourseModel, shape: ReachShape): Uint8A
   if (course.totalMeters <= 0 || shape.rings.length === 0) return out
   const binMeters = course.totalMeters / DENSITY_BINS
 
-  for (let i = 0; i < DENSITY_BINS; i += 1) {
-    const point = pointAtMeters(course, (i + 0.5) * binMeters)
+  const bucketAt = (point: [number, number]): number => {
     for (let r = 0; r < shape.rings.length; r += 1) {
       const [minLng, minLat, maxLng, maxLat] = shape.bounds[r]
       if (point[0] < minLng || point[0] > maxLng || point[1] < minLat || point[1] > maxLat) continue
-      if (pointInRing(point, shape.rings[r])) {
-        out[i] = r + 1
-        break
+      if (pointInRing(point, shape.rings[r])) return r + 1
+    }
+    return 0
+  }
+
+  for (let i = 0; i < DENSITY_BINS; i += 1) {
+    const point = pointAtMeters(course, (i + 0.5) * binMeters)
+    let bucket = bucketAt(point)
+    if (bucket === 0) {
+      // Just off the ribbon: try a short step in each direction and take the
+      // best answer any of them finds.
+      for (const [dx, dy] of toleranceOffsets(point[1])) {
+        const found = bucketAt([point[0] + dx, point[1] + dy])
+        if (found !== 0 && (bucket === 0 || found < bucket)) bucket = found
       }
     }
+    out[i] = bucket
   }
   return out
 }
