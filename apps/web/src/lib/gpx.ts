@@ -48,6 +48,10 @@ export interface GpxTrack {
   coordinates: [number, number][]
   /** Near-raw elevation profile (distance km → elevation m); empty when the GPX has no elevation. */
   elevationProfile: { distance: number; elevation: number }[]
+  /** Raw elevation (m) per coordinate, aligned 1:1 with `coordinates`. Empty
+   *  when the GPX carries none. The deployment planner needs the per-vertex
+   *  series (not the thinned profile) to weight pace by gradient. */
+  elevations?: number[]
 }
 
 function haversineKm(a: [number, number], b: [number, number]): number {
@@ -71,7 +75,7 @@ export function parseGpxTrack(text: string): GpxTrack {
     const doc = parser.parseFromString(text, 'application/xml')
     const trkpts = Array.from(doc.querySelectorAll('trkpt'))
     if (trkpts.length === 0) {
-      return { coordinates: parseGpxCoordinates(text), elevationProfile: [] }
+      return { coordinates: parseGpxCoordinates(text), elevationProfile: [], elevations: [] }
     }
 
     const coordinates: [number, number][] = trkpts.map(pt => [
@@ -104,9 +108,9 @@ export function parseGpxTrack(text: string): GpxTrack {
       }
     }
 
-    return { coordinates, elevationProfile }
+    return { coordinates, elevationProfile, elevations: hasElevation ? eles : [] }
   } catch {
-    return { coordinates: [], elevationProfile: [] }
+    return { coordinates: [], elevationProfile: [], elevations: [] }
   }
 }
 
@@ -114,9 +118,9 @@ export function parseGpxTrack(text: string): GpxTrack {
 export async function fetchGpxTrack(url: string): Promise<GpxTrack> {
   try {
     const res = await fetch(resolveGpxUrl(url))
-    if (!res.ok) return { coordinates: [], elevationProfile: [] }
+    if (!res.ok) return { coordinates: [], elevationProfile: [], elevations: [] }
     return parseGpxTrack(await res.text())
   } catch {
-    return { coordinates: [], elevationProfile: [] }
+    return { coordinates: [], elevationProfile: [], elevations: [] }
   }
 }

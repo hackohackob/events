@@ -156,6 +156,27 @@ export class EventsController {
     return this.eventsService.removeZone(user.eventId, zoneId);
   }
 
+  // ─── Deployment plan ───────────────────────────────────────────────────────
+
+  /** The plan is a coordinator working document — never served to the field. */
+  private assertPlanAccess(user: RequestUser): void {
+    if (user.role === "runner" || user.role === "spectator") {
+      throw new ForbiddenException("The deployment plan is not available to participants");
+    }
+  }
+
+  @Get(":id/plan")
+  getPlan(@CurrentUser() user: RequestUser, @Param("id") id: string) {
+    this.assertPlanAccess(user);
+    return this.eventsService.getPlan(id);
+  }
+
+  @Put(":id/plan")
+  async savePlan(@CurrentUser() user: RequestUser, @Param("id") id: string, @Body() body: unknown) {
+    this.assertPlanAccess(user);
+    return this.eventsService.savePlan(id, body);
+  }
+
   @Put(":id")
   async update(@Param("id") id: string, @Body() body: CreateEventDto) {
     const event = await this.eventsService.update(id, body);

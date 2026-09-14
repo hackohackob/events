@@ -7,7 +7,7 @@ import Link from 'next/link'
 import {
   ChevronRight, ChevronLeft, Calendar, MapPin, Users, Activity,
   Play, Pause, ArrowLeft, Edit, WifiOff, User, Navigation,
-  Layers, AlertTriangle, X, Megaphone, Moon, Stethoscope, Crown, Pencil, MessageCircle, ChevronDown, Clock
+  Layers, AlertTriangle, X, Megaphone, Moon, Stethoscope, Crown, Pencil, MessageCircle, ChevronDown, Clock, CalendarClock
 } from 'lucide-react'
 import { useEvent, useActivateEvent, useDeactivateEvent } from '@/hooks/useEvents'
 import { useLiveMap } from '@/hooks/useLiveMap'
@@ -653,6 +653,17 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
               <Megaphone className="w-4 h-4" />
             </button>
           )}
+          {/* Deployment planning — time the disciplines, then post the medics
+              against that clock. Useful on a live event too, so it is not
+              gated on `draft` the way the event editor is. */}
+          <Link
+            href={`/events/${id}/plan`}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+            style={{ background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.28)', color: '#38bdf8' }}
+            title="Plan where every medic stands, hour by hour"
+          >
+            <CalendarClock className="w-4 h-4" /> Plan
+          </Link>
           {event.status === 'draft' && (
             <Link
               href={`/events/create?edit=${id}`}

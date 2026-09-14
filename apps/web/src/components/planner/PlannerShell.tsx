@@ -1,0 +1,760 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
+import {
+  ArrowLeft,
+  Check,
+  CloudOff,
+  Layers,
+  Loader2,
+  Redo2,
+  ShieldAlert,
+  Sparkles,
+  Undo2,
+  Users,
+  X,
+} from 'lucide-react'
+import type {
+  PlanDisciplineSchedule,
+  PlanMedic,
+  PlanStation,
+  VehicleType,
+} from '@events/contracts'
+import { planMedicColor } from '@events/contracts'
+import { usePlanner } from '@/hooks/usePlanner'
+import type { BaseLayer } from '@/lib/map-styles'
+import { fieldAt, EMPTY_FIELD, type FieldState } from '@/lib/planner/field'
+import {
+  medicPositionAt,
+  resolveMedicTimeline,
+  sortedStations,
+  type MedicTimeline,
+  type ResolveOptions,
+} from '@/lib/planner/schedule'
+import { formatTime } from '@/lib/planner/itinerary'
+import { coverageFor, DEFAULT_COVERAGE_METERS, EMPTY_COVERAGE, type CoverageReport } from '@/lib/planner/coverage'
+import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
+import PlannerMap, { type PlannedMedicView } from './PlannerMap'
+import PlannerTimeline, { type PlaySpeed } from './PlannerTimeline'
+import CoursePanel from './CoursePanel'
+import TeamPanel from './TeamPanel'
+import BriefingPanel from './BriefingPanel'
+
+const TABS = ['course', 'team', 'briefing'] as const
+type Tab = (typeof TABS)[number]
+
+const TAB_LABEL: Record<Tab, string> = {
+  course: 'Course',
+  team: 'Team',
+  briefing: 'Briefing',
+}
+
+/** Arrivals land on a five-minute grid — nobody briefs "arrive 09:07". */
+const TIME_GRID_MS = 5 * 60_000
+
+export default function PlannerShell({ eventId }: { eventId: string }) {
+  const planner = usePlanner(eventId)
+  const { plan, mutate, disciplines, medics, bounds, snapTarget, pathLookup, minTravelMinutes } = planner
+
+  const [tab, setTab] = useState<Tab>('course')
+  const [cursorMs, setCursorMs] = useState<number | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState<PlaySpeed>(300)
+  const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
+  const [hiddenDisciplineIds, setHiddenDisciplineIds] = useState<Set<string>>(new Set())
+  const [baseLayer, setBaseLayer] = useState<BaseLayer>('terrain')
+  const [showDensity, setShowDensity] = useState(true)
+  const [showRunners, setShowRunners] = useState(true)
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false)
+  const [showCoverage, setShowCoverage] = useState(true)
+  const [coverageMeters, setCoverageMeters] = useState(DEFAULT_COVERAGE_METERS)
+  const [fitBounds, setFitBounds] = useState<[[number, number], [number, number]] | undefined>()
+
+  // Park the playhead on the first start — but only once the event has loaded.
+  // Seeding it from the fallback bounds would leave the clock on today's date
+  // for an event that runs next May, which reads as a bug the moment you look.
+  useEffect(() => {
+    if (cursorMs != null || !planner.event || !plan) return
+    const firstStart = disciplines
+      .map(d => new Date(d.schedule.startAt).getTime())
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)[0]
+    if (firstStart == null && disciplines.length > 0) return
+    setCursorMs(firstStart ?? bounds.fromMs)
+  }, [cursorMs, bounds.fromMs, disciplines, planner.event, plan])
+
+  const cursor = cursorMs ?? bounds.fromMs
+
+  // ── Playback ──────────────────────────────────────────────────────────────
+  const cursorRef = useRef(cursor)
+  cursorRef.current = cursor
+  useEffect(() => {
+    if (!playing) return
+    let frame = 0
+    let previous = performance.now()
+    const step = (now: number) => {
+      const delta = (now - previous) * speed
+      previous = now
+      const next = cursorRef.current + delta
+      if (next >= bounds.toMs) {
+        setCursorMs(bounds.toMs)
+        setPlaying(false)
+        return
+      }
+      setCursorMs(next)
+      frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [playing, speed, bounds.toMs])
+
+  // ── Derived state at the playhead ─────────────────────────────────────────
+  const fields = useMemo(() => {
+    const out: Record<string, FieldState> = {}
+    for (const d of disciplines) {
+      out[d.id] =
+        d.schedule.enabled === false || !d.hasCourse
+          ? EMPTY_FIELD
+          : fieldAt(d.schedule, d.shape, d.course, cursor)
+    }
+    return out
+  }, [disciplines, cursor])
+
+  const resolveOptionsFor = useCallback(
+    (medic: PlanMedic): ResolveOptions => ({
+      minTravelMinutes,
+      paths: (from, to) => pathLookup(from, to, medic.vehicleType),
+    }),
+    [minTravelMinutes, pathLookup],
+  )
+
+  const timelines = useMemo(() => {
+    const out: Record<string, MedicTimeline> = {}
+    for (const medic of medics) out[medic.id] = resolveMedicTimeline(medic, resolveOptionsFor(medic))
+    return out
+  }, [medics, resolveOptionsFor])
+
+  const medicViews: PlannedMedicView[] = useMemo(
+    () =>
+      medics.map(medic => {
+        const stations = sortedStations(medic)
+        return {
+          medic,
+          position: medicPositionAt(timelines[medic.id], stations, cursor),
+          routePoints: stations.map(s => ({
+            id: s.id,
+            lng: s.lng,
+            lat: s.lat,
+            label: s.label,
+            arriveMs: new Date(s.arriveAt).getTime(),
+          })),
+        }
+      }),
+    [medics, timelines, cursor],
+  )
+
+  /** Reach analysis: occupied course with no medic inside the coverage radius. */
+  const coverage = useMemo(() => {
+    const out: Record<string, CoverageReport> = {}
+    if (!showCoverage) return out
+    const onDuty = medicViews
+      .filter(v => !v.medic.hidden && v.position && v.position.phase !== 'off-duty')
+      .map(v => v.position!.position)
+    for (const d of disciplines) {
+      out[d.id] =
+        !d.hasCourse || hiddenDisciplineIds.has(d.id)
+          ? EMPTY_COVERAGE
+          : coverageFor(d.course, fields[d.id] ?? EMPTY_FIELD, onDuty, coverageMeters)
+    }
+    return out
+  }, [showCoverage, medicViews, disciplines, fields, hiddenDisciplineIds, coverageMeters])
+
+  // ── Plan edits ────────────────────────────────────────────────────────────
+  const patchSchedule = useCallback(
+    (id: string, patch: Partial<PlanDisciplineSchedule>) => {
+      mutate(current => ({
+        ...current,
+        disciplines: current.disciplines.map(d => (d.id === id ? { ...d, ...patch } : d)),
+      }))
+    },
+    [mutate],
+  )
+
+  const patchMedic = useCallback(
+    (id: string, patch: Partial<PlanMedic>) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(m => (m.id === id ? { ...m, ...patch } : m)),
+      }))
+    },
+    [mutate],
+  )
+
+  const addMedic = useCallback(() => {
+    const id = `pm-local-${Date.now().toString(36)}`
+    mutate(current => ({
+      ...current,
+      medics: [
+        ...current.medics,
+        {
+          id,
+          name: `Unit ${current.medics.length + 1}`,
+          vehicleType: 'offroad-car' as VehicleType,
+          color: planMedicColor(id),
+          stations: [],
+        },
+      ],
+    }))
+    setSelectedMedicId(id)
+    setTab('team')
+  }, [mutate])
+
+  const removeMedic = useCallback(
+    (id: string) => {
+      mutate(current => ({ ...current, medics: current.medics.filter(m => m.id !== id) }))
+      setSelectedMedicId(current => (current === id ? null : current))
+    },
+    [mutate],
+  )
+
+  /**
+   * Post a medic somewhere.
+   *
+   * A drag relocates the posting the medic is currently on — the coordinator is
+   * saying "not there, here". A map click adds a NEW posting at the playhead,
+   * which is how a shift gets built up hour by hour.
+   */
+  const placeStation = useCallback(
+    (medicId: string, lngLat: [number, number], mode: 'drag' | 'click') => {
+      const snap = snapTarget(lngLat)
+      const coords = snap ? snap.coordinates : lngLat
+      const label =
+        snap?.name ||
+        (snap ? POI_CONFIGS.find(c => c.type === snap.type)?.label ?? 'Point' : '')
+
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic => {
+          if (medic.id !== medicId) return medic
+          const stations = [...medic.stations].sort(
+            (a, b) => new Date(a.arriveAt).getTime() - new Date(b.arriveAt).getTime(),
+          )
+
+          // Which station is this gesture about?
+          let targetId: string | null = null
+          if (mode === 'drag') {
+            const timeline = timelines[medic.id]
+            const position = medicPositionAt(timeline, stations, cursor)
+            targetId = position?.stationId ?? null
+          } else {
+            const near = stations.find(
+              s => Math.abs(new Date(s.arriveAt).getTime() - cursor) < TIME_GRID_MS / 2,
+            )
+            targetId = near?.id ?? null
+          }
+
+          if (targetId) {
+            return {
+              ...medic,
+              stations: medic.stations.map(s =>
+                s.id === targetId
+                  ? {
+                      ...s,
+                      lng: coords[0],
+                      lat: coords[1],
+                      poiId: snap?.id,
+                      label: label || s.label,
+                      // The move into it has to be re-measured from scratch.
+                      travelMinutes: s.travelSource === 'manual' ? s.travelMinutes : undefined,
+                      travelSource: s.travelSource === 'manual' ? s.travelSource : undefined,
+                    }
+                  : s,
+              ),
+            }
+          }
+
+          const arriveAt = new Date(Math.round(cursor / TIME_GRID_MS) * TIME_GRID_MS).toISOString()
+          const station: PlanStation = {
+            id: `st-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            arriveAt,
+            lng: coords[0],
+            lat: coords[1],
+            poiId: snap?.id,
+            label: label || `Position ${stations.length + 1}`,
+          }
+          return { ...medic, stations: [...medic.stations, station] }
+        }),
+      }))
+    },
+    [mutate, snapTarget, cursor, timelines],
+  )
+
+  const moveStation = useCallback(
+    (medicId: string, stationId: string, arriveMs: number) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic =>
+          medic.id === medicId
+            ? {
+                ...medic,
+                stations: medic.stations.map(s =>
+                  s.id === stationId ? { ...s, arriveAt: new Date(arriveMs).toISOString() } : s,
+                ),
+              }
+            : medic,
+        ),
+      }))
+    },
+    [mutate],
+  )
+
+  const patchStation = useCallback(
+    (medicId: string, stationId: string, patch: Partial<PlanStation>) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic =>
+          medic.id === medicId
+            ? {
+                ...medic,
+                stations: medic.stations.map(s => (s.id === stationId ? { ...s, ...patch } : s)),
+              }
+            : medic,
+        ),
+      }))
+    },
+    [mutate],
+  )
+
+  const removeStation = useCallback(
+    (medicId: string, stationId: string) => {
+      mutate(current => ({
+        ...current,
+        medics: current.medics.map(medic =>
+          medic.id === medicId
+            ? { ...medic, stations: medic.stations.filter(s => s.id !== stationId) }
+            : medic,
+        ),
+      }))
+    },
+    [mutate],
+  )
+
+  const focusStation = useCallback(
+    (medicId: string, stationId: string) => {
+      const station = medics.find(m => m.id === medicId)?.stations.find(s => s.id === stationId)
+      if (!station) return
+      const pad = 0.012
+      setFitBounds([
+        [station.lng - pad, station.lat - pad],
+        [station.lng + pad, station.lat + pad],
+      ])
+      setCursorMs(new Date(station.arriveAt).getTime())
+      setPlaying(false)
+    },
+    [medics],
+  )
+
+  const focusDiscipline = useCallback(
+    (id: string) => {
+      const discipline = disciplines.find(d => d.id === id)
+      if (!discipline || discipline.course.coordinates.length === 0) return
+      let minLng = Infinity
+      let minLat = Infinity
+      let maxLng = -Infinity
+      let maxLat = -Infinity
+      for (const [lng, lat] of discipline.course.coordinates) {
+        if (lng < minLng) minLng = lng
+        if (lat < minLat) minLat = lat
+        if (lng > maxLng) maxLng = lng
+        if (lat > maxLat) maxLat = lat
+      }
+      setFitBounds([
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ])
+    },
+    [disciplines],
+  )
+
+  const toggleDiscipline = useCallback((id: string) => {
+    setHiddenDisciplineIds(current => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  // Fit the whole course set as the GPX files land. Tracks arrive one at a
+  // time, so the camera keeps widening until they have all reported in — then
+  // it stops, and the view is the coordinator's to move.
+  const fittedCount = useRef(0)
+  useEffect(() => {
+    const withCourse = disciplines.filter(d => d.hasCourse)
+    if (withCourse.length === 0 || withCourse.length <= fittedCount.current) return
+    fittedCount.current = withCourse.length
+    let minLng = Infinity
+    let minLat = Infinity
+    let maxLng = -Infinity
+    let maxLat = -Infinity
+    for (const d of withCourse) {
+      for (const [lng, lat] of d.course.coordinates) {
+        if (lng < minLng) minLng = lng
+        if (lat < minLat) minLat = lat
+        if (lng > maxLng) maxLng = lng
+        if (lat > maxLat) maxLat = lat
+      }
+    }
+    setFitBounds([
+      [minLng, minLat],
+      [maxLng, maxLat],
+    ])
+  }, [disciplines])
+
+  // ── Keyboard ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) planner.history.redo()
+        else planner.history.undo()
+        return
+      }
+      if (e.code === 'Space') {
+        e.preventDefault()
+        setPlaying(p => !p)
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault()
+        setPlaying(false)
+        const step = (e.shiftKey ? 60_000 : 5 * 60_000) * (e.key === 'ArrowLeft' ? -1 : 1)
+        setCursorMs(current =>
+          Math.max(bounds.fromMs, Math.min(bounds.toMs, (current ?? bounds.fromMs) + step)),
+        )
+      } else if (e.key === 'Escape') {
+        setSelectedMedicId(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [bounds.fromMs, bounds.toMs, planner.history])
+
+  const selectedMedic = medics.find(m => m.id === selectedMedicId) ?? null
+  const center: [number, number] = planner.event?.days?.[0]?.pois?.[0]
+    ? [planner.event.days[0].pois[0].lng, planner.event.days[0].pois[0].lat]
+    : MAP_CENTER
+
+  if (planner.loading || !plan) {
+    return (
+      <div className="flex-1 flex items-center justify-center" style={{ background: '#040a14' }}>
+        <div className="flex items-center gap-3 text-sm" style={{ color: '#64748b' }}>
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading the plan…
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#040a14' }}>
+      <PlannerStyles />
+
+      {/* ── Header ────────────────────────────────────────────────────────── */}
+      <header
+        className="flex items-center gap-3 px-5 h-[58px] flex-shrink-0 no-print"
+        style={{ borderBottom: '1px solid rgba(148,163,184,0.1)', background: 'rgba(8,15,28,0.9)' }}
+      >
+        <Link
+          href={`/events/${eventId}`}
+          className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors"
+          style={{ color: '#94a3b8', background: 'rgba(255,255,255,0.04)' }}
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> Event
+        </Link>
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4" style={{ color: '#38bdf8' }} />
+          <span className="text-sm font-bold" style={{ color: '#e2e8f0' }}>Deployment Planner</span>
+        </div>
+        <span className="text-xs truncate max-w-[280px]" style={{ color: '#475569' }}>
+          {planner.event?.title}
+        </span>
+
+        <div className="flex-1" />
+
+        <SaveBadge state={planner.saveState} />
+
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(148,163,184,0.12)' }}>
+          <button
+            onClick={planner.history.undo}
+            disabled={!planner.history.canUndo}
+            className="px-2 py-1.5 disabled:opacity-30"
+            style={{ color: '#94a3b8' }}
+            title="Undo (⌘Z)"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={planner.history.redo}
+            disabled={!planner.history.canRedo}
+            className="px-2 py-1.5 disabled:opacity-30"
+            style={{ color: '#94a3b8' }}
+            title="Redo (⇧⌘Z)"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(148,163,184,0.12)' }}>
+          {(['streets', 'terrain', 'satellite'] as const).map(layer => (
+            <button
+              key={layer}
+              onClick={() => setBaseLayer(layer)}
+              className="px-2.5 py-1.5 text-[10px] font-bold capitalize transition-colors"
+              style={{
+                background: baseLayer === layer ? 'rgba(56,189,248,0.16)' : 'transparent',
+                color: baseLayer === layer ? '#38bdf8' : '#64748b',
+              }}
+            >
+              {layer}
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={() => setShowDensity(v => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
+          style={{
+            background: showDensity ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${showDensity ? 'rgba(251,191,36,0.3)' : 'rgba(148,163,184,0.12)'}`,
+            color: showDensity ? '#fbbf24' : '#64748b',
+          }}
+          title="Heat the course where the field is bunched up"
+        >
+          <Layers className="w-3 h-3" /> Field
+        </button>
+        <button
+          onClick={() => setShowCoverage(v => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
+          style={{
+            background: showCoverage ? 'rgba(248,113,113,0.12)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${showCoverage ? 'rgba(248,113,113,0.3)' : 'rgba(148,163,184,0.12)'}`,
+            color: showCoverage ? '#f87171' : '#64748b',
+          }}
+          title="Mark stretches of occupied course with no medic in reach"
+        >
+          <ShieldAlert className="w-3 h-3" /> Gaps
+        </button>
+        <button
+          onClick={() => setShowRunners(v => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
+          style={{
+            background: showRunners ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${showRunners ? 'rgba(52,211,153,0.3)' : 'rgba(148,163,184,0.12)'}`,
+            color: showRunners ? '#34d399' : '#64748b',
+          }}
+          title="Draw individual participants"
+        >
+          <Users className="w-3 h-3" /> Runners
+        </button>
+      </header>
+
+      {/* ── Body ──────────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
+        <aside
+          className="w-[368px] flex-shrink-0 flex flex-col overflow-hidden no-print"
+          style={{ borderRight: '1px solid rgba(148,163,184,0.08)', background: 'rgba(8,15,28,0.96)' }}
+        >
+          <div className="flex flex-shrink-0" style={{ borderBottom: '1px solid rgba(148,163,184,0.08)' }}>
+            {TABS.map(t => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className="flex-1 py-3 text-[11px] font-bold uppercase tracking-widest relative transition-colors"
+                style={{ color: tab === t ? '#e2e8f0' : '#475569' }}
+              >
+                {TAB_LABEL[t]}
+                {tab === t && (
+                  <span
+                    className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full"
+                    style={{ background: '#38bdf8' }}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto planner-scroll">
+            {tab === 'course' && (
+              <CoursePanel
+                disciplines={disciplines}
+                fields={fields}
+                cursorMs={cursor}
+                onChange={patchSchedule}
+                onFocus={focusDiscipline}
+                hiddenDisciplineIds={hiddenDisciplineIds}
+                onToggleVisible={toggleDiscipline}
+                coverage={coverage}
+                coverageMeters={coverageMeters}
+                onCoverageMeters={setCoverageMeters}
+                showCoverage={showCoverage}
+                onToggleCoverage={() => setShowCoverage(v => !v)}
+              />
+            )}
+            {tab === 'team' && (
+              <TeamPanel
+                medics={medics}
+                timelines={timelines}
+                selectedMedicId={selectedMedicId}
+                onSelectMedic={setSelectedMedicId}
+                cursorMs={cursor}
+                onAddMedic={addMedic}
+                onPatchMedic={patchMedic}
+                onRemoveMedic={removeMedic}
+                onPatchStation={patchStation}
+                onRemoveStation={removeStation}
+                onFocusStation={focusStation}
+              />
+            )}
+            {tab === 'briefing' && (
+              <BriefingPanel
+                medics={medics}
+                eventTitle={planner.event?.title ?? 'Event'}
+                resolveOptions={{ minTravelMinutes }}
+              />
+            )}
+          </div>
+        </aside>
+
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <div className="flex-1 relative">
+            <PlannerMap
+              center={center}
+              baseLayer={baseLayer}
+              disciplines={disciplines}
+              fields={fields}
+              hiddenDisciplineIds={hiddenDisciplineIds}
+              pois={planner.pois}
+              medicViews={medicViews}
+              selectedMedicId={selectedMedicId}
+              onSelectMedic={id => {
+                setSelectedMedicId(id)
+                if (id) setTab('team')
+              }}
+              onPlaceStation={(medicId, lngLat) => placeStation(medicId, lngLat, 'click')}
+              onDragStation={(medicId, lngLat) => placeStation(medicId, lngLat, 'drag')}
+              snapTarget={snapTarget}
+              fitBounds={fitBounds}
+              showRunners={showRunners}
+              showDensity={showDensity}
+              coverage={coverage}
+            />
+
+            {/* Placement hint */}
+            {selectedMedic && (
+              <div
+                className="absolute left-1/2 -translate-x-1/2 top-4 flex items-center gap-2.5 px-4 py-2.5 rounded-2xl no-print"
+                style={{
+                  background: 'rgba(2,8,18,0.92)',
+                  border: `1px solid ${selectedMedic.color}55`,
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                  backdropFilter: 'blur(12px)',
+                  animation: 'plannerHintIn 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+                }}
+              >
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ background: selectedMedic.color, boxShadow: `0 0 10px ${selectedMedic.color}` }}
+                />
+                <span className="text-xs font-semibold" style={{ color: '#e2e8f0' }}>
+                  Click the map to post <strong>{selectedMedic.name}</strong> at{' '}
+                  <span style={{ color: selectedMedic.color }}>{formatTime(cursor)}</span>
+                </span>
+                <span className="text-[10px]" style={{ color: '#475569' }}>drag the puck to move a posting</span>
+                <button onClick={() => setSelectedMedicId(null)} className="p-0.5" style={{ color: '#475569' }}>
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <PlannerTimeline
+            fromMs={bounds.fromMs}
+            toMs={bounds.toMs}
+            cursorMs={cursor}
+            onCursor={setCursorMs}
+            playing={playing}
+            onPlaying={setPlaying}
+            speed={speed}
+            onSpeed={setSpeed}
+            disciplines={disciplines}
+            hiddenDisciplineIds={hiddenDisciplineIds}
+            onToggleDiscipline={toggleDiscipline}
+            medics={medics}
+            timelines={timelines}
+            selectedMedicId={selectedMedicId}
+            onSelectMedic={id => {
+              setSelectedMedicId(id)
+              if (id) setTab('team')
+            }}
+            onMoveStation={moveStation}
+            onStationClick={(medicId, stationId) => {
+              setSelectedMedicId(medicId)
+              setTab('team')
+              focusStation(medicId, stationId)
+            }}
+            collapsed={timelineCollapsed}
+            onToggleCollapsed={() => setTimelineCollapsed(v => !v)}
+          />
+        </main>
+      </div>
+    </div>
+  )
+}
+
+function SaveBadge({ state }: { state: ReturnType<typeof usePlanner>['saveState'] }) {
+  const map = {
+    idle: { label: 'Up to date', color: '#475569', icon: <Check className="w-3 h-3" /> },
+    dirty: { label: 'Unsaved', color: '#f59e0b', icon: <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f59e0b' }} /> },
+    saving: { label: 'Saving', color: '#38bdf8', icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+    saved: { label: 'Saved', color: '#34d399', icon: <Check className="w-3 h-3" /> },
+    error: { label: 'Not saved', color: '#f87171', icon: <CloudOff className="w-3 h-3" /> },
+  } as const
+  const entry = map[state]
+  return (
+    <span className="flex items-center gap-1.5 text-[10px] font-bold" style={{ color: entry.color }}>
+      {entry.icon} {entry.label}
+    </span>
+  )
+}
+
+/** Animations + print rules used across the planner. */
+function PlannerStyles() {
+  return (
+    <style jsx global>{`
+      @keyframes plannerSnapPulse {
+        0% { transform: scale(0.82); opacity: 1; }
+        100% { transform: scale(1.25); opacity: 0; }
+      }
+      @keyframes plannerMovePulse {
+        0% { transform: scale(0.62); opacity: 0.85; }
+        100% { transform: scale(1.2); opacity: 0; }
+      }
+      @keyframes plannerHintIn {
+        from { opacity: 0; transform: translate(-50%, -8px); }
+        to { opacity: 1; transform: translate(-50%, 0); }
+      }
+      .planner-scroll::-webkit-scrollbar { width: 8px; height: 10px; }
+      .planner-scroll::-webkit-scrollbar-thumb {
+        background: rgba(148,163,184,0.2);
+        border-radius: 6px;
+      }
+      .planner-scroll::-webkit-scrollbar-track { background: transparent; }
+      @media print {
+        .no-print { display: none !important; }
+        body { background: #fff !important; }
+        .planner-print { color: #000 !important; }
+      }
+    `}</style>
+  )
+}

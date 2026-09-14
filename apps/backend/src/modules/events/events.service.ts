@@ -1,7 +1,14 @@
 import { randomUUID } from "crypto";
 import { ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
-import { normalizeVehicleType } from "@events/contracts";
-import type { EventActiveHours, TrackGeoJson } from "@events/contracts";
+import { EMPTY_EVENT_PLAN, normalizeVehicleType } from "@events/contracts";
+import type {
+  EventActiveHours,
+  EventPlan,
+  PlanDisciplineSchedule,
+  PlanMedic,
+  PlanStation,
+  TrackGeoJson,
+} from "@events/contracts";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { DbService } from "../infra/db.service";
@@ -100,6 +107,12 @@ export interface EventRecord {
   days: StoredDay[];
   /** Medic-only map regions — never included in summaries served to runners. */
   zones?: StoredZone[];
+  /**
+   * Pre-event deployment plan (discipline timings + medic move schedule). Kept
+   * off {@link EventSummary} on purpose: summaries are served to runners, and
+   * the plan is a coordinator working document served by its own endpoint.
+   */
+  plan?: EventPlan;
 }
 
 export interface EventSummary {
@@ -264,6 +277,120 @@ function toSummary(event: EventRecord): EventSummary {
     disciplineCount,
     medicCount,
     days: event.days,
+  };
+}
+
+// ─── Plan sanitizing ─────────────────────────────────────────────────────────
+//
+// The plan is a free-form working document written by the dashboard, so it is
+// normalised on the way in rather than trusted: a NaN arrival or a station at
+// (undefined, undefined) would otherwise be persisted and then crash the
+// planner for everyone who opens the event afterwards.
+
+function planString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function planNumber(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** An ISO instant, or "" when the input isn't a usable date. */
+function planInstant(value: unknown): string {
+  const raw = planString(value);
+  if (!raw) return "";
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? "" : at.toISOString();
+}
+
+function sanitizeStation(input: unknown): PlanStation | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const arriveAt = planInstant(raw.arriveAt);
+  const lat = Number(raw.lat);
+  const lng = Number(raw.lng);
+  if (!arriveAt || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const travel = Number(raw.travelMinutes);
+  const source = planString(raw.travelSource);
+  return {
+    id: planString(raw.id) || randomUUID(),
+    arriveAt,
+    lat,
+    lng,
+    poiId: planString(raw.poiId) || undefined,
+    label: planString(raw.label) || "Position",
+    note: planString(raw.note) || undefined,
+    travelMinutes: Number.isFinite(travel) ? Math.max(0, travel) : undefined,
+    travelSource:
+      source === "routed" || source === "estimated" || source === "manual" ? source : undefined,
+  };
+}
+
+function sanitizePlanMedic(input: unknown): PlanMedic | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const id = planString(raw.id);
+  if (!id) return null;
+  const stations = Array.isArray(raw.stations)
+    ? raw.stations
+        .map(sanitizeStation)
+        .filter((s): s is PlanStation => s !== null)
+        .sort((a, b) => a.arriveAt.localeCompare(b.arriveAt))
+    : [];
+  return {
+    id,
+    medicId: planString(raw.medicId) || undefined,
+    name: planString(raw.name) || "Unnamed unit",
+    vehicleType: normalizeVehicleType(raw.vehicleType),
+    color: planString(raw.color) || "#38bdf8",
+    unit: planString(raw.unit) || undefined,
+    stations,
+    hidden: raw.hidden === true || undefined,
+  };
+}
+
+function sanitizeSchedule(input: unknown): PlanDisciplineSchedule | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const id = planString(raw.id);
+  const startAt = planInstant(raw.startAt);
+  if (!id || !startAt) return null;
+  // A cut-off can legitimately be tens of hours (a 160 km ultra runs 50), so the
+  // only ordering rule is that the winner cannot be slower than the cut-off.
+  const fastest = Math.max(1, planNumber(raw.fastestMinutes, 60));
+  const slowest = Math.max(fastest, planNumber(raw.slowestMinutes, fastest * 2));
+  const pacing = planString(raw.pacing);
+  return {
+    id,
+    startAt,
+    fastestMinutes: fastest,
+    slowestMinutes: slowest,
+    startWindowMinutes: Math.max(0, planNumber(raw.startWindowMinutes, 0)) || undefined,
+    participants: Math.max(0, Math.round(planNumber(raw.participants, 0))) || undefined,
+    pacing: pacing === "linear" || pacing === "terrain" ? pacing : undefined,
+    enabled: raw.enabled === false ? false : undefined,
+  };
+}
+
+function sanitizePlan(input: unknown): EventPlan {
+  const raw = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const settings = (raw.settings && typeof raw.settings === "object" ? raw.settings : {}) as Record<string, unknown>;
+  const snapMeters = Number(settings.snapMeters);
+  const minTravel = Number(settings.minTravelMinutes);
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    disciplines: Array.isArray(raw.disciplines)
+      ? raw.disciplines.map(sanitizeSchedule).filter((d): d is PlanDisciplineSchedule => d !== null)
+      : [],
+    medics: Array.isArray(raw.medics)
+      ? raw.medics.map(sanitizePlanMedic).filter((m): m is PlanMedic => m !== null)
+      : [],
+    settings: {
+      snapMeters: Number.isFinite(snapMeters) ? Math.min(2000, Math.max(0, snapMeters)) : undefined,
+      minTravelMinutes: Number.isFinite(minTravel) ? Math.min(600, Math.max(0, minTravel)) : undefined,
+    },
   };
 }
 
@@ -593,6 +720,32 @@ export class EventsService implements OnModuleInit {
         },
       ],
     };
+  }
+
+  // ─── Deployment plan ───────────────────────────────────────────────────────
+
+  /**
+   * The event's deployment plan. Never 404s on a missing plan: a freshly
+   * created event simply has an empty one, and the planner has to be able to
+   * open on it.
+   */
+  getPlan(eventId: string): EventPlan {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    return event.plan ?? { ...EMPTY_EVENT_PLAN };
+  }
+
+  /**
+   * Replace the plan wholesale. The planner owns the document and sends it
+   * complete on every autosave, so a merge here would only ever resurrect rows
+   * the coordinator had just deleted.
+   */
+  async savePlan(eventId: string, input: unknown): Promise<EventPlan> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    event.plan = sanitizePlan(input);
+    await this.persist();
+    return event.plan;
   }
 
   listPoisForEvent(eventId: string, includeArchived = false): StoredPoi[] {

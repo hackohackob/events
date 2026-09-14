@@ -1171,3 +1171,125 @@ export function trailColor(medicId: string): string {
   }
   return TRAIL_COLORS[hash % TRAIL_COLORS.length];
 }
+
+// ─── Deployment planning ─────────────────────────────────────────────────────
+
+/**
+ * How a discipline's field is spread along its course over time.
+ *
+ * `linear` walks the field along the track at a constant share of distance per
+ * share of time. `terrain` weights every segment by its gradient, so the pack
+ * bunches up on the climbs and stretches on the descents — which is where the
+ * medics actually have to be.
+ */
+export type PlanPacingModel = "linear" | "terrain";
+
+/** A discipline's planned timing: when it starts and how long the field takes. */
+export interface PlanDisciplineSchedule {
+  /** `${dayDate}::${disciplineName}` — stable across saves and reorderings. */
+  id: string;
+  /** Start instant, ISO 8601. */
+  startAt: string;
+  /** Winner's expected time in minutes. */
+  fastestMinutes: number;
+  /**
+   * Cut-off in minutes. Deliberately unbounded by a day: a 160 km ultra runs a
+   * 50-hour cut-off, so every consumer must treat this as "minutes", never
+   * "minutes into the start day".
+   */
+  slowestMinutes: number;
+  /** Minutes over which the field is released (waves). 0 / absent = mass start. */
+  startWindowMinutes?: number;
+  /** Expected starters — drives the on-course head-count readout. */
+  participants?: number;
+  /** Defaults to `terrain` when the track carries elevation. */
+  pacing?: PlanPacingModel;
+  /** Unticked disciplines stay in the plan but off the map and the timeline. */
+  enabled?: boolean;
+}
+
+/** Where a planned travel duration came from. */
+export type PlanTravelSource = "routed" | "estimated" | "manual";
+
+/**
+ * One place a medic is planned to be, and the instant they have to be there.
+ *
+ * A station is an ARRIVAL, never a departure: the medic holds the previous
+ * station until the last moment, then travels. That is what keeps a medic
+ * parked at base camp from 01:00 and on the road only from 05:30 when they are
+ * due at Point 1 at 06:00.
+ */
+export interface PlanStation {
+  id: string;
+  /** When the medic must BE here, ISO 8601. */
+  arriveAt: string;
+  lat: number;
+  lng: number;
+  /** Set when the station snapped onto a point of interest. */
+  poiId?: string;
+  label: string;
+  note?: string;
+  /** Travel minutes from the previous station. */
+  travelMinutes?: number;
+  travelSource?: PlanTravelSource;
+}
+
+/** A medic (or vehicle/crew) as it appears in the plan. */
+export interface PlanMedic {
+  id: string;
+  /** Roster medic id when this row mirrors one; absent for planned-only units. */
+  medicId?: string;
+  name: string;
+  vehicleType: VehicleType;
+  color: string;
+  unit?: string;
+  /** Ordered by `arriveAt`; the planner re-sorts on every edit. */
+  stations: PlanStation[];
+  hidden?: boolean;
+}
+
+export interface EventPlanSettings {
+  /** Metres within which a dropped station snaps onto a point of interest. */
+  snapMeters?: number;
+  /** Floor for any planned move — nobody relocates in under this. */
+  minTravelMinutes?: number;
+}
+
+/** The whole deployment plan for an event. */
+export interface EventPlan {
+  version: 1;
+  updatedAt: string;
+  disciplines: PlanDisciplineSchedule[];
+  medics: PlanMedic[];
+  settings?: EventPlanSettings;
+}
+
+export const EMPTY_EVENT_PLAN: EventPlan = {
+  version: 1,
+  updatedAt: "",
+  disciplines: [],
+  medics: [],
+};
+
+/** Distinct hues for planned medics — same palette discipline as trails. */
+export const PLAN_MEDIC_COLORS = [
+  "#38bdf8",
+  "#fbbf24",
+  "#a78bfa",
+  "#34d399",
+  "#f472b6",
+  "#fb923c",
+  "#2dd4bf",
+  "#818cf8",
+  "#e879f9",
+  "#facc15",
+] as const;
+
+/** Stable colour for a planned medic, derived from its id (never list order). */
+export function planMedicColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return PLAN_MEDIC_COLORS[hash % PLAN_MEDIC_COLORS.length];
+}
