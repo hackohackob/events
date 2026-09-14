@@ -235,22 +235,15 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
           : undefined
 
         const anchors = reachAnchorsNear(position, v.vehicleType)
-        if (anchors.length === 0) return [{ position, radiusMeters: reachMeters, alongCourse }]
-
-        const [near, next] = anchors
-        // Weighted by how far between the two anchors the medic actually is, so
-        // the shape slides with them rather than snapping at the midpoint.
-        const span = next ? near.distance + next.distance : 0
         return [
           {
             position,
             radiusMeters: reachMeters,
             alongCourse,
-            buckets: reachBuckets(d.id, d.course, near.key, near.shape),
-            bucketCount: near.shape.rings.length,
-            blendBuckets: next ? reachBuckets(d.id, d.course, next.key, next.shape) : undefined,
-            blendBucketCount: next?.shape.rings.length,
-            blendWeight: next && span > 0 ? near.distance / span : undefined,
+            measures: anchors.map(anchor => ({
+              buckets: reachBuckets(d.id, d.course, anchor.key, anchor.shape),
+              bucketCount: anchor.shape.rings.length,
+            })),
           },
         ]
       })

@@ -23,23 +23,18 @@ const OUT_OF_REACH = 2.2
 
 export interface CoverageMedic {
   position: [number, number]
-  /** Per-bin reach buckets from a routed isochrone (1 = innermost). */
-  buckets?: Uint8Array
-  /** How many buckets the isochrone was cut into. */
-  bucketCount?: number
   /**
-   * The next-nearest measurement, and how far between the two the medic is
-   * (0 = on {@link buckets}, 1 = on this one).
+   * Reach buckets from each measurement taken near this medic — the nearest
+   * few isochrone anchors. The BEST of them wins.
    *
-   * Isochrones are measured at fixed anchors, so a medic driving between two of
-   * them would otherwise snap from one shape to the other and take a whole
-   * stretch of course from amber to red in a single minute. Interpolating
-   * between the two is both smoother and closer to the truth: they really are
-   * part-way between the two measurements.
+   * Deliberately not an average. Averaging a coverage ratio with a neighbouring
+   * anchor's "out of reach" can only ever push the number up, so it subtracts
+   * coverage and never adds any: at one measured position it reported seven
+   * bins covered where the two measurements together established twenty. A
+   * medic is at one place, and a second measurement is evidence of what they
+   * CAN reach, never evidence against what the first one already showed.
    */
-  blendBuckets?: Uint8Array
-  blendBucketCount?: number
-  blendWeight?: number
+  measures?: Array<{ buckets: Uint8Array; bucketCount: number }>
   /**
    * A sweeper is ON this course, so their road IS the course: reach is measured
    * as distance along it from where they are, not as a shape around them.
@@ -89,7 +84,7 @@ export function coverageFor(
   const binMeters = course.totalMeters / DENSITY_BINS
   const ratio = new Array<number>(DENSITY_BINS).fill(OUT_OF_REACH)
   const occupied = new Array<boolean>(DENSITY_BINS).fill(false)
-  const routed = medics.some(m => m.buckets != null || m.alongCourse != null)
+  const routed = medics.some(m => (m.measures?.length ?? 0) > 0 || m.alongCourse != null)
 
   const hasField = field.onCourse > 0 && field.tailMeters >= 0
   const fieldFrom = hasField ? Math.max(0, field.tailMeters) : 0
@@ -109,33 +104,27 @@ export function coverageFor(
       let value = OUT_OF_REACH
 
       // A sweeper riding this course reaches along it by definition. Combined
-      // with, not instead of, the routed shape: the ride covers the course, the
-      // isochrone covers everywhere the course passes near.
+      // with, not instead of, the routed shapes: the ride covers the course,
+      // the isochrones cover everywhere the course passes near.
       if (medic.alongCourse) {
         const [atCourseMeters, reach] = medic.alongCourse
         if (reach > 0) value = Math.abs(atMeters - atCourseMeters) / reach
       }
-      if (medic.buckets) {
-        // Buckets divide TWICE the reach budget, so bucket k means "reachable
-        // in k/(count/2) of the budget": the back half grades how far PAST the
-        // budget a stretch is instead of calling everything beyond it red.
-        const ratioOf = (buckets: Uint8Array, count: number) => {
-          const bucket = buckets[i]
-          return bucket === 0 ? OUT_OF_REACH : bucket / Math.max(1, count / 2)
+
+      if (medic.measures && medic.measures.length > 0) {
+        for (const measure of medic.measures) {
+          const bucket = measure.buckets[i]
+          // Buckets divide TWICE the reach budget, so bucket k means "reachable
+          // in k/(count/2) of the budget": the back half grades how far PAST the
+          // budget a stretch is instead of calling everything beyond it red.
+          const routed =
+            bucket === 0 ? OUT_OF_REACH : bucket / Math.max(1, measure.bucketCount / 2)
+          if (routed < value) value = routed
         }
-        let routed = ratioOf(medic.buckets, medic.bucketCount ?? 6)
-        if (medic.blendBuckets && medic.blendWeight != null) {
-          const other = ratioOf(medic.blendBuckets, medic.blendBucketCount ?? 6)
-          const w = Math.max(0, Math.min(1, medic.blendWeight))
-          routed = routed * (1 - w) + other * w
-        }
-        if (routed < value) value = routed
       } else {
-        // No measured shape: fall back to the vehicle's own radius. This runs
-        // for sweepers too — the along-the-course term is a floor saying "the
-        // tail is covered", never a reason to skip the fallback and leave a
-        // sweeper scored on three kilometres of course while everyone else gets
-        // a proper estimate.
+        // Nothing measured near this position: fall back to the vehicle's own
+        // radius. This runs for sweepers too — the along-the-course term is a
+        // floor saying "the tail is covered", never a reason to skip it.
         const point = pointAtMeters(course, atMeters)
         const circle = medic.radiusMeters > 0
           ? haversineMeters(point, medic.position) / medic.radiusMeters

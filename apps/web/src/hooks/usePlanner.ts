@@ -725,12 +725,12 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
   /**
    * The measured shapes nearest a position, for that vehicle.
    *
-   * Two rather than one on purpose. A single nearest anchor makes the shape
+   * Three rather than one on purpose. A single nearest anchor makes the shape
    * swap wholesale the moment a medic passes the midpoint between anchors, and
    * two isochrones a kilometre apart on a mountain road are not the same shape
-   * — so the coverage jumped once a minute. Taking both and using whichever
-   * reaches further means the picture changes only as an anchor drops out of
-   * range and the next comes in, which is a fraction of the step.
+   * — so the coverage jumped once a minute. Taking several and using whichever
+   * reaches furthest means the picture changes only as one anchor drops out of
+   * range and another comes in, a small increment at a time.
    *
    * `tolerance` is twice the widest anchor spacing in play — the sweep one, not
    * the journey one. Sized to the journey spacing it would never find a second
@@ -755,7 +755,7 @@ export function usePlanner(eventId: string, options: { reachMinutes: number }) {
         near.push({ key: anchor.key, shape, distance })
       }
       near.sort((a, b) => a.distance - b.distance)
-      return near.slice(0, 2)
+      return near.slice(0, 3)
     },
     [reachTick],
   )
