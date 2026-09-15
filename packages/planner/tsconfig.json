@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "paths": {
+      "@events/contracts": ["../contracts/src"]
+    }
+  },
+  "include": ["src/**/*"]
+}

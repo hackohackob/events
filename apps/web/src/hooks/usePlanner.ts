@@ -27,8 +27,8 @@ import {
   pointAtMeters,
   timeFractionAtMeters,
   type CourseModel,
-} from '@/lib/planner/course'
-import { buildFieldShape, fieldAt, scheduleEndMs, type FieldShape } from '@/lib/planner/field'
+} from '@events/planner'
+import { buildFieldShape, fieldAt, scheduleEndMs, type FieldShape } from '@events/planner'
 import {
   DEFAULT_MIN_TRAVEL_MINUTES,
   legVehicle,
@@ -36,16 +36,16 @@ import {
   resolveSweep,
   type ResolvedSweep,
   type SweepWindow,
-} from '@/lib/planner/schedule'
-import { estimateTravelMinutes } from '@/lib/planner/travel'
+} from '@events/planner'
+import { estimateTravelMinutes } from '@events/planner'
 import {
   bucketsForCourse,
   buildReachShape,
   reachKey,
   shapeContains,
   type ReachShape,
-} from '@/lib/planner/isochrone'
-import { sampleChords, type SweepFit } from '@/lib/planner/sweep-check'
+} from '@events/planner'
+import { sampleChords, type SweepFit } from '@events/planner'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
 // ─── Defaults ────────────────────────────────────────────────────────────────

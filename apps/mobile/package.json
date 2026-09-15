@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@events/contracts": "0.1.0",
+    "@events/planner": "0.1.0",
     "@expo/vector-icons": "^15.1.1",
     "@gorhom/bottom-sheet": "^5.2.14",
     "@maplibre/maplibre-react-native": "^11.0.2",
@@ -59,7 +60,9 @@
         "enabled": false
       },
       "reactNativeDirectoryCheck": {
-        "exclude": ["@notifee/react-native"]
+        "exclude": [
+          "@notifee/react-native"
+        ]
       }
     }
   }

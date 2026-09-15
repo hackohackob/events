@@ -10,10 +10,10 @@ import { styleFor, type BaseLayer } from '@/lib/map-styles'
 import { PoiIcon } from '@/lib/poi-icons'
 import { POI_CONFIGS } from '@/lib/constants'
 import type { PointOfInterest } from '@/lib/types'
-import { DENSITY_BINS, type FieldState } from '@/lib/planner/field'
+import { DENSITY_BINS, type FieldState } from '@events/planner'
 import type { PlannerDiscipline } from '@/hooks/usePlanner'
-import type { CoverageReport } from '@/lib/planner/coverage'
-import type { MedicPosition } from '@/lib/planner/schedule'
+import type { CoverageReport } from '@events/planner'
+import type { MedicPosition } from '@events/planner'
 
 export interface PlannedMedicView {
   medic: PlanMedic

@@ -165,7 +165,362 @@
         ]
       }
     ],
-    "commandPhone": null
+    "commandPhone": null,
+    "plan": {
+      "version": 1,
+      "updatedAt": "2026-09-14T21:20:31.533Z",
+      "disciplines": [
+        {
+          "id": "2026-05-23::S",
+          "startAt": "2026-05-23T05:00:00.000Z",
+          "fastestMinutes": 114,
+          "slowestMinutes": 176,
+          "participants": 250,
+          "pacing": "terrain"
+        },
+        {
+          "id": "2026-05-23::M",
+          "startAt": "2026-05-23T05:30:00.000Z",
+          "fastestMinutes": 176,
+          "slowestMinutes": 458,
+          "pacing": "terrain"
+        },
+        {
+          "id": "2026-05-24::L",
+          "startAt": "2026-05-23T06:00:00.000Z",
+          "fastestMinutes": 243,
+          "slowestMinutes": 632,
+          "pacing": "terrain"
+        }
+      ],
+      "medics": [
+        {
+          "id": "pm-367ebd4e-769d-460d-9c10-dd89640c8dd3",
+          "medicId": "367ebd4e-769d-460d-9c10-dd89640c8dd3",
+          "name": "Alex Rivera",
+          "vehicleType": "ambulance",
+          "color": "#e879f9",
+          "unit": "Unit 1",
+          "stations": [
+            {
+              "id": "st-mu0yejid-i4hi",
+              "arriveAt": "2026-05-23T04:55:00.000Z",
+              "lat": 43.38592409592411,
+              "lng": 22.878325419155743,
+              "poiId": "607e7556-1a68-48e1-a5ec-35b241c9e295",
+              "label": "Base Medical Camp3"
+            }
+          ],
+          "hidden": true
+        },
+        {
+          "id": "pm-6f53052c-4a80-4bc8-b9d2-e5ffad219570",
+          "medicId": "6f53052c-4a80-4bc8-b9d2-e5ffad219570",
+          "name": "Alex Thompson",
+          "vehicleType": "car",
+          "color": "#e879f9",
+          "unit": "Unit 1",
+          "stations": [
+            {
+              "id": "st-mu0ylssm-wwir",
+              "arriveAt": "2026-05-23T04:55:00.000Z",
+              "lat": 43.656339168622,
+              "lng": 22.733564336388184,
+              "poiId": "ec9aad05-b048-495f-8192-39898d37e397",
+              "label": "Ambulance"
+            },
+            {
+              "id": "st-mu0ym0o5-twd4",
+              "arriveAt": "2026-05-23T14:00:00.000Z",
+              "lat": 43.49898700860834,
+              "lng": 22.782625035380647,
+              "via": [
+                {
+                  "lat": 43.60915778492017,
+                  "lng": 22.718044850231905
+                },
+                {
+                  "lat": 43.59985105687116,
+                  "lng": 22.759815502455695
+                }
+              ],
+              "label": "Position 2",
+              "travelMinutes": 93,
+              "travelSource": "routed",
+              "travelVehicle": "car"
+            }
+          ],
+          "hidden": true
+        },
+        {
+          "id": "pm-8dc93ec2-ce26-49af-b812-2f040d59645c",
+          "medicId": "8dc93ec2-ce26-49af-b812-2f040d59645c",
+          "name": "Dr. Georgi P.",
+          "vehicleType": "bike",
+          "color": "#a78bfa",
+          "stations": [
+            {
+              "id": "st-mu0yyfnz-urhj",
+              "arriveAt": "2026-05-23T04:55:00.000Z",
+              "lat": 43.50155668702712,
+              "lng": 22.778357469773084,
+              "poiId": "c41227f7-4034-4767-9d61-36687ee0dc48",
+              "label": "Ambulance"
+            },
+            {
+              "id": "st-mu1q709b-7j3p",
+              "arriveAt": "2026-05-23T09:00:00.000Z",
+              "lat": 43.60444476776942,
+              "lng": 22.67216696311661,
+              "poiId": "910145bb-9c32-4206-9de6-afbfb58c0e27",
+              "via": [
+                {
+                  "lat": 43.56400644647874,
+                  "lng": 22.78581397329782
+                },
+                {
+                  "lat": 43.590017853581,
+                  "lng": 22.76318901456321
+                },
+                {
+                  "lat": 43.542466660600496,
+                  "lng": 22.713799735082034
+                },
+                {
+                  "lat": 43.54042450336169,
+                  "lng": 22.653548365579866
+                }
+              ],
+              "label": "Base Medical Camp4",
+              "travelMinutes": 129,
+              "travelSource": "routed",
+              "travelVehicle": "bike"
+            }
+          ]
+        },
+        {
+          "id": "pm-7b7b96a2-d779-4e5d-9aea-6ace9b9c551a",
+          "medicId": "7b7b96a2-d779-4e5d-9aea-6ace9b9c551a",
+          "name": "Dr. Maria K.",
+          "vehicleType": "foot",
+          "color": "#fb923c",
+          "stations": []
+        },
+        {
+          "id": "pm-76995811-b32f-4b7c-891d-8d6e3bb8ee11",
+          "medicId": "76995811-b32f-4b7c-891d-8d6e3bb8ee11",
+          "name": "Dr. Peter V.",
+          "vehicleType": "motorcycle",
+          "color": "#34d399",
+          "stations": [
+            {
+              "id": "st-mu10kmnl-v0yx",
+              "arriveAt": "2026-05-23T05:30:00.000Z",
+              "lat": 43.38592409592411,
+              "lng": 22.878325419155743,
+              "poiId": "607e7556-1a68-48e1-a5ec-35b241c9e295",
+              "label": "Base Medical Camp3"
+            },
+            {
+              "id": "st-mu10lbve-4hnb",
+              "arriveAt": "2026-05-23T08:00:00.000Z",
+              "lat": 43.50160886939909,
+              "lng": 22.780151579440144,
+              "label": "Position 2",
+              "travelMinutes": 28,
+              "travelSource": "routed",
+              "travelVehicle": "motorcycle"
+            }
+          ],
+          "hidden": true
+        },
+        {
+          "id": "pm-564198af-73a0-4480-a4f6-5ab7ffd5870c",
+          "medicId": "564198af-73a0-4480-a4f6-5ab7ffd5870c",
+          "name": "Elena Stoyanova",
+          "vehicleType": "car",
+          "color": "#38bdf8",
+          "unit": "Command",
+          "stations": [
+            {
+              "id": "st-mu0ygdpi-uje8",
+              "arriveAt": "2026-05-23T05:30:00.000Z",
+              "lat": 43.384939853420946,
+              "lng": 22.87717421021142,
+              "label": "Position 1"
+            },
+            {
+              "id": "st-mu0yh6op-nqpa",
+              "arriveAt": "2026-05-23T12:00:00.000Z",
+              "lat": 43.50155668702712,
+              "lng": 22.778357469773084,
+              "poiId": "c41227f7-4034-4767-9d61-36687ee0dc48",
+              "label": "Ambulance",
+              "travelMinutes": 36,
+              "travelSource": "routed",
+              "travelVehicle": "car"
+            }
+          ],
+          "hidden": true
+        },
+        {
+          "id": "pm-45961508-ad20-4830-90b1-f6589f46ca73",
+          "medicId": "45961508-ad20-4830-90b1-f6589f46ca73",
+          "name": "Emma Wilson",
+          "vehicleType": "foot",
+          "vehicleChanges": [
+            {
+              "id": "vc-mphxp9uo",
+              "at": "2026-05-23T05:55:00.000Z",
+              "vehicleType": "offroad-car"
+            }
+          ],
+          "color": "#e879f9",
+          "unit": "Unit 3",
+          "stations": [
+            {
+              "id": "st-mu10rkg8-pyda",
+              "arriveAt": "2026-05-23T04:55:00.000Z",
+              "lat": 43.38592409592411,
+              "lng": 22.878325419155743,
+              "poiId": "607e7556-1a68-48e1-a5ec-35b241c9e295",
+              "label": "Base Medical Camp3"
+            }
+          ]
+        },
+        {
+          "id": "pm-d6d8901d-fb06-4741-a1d9-66e1b3ffcdbc",
+          "medicId": "d6d8901d-fb06-4741-a1d9-66e1b3ffcdbc",
+          "name": "Mike Johnson",
+          "vehicleType": "foot",
+          "color": "#a78bfa",
+          "unit": "Unit 1",
+          "stations": []
+        },
+        {
+          "id": "pm-ef94e141-ba07-4817-86ba-435c847293d1",
+          "medicId": "ef94e141-ba07-4817-86ba-435c847293d1",
+          "name": "Nurse Elena D.",
+          "vehicleType": "foot",
+          "color": "#facc15",
+          "stations": [
+            {
+              "id": "st-mu0yjzrj-gk7g",
+              "arriveAt": "2026-05-23T05:00:00.000Z",
+              "lat": 43.50155668702712,
+              "lng": 22.778357469773084,
+              "poiId": "c41227f7-4034-4767-9d61-36687ee0dc48",
+              "label": "Ambulance"
+            }
+          ]
+        },
+        {
+          "id": "pm-0cf5c989-22cd-44ee-8f87-ed735df3b2e2",
+          "medicId": "0cf5c989-22cd-44ee-8f87-ed735df3b2e2",
+          "name": "Nurse Ivan T.",
+          "vehicleType": "foot",
+          "color": "#facc15",
+          "stations": []
+        },
+        {
+          "id": "pm-5b041dba-60f2-47d9-90d9-426fbb1550e9",
+          "medicId": "5b041dba-60f2-47d9-90d9-426fbb1550e9",
+          "name": "Paramedic Ana S.",
+          "vehicleType": "bike",
+          "vehicleChanges": [
+            {
+              "id": "vc-mpi4o1mo",
+              "at": "2026-05-23T09:10:00.000Z",
+              "vehicleType": "car"
+            }
+          ],
+          "color": "#38bdf8",
+          "stations": [
+            {
+              "id": "st-mu147pej-s9cm",
+              "arriveAt": "2026-05-23T07:25:00.000Z",
+              "lat": 43.62556085560931,
+              "lng": 22.751685557981375,
+              "label": "Position 1"
+            },
+            {
+              "id": "st-mu14rozq-8m92",
+              "arriveAt": "2026-05-23T09:04:00.000Z",
+              "lat": 43.65487058745774,
+              "lng": 22.733880893135193,
+              "label": "Position 2",
+              "travelMinutes": 14,
+              "travelSource": "routed",
+              "travelVehicle": "bike"
+            },
+            {
+              "id": "st-mu14rzey-q0jm",
+              "arriveAt": "2026-05-23T10:40:00.000Z",
+              "lat": 43.60444476776942,
+              "lng": 22.67216696311661,
+              "poiId": "910145bb-9c32-4206-9de6-afbfb58c0e27",
+              "label": "Base Medical Camp4",
+              "travelMinutes": 16,
+              "travelSource": "routed",
+              "travelVehicle": "car"
+            }
+          ]
+        },
+        {
+          "id": "pm-6d5a4894-dede-43c2-ba0c-541a453089c3",
+          "medicId": "6d5a4894-dede-43c2-ba0c-541a453089c3",
+          "name": "Sam Lee",
+          "vehicleType": "bike",
+          "color": "#34d399",
+          "unit": "Unit 2",
+          "stations": []
+        },
+        {
+          "id": "pm-4c6360ed-a5aa-4edb-b5b6-5f782250128c",
+          "medicId": "4c6360ed-a5aa-4edb-b5b6-5f782250128c",
+          "name": "Sarah Davis",
+          "vehicleType": "foot",
+          "color": "#2dd4bf",
+          "unit": "Unit 2",
+          "stations": []
+        },
+        {
+          "id": "pm-local-mu10msar",
+          "name": "Unit 14",
+          "vehicleType": "offroad-car",
+          "vehicleChanges": [
+            {
+              "id": "vc-mphy24tc",
+              "at": "2026-05-23T06:05:00.000Z",
+              "vehicleType": "ambulance"
+            },
+            {
+              "id": "vc-mpi2cgdc",
+              "at": "2026-05-23T08:05:00.000Z",
+              "vehicleType": "ambulance"
+            }
+          ],
+          "color": "#2dd4bf",
+          "stations": [
+            {
+              "id": "st-mu10mtvm-pnky",
+              "arriveAt": "2026-05-23T05:25:00.000Z",
+              "lat": 43.46422333592133,
+              "lng": 22.887047254714645,
+              "poiId": "4e6bf1e7-b193-4123-964f-45af52e24d6c",
+              "label": "Mountain Rescue"
+            }
+          ],
+          "sweeps": [
+            {
+              "disciplineId": "2026-05-23::M",
+              "joinFrom": "post"
+            }
+          ]
+        }
+      ],
+      "settings": {}
+    }
   },
   {
     "id": "event-mpidawb5",

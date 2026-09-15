@@ -25,28 +25,28 @@ import type {
 import { planMedicColor, planSweeps, planVehicleAt } from '@events/contracts'
 import { usePlanner } from '@/hooks/usePlanner'
 import type { BaseLayer } from '@/lib/map-styles'
-import { fieldAt, EMPTY_FIELD, type FieldState } from '@/lib/planner/field'
+import { fieldAt, EMPTY_FIELD, type FieldState } from '@events/planner'
 import {
   medicPositionAt,
   resolveMedicTimeline,
   type MedicTimeline,
   type ResolveOptions,
   type ResolvedSweep,
-} from '@/lib/planner/schedule'
-import { formatTime } from '@/lib/planner/itinerary'
+} from '@events/planner'
+import { formatTime } from '@events/planner'
 import {
   coverageFor,
   DEFAULT_REACH_MINUTES,
   EMPTY_COVERAGE,
   type CoverageMedic,
   type CoverageReport,
-} from '@/lib/planner/coverage'
+} from '@events/planner'
 
-import { checkSweep, type SweepWarning } from '@/lib/planner/sweep-check'
-import { bucketCount } from '@/lib/planner/isochrone'
-import { splitRouteAtVias } from '@/lib/planner/route-segments'
-import { haversineMeters, nearestOnCourse } from '@/lib/planner/course'
-import { vehicleSpeedKmh } from '@/lib/planner/travel'
+import { checkSweep, type SweepWarning } from '@events/planner'
+import { bucketCount } from '@events/planner'
+import { splitRouteAtVias } from '@events/planner'
+import { haversineMeters, nearestOnCourse } from '@events/planner'
+import { vehicleSpeedKmh } from '@events/planner'
 import { POI_CONFIGS, MAP_CENTER } from '@/lib/constants'
 import PlannerMap, { type PlannedMedicView } from './PlannerMap'
 import PlannerTimeline, { type PlaySpeed } from './PlannerTimeline'

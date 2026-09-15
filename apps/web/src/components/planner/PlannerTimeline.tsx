@@ -15,9 +15,9 @@ import {
 import { VEHICLE_TYPE_META } from '@events/contracts'
 import type { PlanMedic } from '@events/contracts'
 import type { PlannerDiscipline } from '@/hooks/usePlanner'
-import type { MedicTimeline } from '@/lib/planner/schedule'
-import { formatDuration, formatTime } from '@/lib/planner/itinerary'
-import { fieldLoadCurve } from '@/lib/planner/load'
+import type { MedicTimeline } from '@events/planner'
+import { formatDuration, formatTime } from '@events/planner'
+import { fieldLoadCurve } from '@events/planner'
 
 const HOUR = 3600_000
 const GUTTER = 172

@@ -1,6 +1,6 @@
 import type { EventPlan, VehicleType } from "@events/contracts";
 import client from "./client";
-import { routeProfileFor } from "@/lib/planner/travel";
+import { routeProfileFor } from "@events/planner";
 
 /** The event's deployment plan. A never-planned event returns an empty one. */
 export async function fetchPlan(eventId: string): Promise<EventPlan> {

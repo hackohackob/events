@@ -4,9 +4,9 @@ import { useMemo } from 'react'
 import { Flag, Mountain, Route, ShieldAlert, ShieldCheck, TriangleAlert, Users } from 'lucide-react'
 import type { PlanDisciplineSchedule } from '@events/contracts'
 import type { PlannerDiscipline } from '@/hooks/usePlanner'
-import type { FieldState } from '@/lib/planner/field'
-import { formatDuration, formatStamp } from '@/lib/planner/itinerary'
-import type { CoverageReport } from '@/lib/planner/coverage'
+import type { FieldState } from '@events/planner'
+import { formatDuration, formatStamp } from '@events/planner'
+import type { CoverageReport } from '@events/planner'
 
 interface Props {
   disciplines: PlannerDiscipline[]

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Check, ClipboardCopy, Download, Printer, Waves } from 'lucide-react'
 import type { PlanMedic } from '@events/contracts'
-import type { ResolveOptions } from '@/lib/planner/schedule'
+import type { ResolveOptions } from '@events/planner'
 import {
   buildItinerary,
   formatDay,
@@ -11,7 +11,7 @@ import {
   formatTime,
   itinerariesToCsv,
   itineraryToText,
-} from '@/lib/planner/itinerary'
+} from '@events/planner'
 
 interface Props {
   medics: PlanMedic[]
