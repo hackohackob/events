@@ -57,6 +57,8 @@ import { mapDebugDirtyCount, useMapDebug } from "../debug/map-debug";
 import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
+import { PlanControl } from "../plan/PlanControl";
+import { PlanScreen } from "../plan/PlanScreen";
 import { IMPRECISE_ACCURACY_M, MedicDot } from "./MedicDot";
 import { MedicSheet } from "./MedicSheet";
 import { SearchOverlay, type SearchTarget } from "../search/SearchOverlay";
@@ -5329,6 +5331,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
       {showEl("medicStatus") && activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
+      {/* The deployment plan, directly under the status control. Renders nothing
+          unless the desk has actually put this user on a plan. Hidden under the
+          same conditions as the status control — every one of them means the
+          screen already belongs to something more urgent. */}
+      {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <PlanControl /> : null}
+      <PlanScreen />
       {/* Also hidden while a trail is open: the transport occupies the same
           corner, and the FAB sat directly on top of its LIVE button. */}
       {showEl("incidentFab") && !selectedMarker && !participantsOpen && navPhase === "idle" && trackNavPhase === "idle" && !trackModeActive && !trailOpen ? (

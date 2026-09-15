@@ -17,6 +17,7 @@ import { logIncidentChannelState } from "./notifications/broadcast-notification"
 import { stopIncidentSiren } from "./notifications/incident-siren";
 import { hydrateAlarmGuard } from "./notifications/incident-alarm-guard";
 import { MapScreen } from "./map/MapScreen";
+import { syncPlanNotifications } from "./plan/plan-notifications";
 import { useSessionStore } from "./security/session-store";
 import { useSettingsStore } from "./settings/settings-store";
 import { useIncidentReadsStore } from "./incidents/incident-reads-store";
@@ -105,6 +106,10 @@ export default function App() {
     })();
     // Register for push so the backend can alert this device when the app is closed.
     void registerPushToken();
+    // Departure reminders from the deployment plan. Scheduled locally at login
+    // rather than pushed, because the moves are known hours ahead and the
+    // reminder that matters most is the one for a post with no reception.
+    void syncPlanNotifications();
     // The chat channels must exist before the first remote chat push names them.
     void ensureChatNotificationChannels();
     // Read back what Android actually stored for the alarm channel — the only
@@ -154,6 +159,9 @@ export default function App() {
         // settings), so the watchdog below can re-register tracking right away.
         resetTransientTrackingBackoff();
         void ensureTrackingAlive();
+        // The plan may have been re-cut while the phone was asleep; re-reading
+        // it on foreground is one GET and keeps the pending reminders honest.
+        void syncPlanNotifications();
       }
     });
     const watchdog = setInterval(() => void ensureTrackingAlive(), 60_000);

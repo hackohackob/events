@@ -135,6 +135,13 @@ export interface EventTrack {
   id: string;
   label: string;
   color?: string;
+  /**
+   * `${dayDate}::${disciplineName}` — the same key the deployment plan files
+   * its schedules under. Carried on the track so a client can line a course up
+   * with its plan without re-deriving it from a label, which is not unique
+   * across the days of a multi-day event.
+   */
+  disciplineId?: string;
   points: Array<{ lat: number; lng: number; ele?: number }>;
   elevationProfile: {
     totalAscentMeters: number;
@@ -719,6 +726,7 @@ export class EventsService implements OnModuleInit {
             id: disc.trackId ?? disc.name.toLowerCase().replace(/\s+/g, "-"),
             label: disc.name,
             color: disc.color,
+            disciplineId: `${day.date}::${disc.name}`,
             points,
             elevationProfile: {
               totalAscentMeters: disc.ascentMeters ?? 0,
