@@ -214,6 +214,8 @@ export interface MedicState {
   battery?: number;
   /** Whether the device was charging at the time of the last update */
   charging?: boolean;
+  /** Radio conditions when the last update was sent. See {@link SignalSample}. */
+  signal?: SignalSample;
   status: MedicStatus;
   destination?: MedicDestination | null;
   /** Active navigation path (set while navigating), or null. */
@@ -233,6 +235,11 @@ export interface WsMedicLocation {
   battery?: number;
   /** Whether the device is charging */
   charging?: boolean;
+  /**
+   * Radio conditions at this fix. Sent by app builds that support the coverage
+   * survey; absent from older ones, which the server tolerates.
+   */
+  signal?: SignalSample;
 }
 
 export interface AssignMedicDestinationRequest {
@@ -1368,3 +1375,193 @@ export function planMedicColor(id: string): string {
   }
   return PLAN_MEDIC_COLORS[hash % PLAN_MEDIC_COLORS.length];
 }
+
+// ─── Signal coverage ──────────────────────────────────────────────────────────
+//
+// Every medic location report carries a snapshot of the radio the report went
+// out on. Accumulated across every event, that turns the fleet into a survey
+// crew: wherever a medic has ever stood, we know whether a phone works there.
+//
+// What the phone can actually measure, and what it cannot:
+//
+//   • `networkType` / `generation` / `carrier` come from NetInfo and are exact.
+//   • `bars` is a 0–4 quality score we derive (see mobile/src/location/
+//     signal-probe.ts). It is NOT a vendor bar count — it blends the radio
+//     class with whether traffic is actually getting through.
+//   • `rssi` is true dBm. React Native exposes no such API on either platform,
+//     so it stays undefined until a native probe is added; the field exists so
+//     that build needs no schema change. Never assume it is present.
+//
+// Consumers should treat `bars` as the primary metric and `rssi` as a bonus.
+
+/** Transport the report went out on. */
+export type SignalNetworkType = "cellular" | "wifi" | "ethernet" | "none" | "unknown";
+
+/** Radio class. `wifi`/`none`/`unknown` are not cellular generations but belong
+ *  in the same slot because that is how an operator reads the map: "what did
+ *  this phone have here?" */
+export type SignalGeneration = "2g" | "3g" | "4g" | "5g" | "wifi" | "none" | "unknown";
+
+/** Radio conditions at one location report. All fields optional — an old app
+ *  build sends none of them, and the ingest path must stay happy with that. */
+export interface SignalSample {
+  /**
+   * Normalised quality, 0 (nothing) – 4 (excellent). Derived, not vendor bars.
+   */
+  bars?: number;
+  /** True cellular RSSI in dBm, when a native probe can supply it. */
+  rssi?: number;
+  networkType?: SignalNetworkType;
+  generation?: SignalGeneration;
+  /** Carrier name (cellular) — never an SSID, which would leak a home network. */
+  carrier?: string;
+  /** Round-trip of the last successful report, ms. The honest latency number. */
+  latencyMs?: number;
+}
+
+/** A location where a phone had no usable data at all. */
+export const SIGNAL_DEAD_BARS = 0;
+
+/** At or below this the location is "weak" — a voice call might hold, data won't. */
+export const SIGNAL_WEAK_BARS = 1;
+
+/** Bars → label, shared by every surface so the wording never drifts. */
+export const SIGNAL_BAR_LABELS = ["No signal", "Very weak", "Weak", "Good", "Excellent"] as const;
+
+/**
+ * Bars → colour, low to high. Red for dead through green for excellent: the
+ * scale reads the same way as every other risk colour in the dashboard.
+ */
+export const SIGNAL_BAR_COLORS = ["#ef4444", "#f97316", "#facc15", "#84cc16", "#22c55e"] as const;
+
+export function signalBarLabel(bars: number): string {
+  return SIGNAL_BAR_LABELS[clampBars(bars)];
+}
+
+export function signalBarColor(bars: number): string {
+  return SIGNAL_BAR_COLORS[clampBars(bars)];
+}
+
+function clampBars(bars: number): number {
+  if (!Number.isFinite(bars)) return 0;
+  return Math.min(SIGNAL_BAR_LABELS.length - 1, Math.max(0, Math.round(bars)));
+}
+
+/**
+ * Grid resolutions the coverage map offers, coarse → fine, in degrees of
+ * latitude. Samples are bucketed server-side to one of these; the client picks
+ * by zoom so a country-wide view aggregates hard and a village view does not.
+ *
+ * ~0.01° ≈ 1.1 km, ~0.0005° ≈ 55 m. Finer than the last step is pointless —
+ * it is below the accuracy of the fixes feeding it.
+ */
+export const COVERAGE_CELL_SIZES = [0.02, 0.01, 0.005, 0.002, 0.001, 0.0005] as const;
+
+export type CoverageCellSize = (typeof COVERAGE_CELL_SIZES)[number];
+
+/** Pick a grid size for a map zoom level. */
+export function coverageCellForZoom(zoom: number): CoverageCellSize {
+  if (zoom < 8) return 0.02;
+  if (zoom < 10) return 0.01;
+  if (zoom < 12) return 0.005;
+  if (zoom < 14) return 0.002;
+  if (zoom < 16) return 0.001;
+  return 0.0005;
+}
+
+/** One aggregated grid square of the coverage survey. */
+export interface CoverageCell {
+  /** Cell centre. */
+  lat: number;
+  lng: number;
+  /** Mean bars across every sample in the cell, 0–4 (fractional). */
+  bars: number;
+  /** Worst single sample here — a mean of 3 hides a cell that drops out. */
+  worstBars: number;
+  /** Number of samples aggregated. */
+  samples: number;
+  /** Share of samples with no usable data at all, 0–1. */
+  deadRatio: number;
+  /** Carriers observed here, most-sampled first. */
+  carriers: string[];
+  /** Median round-trip in ms across samples that measured one. */
+  latencyMs?: number;
+  /** Most common radio class in the cell. */
+  generation?: SignalGeneration;
+  /** ISO time of the newest sample in the cell. */
+  lastSeenAt: string;
+}
+
+/** Fleet-wide totals for the survey matching the active filters. */
+export interface CoverageSummary {
+  samples: number;
+  cells: number;
+  /** Mean bars across every sample. */
+  meanBars: number;
+  /** Cells whose mean is at or below {@link SIGNAL_WEAK_BARS}. */
+  weakCells: number;
+  /** Cells that were fully dead for every sample taken there. */
+  deadCells: number;
+  /** ISO range actually covered by the returned data. */
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+}
+
+export interface CoverageGridResponse {
+  cellSize: number;
+  cells: CoverageCell[];
+  summary: CoverageSummary;
+  /** True when the row cap was hit and the grid is incomplete — the client
+   *  says so rather than quietly drawing a partial survey. */
+  truncated: boolean;
+}
+
+/** A carrier the survey has seen, with enough detail to rank the operators. */
+export interface CoverageCarrierStat {
+  carrier: string;
+  samples: number;
+  meanBars: number;
+  /** Share of this carrier's samples that were dead, 0–1. */
+  deadRatio: number;
+}
+
+/**
+ * An event the survey has data for — the coverage page's event filter.
+ *
+ * No title: the event list lives in the backend's JSON store, and reaching it
+ * from the coverage module would drag EventsModule into a module graph that
+ * already has two forwardRef cycles in it. The dashboard holds the event list
+ * anyway, so it resolves the name from `eventId` itself.
+ */
+export interface CoverageEventStat {
+  eventId: string;
+  samples: number;
+  meanBars: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+/** A contiguous-enough patch of no-signal ground, for the dead-zone list. */
+export interface CoverageDeadZone {
+  lat: number;
+  lng: number;
+  samples: number;
+  /** Distinct medics who lost signal here — 1 may be a broken handset, 5 is
+   *  a property of the ground. */
+  medics: number;
+  carriers: string[];
+  lastSeenAt: string;
+}
+
+export interface CoverageFacets {
+  carriers: CoverageCarrierStat[];
+  events: CoverageEventStat[];
+  generations: { generation: SignalGeneration; samples: number }[];
+  summary: CoverageSummary;
+}
+
+/** Ceiling on grid cells returned in one request. */
+export const COVERAGE_MAX_CELLS = 20_000;
+
+/** Default look-back for the coverage map when no range is given, in days. */
+export const COVERAGE_DEFAULT_DAYS = 365;

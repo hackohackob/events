@@ -4,7 +4,12 @@ dist
 .env.*
 !.env.example
 .expo
-coverage
+# Test-coverage output only. A bare `coverage` rule also matches source
+# directories named coverage (e.g. the signal-coverage modules), which git
+# then silently refuses to add.
+/coverage/
+apps/*/coverage/
+packages/*/coverage/
 *.log
 /android/
 apps/backend/uploads/gpx/

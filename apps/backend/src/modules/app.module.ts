@@ -3,6 +3,7 @@ import { ConfigModule } from "@nestjs/config";
 import { AssignmentsModule } from "./assignments/assignments.module";
 import { AuthModule } from "./auth/auth.module";
 import { CommonModule } from "./common/common.module";
+import { CoverageModule } from "./coverage/coverage.module";
 import { EventChatModule } from "./event-chat/event-chat.module";
 import { ExampleDataModule } from "./example-data/example-data.module";
 import { EventsModule } from "./events/events.module";
@@ -30,6 +31,7 @@ import { WeatherModule } from "./weather/weather.module";
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     CommonModule,
+    CoverageModule,
     ExampleDataModule,
     InfraModule,
     HealthModule,

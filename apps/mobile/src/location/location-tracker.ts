@@ -13,6 +13,7 @@ import { debugLog, describeError } from "../debug/debug-log";
 import { useLocationStatus } from "../debug/location-status";
 import { effectiveLocationIntervalMs, useSettingsStore } from "../settings/settings-store";
 import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "./battery-optimization";
+import { getSignalSample, noteReportFailure, noteReportSuccess } from "./signal-probe";
 
 export const LOCATION_TASK_NAME = "background-location-task";
 
@@ -311,6 +312,10 @@ async function sendLocation(
   }
 
   if (isMedic) {
+    // Radio snapshot for the coverage survey. Read here rather than at queue
+    // flush time: what matters is the signal where the medic was standing when
+    // the fix was taken, not where they were when the backlog finally drained.
+    const signal = getSignalSample();
     const payload = {
       // Display name for the HTTP path — external guests aren't on the roster,
       // so without this the server can only fall back to the "external_…" id.
@@ -322,6 +327,7 @@ async function sendLocation(
       heading: location.coords.heading ?? undefined,
       battery,
       charging,
+      signal,
       // Real fix time — without it the server stamps arrival time, so a fix
       // flushed after a Doze freeze masquerades as a live position.
       timestamp: new Date(location.timestamp).toISOString(),
@@ -352,14 +358,20 @@ async function sendLocation(
     // Known offline → don't spin the radio up on a doomed fetch; park the fix
     // in the queue (newest-only) and let the connectivity listener flush it.
     if (!isOnline()) {
+      noteReportFailure();
       queueLocation("medic_location", { ...payload, eventId, medicId }, "offline");
       return;
     }
+    const startedAt = Date.now();
     try {
       await apiFetch(`/events/${eventId}/medics/${medicId}/location`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
+      // The round-trip of this very POST is the survey's throughput evidence —
+      // measured on the request we were sending anyway, so it costs no radio
+      // time of its own.
+      noteReportSuccess(Date.now() - startedAt);
       noteEnergyEvent("sendHttpOk");
       debugLog("location", "info", `medic location sent via HTTP${opts.heartbeat ? " (heartbeat — cached fix)" : ""}`, {
         accuracy: payload.accuracy,
@@ -368,6 +380,7 @@ async function sendLocation(
       });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "http" });
     } catch (err) {
+      noteReportFailure();
       noteEnergyEvent("sendHttpFail");
       queueLocation("medic_location", { ...payload, eventId, medicId }, String(err));
     }

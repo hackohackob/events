@@ -213,3 +213,17 @@ input[type='date']::-webkit-calendar-picker-indicator {
   font-size: 18px;
   padding: 2px 7px;
 }
+
+/* Signal-coverage cell popup — same dark card as the POI popup. Kept separate
+   rather than reusing .poi-popup so the two can diverge without surprises. */
+.coverage-popup .maplibregl-popup-content {
+  background: #0a1320;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  padding: 10px 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+.coverage-popup .maplibregl-popup-tip {
+  border-top-color: #0a1320 !important;
+  border-bottom-color: #0a1320 !important;
+}

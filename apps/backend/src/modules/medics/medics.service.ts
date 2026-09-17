@@ -10,6 +10,7 @@ import {
   MedicType,
   normalizeVehicleType,
   PublicMedicState,
+  SignalSample,
   VehicleType,
 } from "@events/contracts";
 import { DbService } from "../infra/db.service";
@@ -17,6 +18,7 @@ import { RedisService } from "../infra/redis.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { EventsService } from "../events/events.service";
 import { TrailRecorderService } from "../trails/trail-recorder.service";
+import { SignalRecorderService } from "../coverage/signal-recorder.service";
 
 interface RosterRow {
   id: string;
@@ -63,6 +65,8 @@ export interface UpsertMedicLocationParams {
   accuracy?: number;
   battery?: number;
   charging?: boolean;
+  /** Radio conditions the report went out on. Absent on older app builds. */
+  signal?: SignalSample;
   /** Client-side fix time (ISO). Falls back to server time when absent. */
   timestamp?: string;
 }
@@ -77,6 +81,7 @@ export class MedicsService implements OnModuleInit {
     private readonly notifications: NotificationsService,
     private readonly events: EventsService,
     private readonly trailRecorder: TrailRecorderService,
+    private readonly signalRecorder: SignalRecorderService,
   ) {}
 
   /**
@@ -314,6 +319,10 @@ export class MedicsService implements OnModuleInit {
       accuracy: params.accuracy,
       battery: params.battery,
       charging: params.charging,
+      // Carried on the live state so the dashboard can show a medic's current
+      // signal without a second lookup; not persisted — the survey table is the
+      // record, this is only the latest value.
+      signal: params.signal ?? existing?.signal,
       status: existing?.status ?? "available",
       destination: existing?.destination ?? null,
       route: existing?.route ?? null,
@@ -375,6 +384,31 @@ export class MedicsService implements OnModuleInit {
       }
     } catch (err) {
       this.logger.warn(`trail breadcrumb skipped: ${String(err)}`);
+    }
+
+    // Radio snapshot for the coverage survey. Gated on the same flag as the
+    // trail so the two stores always agree on when a medic is being recorded —
+    // a survey point that outlives its breadcrumb would reveal a position at a
+    // time history was supposed to be off.
+    //
+    // Same guarantees as above: synchronous, batched, and wrapped so a survey
+    // problem can never drop a live medic off the map.
+    try {
+      if (params.signal && this.events.shouldRecordHistory(params.eventId)) {
+        this.signalRecorder.record(
+          {
+            eventId: params.eventId,
+            medicId: params.medicId,
+            lat: params.lat,
+            lng: params.lng,
+            recordedAt,
+            signal: params.signal,
+          },
+          params.accuracy,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`signal sample skipped: ${String(err)}`);
     }
 
     await this.publishMedicLocation(params.eventId, state);

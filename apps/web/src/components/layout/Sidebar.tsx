@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Calendar, Users, Settings, LogOut, BookOpen, Cross, Smartphone,
+  LayoutDashboard, Calendar, Users, Settings, LogOut, BookOpen, Cross, Smartphone, RadioTower,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +13,7 @@ const navItems = [
   { href: '/events', icon: Calendar, label: 'Events' },
   { href: '/users', icon: Users, label: 'Users' },
   { href: '/hospitals', icon: Cross, label: 'Hospitals' },
+  { href: '/coverage', icon: RadioTower, label: 'Coverage' },
   { href: '/devices', icon: Smartphone, label: 'Devices' },
   { href: '/field-guide', icon: BookOpen, label: 'Field Guide' },
   { href: '/settings', icon: Settings, label: 'Settings' },
