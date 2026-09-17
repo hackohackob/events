@@ -18,6 +18,9 @@ export interface CellFeatureProperties {
   latencyMs: number | null
   /** Pre-resolved fill, so the paint expression stays a plain `['get']`. */
   color: string
+  /** The metric being painted, 0–4. Drives opacity: no-coverage squares are
+   *  drawn near-solid so the black reads as black rather than grey. */
+  value: number
   /** Index back into the cell array for the detail popup. */
   index: number
 }
@@ -79,6 +82,7 @@ export function cellPolygons(
           deadRatio: cell.deadRatio,
           latencyMs: cell.latencyMs ?? null,
           color: barsColor(value),
+          value,
           index,
         },
         geometry: {

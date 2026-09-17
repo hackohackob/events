@@ -14,6 +14,7 @@ import { useLocationStatus } from "../debug/location-status";
 import { effectiveLocationIntervalMs, useSettingsStore } from "../settings/settings-store";
 import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "./battery-optimization";
 import { getSignalSample, noteReportFailure, noteReportSuccess } from "./signal-probe";
+import { bufferSignalSample, flushSignalBuffer, hydrateSignalBuffer } from "./signal-buffer";
 
 export const LOCATION_TASK_NAME = "background-location-task";
 
@@ -359,6 +360,12 @@ async function sendLocation(
     // in the queue (newest-only) and let the connectivity listener flush it.
     if (!isOnline()) {
       noteReportFailure();
+      // The location queue keeps only the newest fix — right for liveness,
+      // wrong for the survey, where every reading is a distinct measurement of
+      // a distinct place. Without this the map goes blank over exactly the
+      // ground it exists to map: an hours-long hole would record as one dot at
+      // wherever the medic was standing when coverage came back.
+      bufferSignalSample({ eventId, medicId, lat: payload.lat, lng: payload.lng, at: payload.timestamp, signal });
       queueLocation("medic_location", { ...payload, eventId, medicId }, "offline");
       return;
     }
@@ -381,6 +388,9 @@ async function sendLocation(
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "http" });
     } catch (err) {
       noteReportFailure();
+      // A report that failed to go out is itself a coverage reading, and the
+      // most honest kind: the OS claimed a connection and nothing got through.
+      bufferSignalSample({ eventId, medicId, lat: payload.lat, lng: payload.lng, at: payload.timestamp, signal });
       noteEnergyEvent("sendHttpFail");
       queueLocation("medic_location", { ...payload, eventId, medicId }, String(err));
     }
@@ -1151,6 +1161,13 @@ export async function stopLocationLoop(): Promise<void> {
 let flushInFlight = false;
 
 export async function flushLocationQueue(): Promise<void> {
+  // The coverage backlog drains on the same triggers but is gated separately:
+  // the two queues empty independently, and the survey's is usually the one
+  // with something in it after an outage (the location queue holds at most one
+  // fix). Its own guards cover offline/empty/in-flight.
+  await hydrateSignalBuffer();
+  await flushSignalBuffer();
+
   // Multiple triggers can coincide (NetInfo flip + app foreground + background
   // task) — one pass at a time, and never while known-offline.
   if (flushInFlight || !isOnline() || locationQueue.size === 0) return;

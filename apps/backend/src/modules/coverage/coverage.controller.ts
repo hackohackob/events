@@ -1,9 +1,17 @@
-import { Controller, ForbiddenException, Get, Query, UseGuards } from "@nestjs/common";
-import { COVERAGE_DEFAULT_DAYS, coverageCellForZoom } from "@events/contracts";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  COVERAGE_DEFAULT_DAYS,
+  COVERAGE_MAX_BATCH,
+  CoverageSampleBatch,
+  CoverageSampleBatchResult,
+  coverageCellForZoom,
+  isStaffRole,
+} from "@events/contracts";
 import { AuthGuard } from "../common/guards/auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
 import { CoverageBounds, CoverageQuery, CoverageService } from "./coverage.service";
+import { SignalRecorderService } from "./signal-recorder.service";
 
 /**
  * Signal coverage survey — the fleet-wide radio map.
@@ -19,7 +27,10 @@ import { CoverageBounds, CoverageQuery, CoverageService } from "./coverage.servi
 @Controller("coverage")
 @UseGuards(AuthGuard)
 export class CoverageController {
-  constructor(private readonly coverageService: CoverageService) {}
+  constructor(
+    private readonly coverageService: CoverageService,
+    private readonly signalRecorder: SignalRecorderService,
+  ) {}
 
   /** Aggregated grid for the current viewport. */
   @Get("grid")
@@ -61,6 +72,55 @@ export class CoverageController {
     // Facets deliberately ignore the viewport: they drive the filter controls,
     // which must keep offering a carrier even after you pan away from it.
     return this.coverageService.getFacets(parseQuery({ from, to, days, eventIds, carriers, generations }));
+  }
+
+  /**
+   * A backlog of readings a device buffered while it had no way to report.
+   *
+   * Written by MEDICS, not coordinators — this is the one route here that is
+   * not a coordinator read. Without it the survey is blind exactly where
+   * coverage is worst, because a phone in a hole cannot post from the hole.
+   *
+   * The body is typed but not a DTO class on purpose: the global ValidationPipe
+   * runs with `whitelist: true`, which would strip every nested field of a
+   * class it cannot see decorators for. Validation is done explicitly below and
+   * in the recorder, which clamps every column to its own range.
+   */
+  @Post("samples")
+  ingestSamples(
+    @CurrentUser() user: RequestUser,
+    @Body() body: CoverageSampleBatch,
+  ): CoverageSampleBatchResult {
+    if (!isStaffRole(user.role)) {
+      throw new ForbiddenException("Only staff devices report coverage samples");
+    }
+    const samples = Array.isArray(body?.samples) ? body.samples : null;
+    if (!samples) throw new BadRequestException("samples must be an array");
+    if (samples.length > COVERAGE_MAX_BATCH) {
+      throw new BadRequestException(`at most ${COVERAGE_MAX_BATCH} samples per request`);
+    }
+
+    // The device carries the ids the readings were taken under: a medic may
+    // have switched events between the outage and the flush, and the backlog
+    // belongs to the event it was recorded on, not the current one.
+    const eventId = typeof body.eventId === "string" ? body.eventId.trim() : "";
+    const medicId = typeof body.medicId === "string" ? body.medicId.trim() : "";
+    if (!eventId || !medicId) throw new BadRequestException("eventId and medicId are required");
+
+    let accepted = 0;
+    for (const sample of samples) {
+      if (!sample || typeof sample !== "object" || !sample.signal) continue;
+      const stored = this.signalRecorder.recordBackfill({
+        eventId,
+        medicId,
+        lat: sample.lat,
+        lng: sample.lng,
+        recordedAt: sample.at,
+        signal: sample.signal,
+      });
+      if (stored) accepted += 1;
+    }
+    return { accepted, rejected: samples.length - accepted };
   }
 
   /** Ranked black spots — the actionable end of the survey. */

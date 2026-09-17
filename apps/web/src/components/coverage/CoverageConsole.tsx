@@ -23,6 +23,7 @@ import {
   SIGNAL_BAR_LABELS,
   coverageCellForZoom,
   signalBarLabel,
+  signalBarTextColor,
 } from '@events/contracts'
 import { fetchEvents } from '@/api/events'
 import {
@@ -38,7 +39,6 @@ import {
 } from '@/api/coverage'
 import { styleFor } from '@/lib/map-styles'
 import {
-  barsColor,
   cellPolygons,
   cellsBbox,
   metricValue,
@@ -212,15 +212,6 @@ export default function CoverageConsole() {
     [cells, gridQuery.data?.cellSize, cellSize, metric],
   )
   const heatPoints = useMemo(() => weaknessPoints(cells, metric), [cells, metric])
-
-  const deadZonePoints = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(() => ({
-    type: 'FeatureCollection',
-    features: deadZones.map((zone) => ({
-      type: 'Feature' as const,
-      properties: { samples: zone.samples },
-      geometry: { type: 'Point' as const, coordinates: [zone.lng, zone.lat] },
-    })),
-  }), [deadZones])
 
   const mapStyle = useMemo(() => styleFor('streets', false), [])
 
@@ -422,7 +413,13 @@ export default function CoverageConsole() {
                 <Layer
                   id={FILL_LAYER_ID}
                   type="fill"
-                  paint={{ 'fill-color': ['get', 'color'], 'fill-opacity': 0.62 }}
+                  paint={{
+                    'fill-color': ['get', 'color'],
+                    // No-coverage squares go near-solid so they read as black
+                    // rather than as grey haze over the basemap; the usable
+                    // range stays translucent enough to see streets through.
+                    'fill-opacity': ['interpolate', ['linear'], ['get', 'value'], 0, 0.92, 1, 0.62],
+                  }}
                 />
                 <Layer
                   id="coverage-cells-outline"
@@ -433,22 +430,6 @@ export default function CoverageConsole() {
                     // have edges; at low zoom they'd be a grey haze.
                     'line-opacity': ['interpolate', ['linear'], ['zoom'], 11, 0, 13, 0.55],
                     'line-width': 1,
-                  }}
-                />
-              </Source>
-            )}
-
-            {/* Confirmed black spots, always visible in both views. */}
-            {deadZonePoints.features.length > 0 && (
-              <Source id="coverage-dead" type="geojson" data={deadZonePoints}>
-                <Layer
-                  id="coverage-dead-layer"
-                  type="circle"
-                  paint={{
-                    'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 3, 12, 6, 16, 10],
-                    'circle-color': 'rgba(239,68,68,0)',
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#ef4444',
                   }}
                 />
               </Source>
@@ -541,7 +522,7 @@ export default function CoverageConsole() {
               <Stat
                 label="Average signal"
                 value={totals ? `${totals.meanBars.toFixed(1)}/4` : '—'}
-                tone={totals ? barsColor(totals.meanBars) : '#64748b'}
+                tone={totals ? signalBarTextColor(totals.meanBars) : '#64748b'}
               />
               <Stat label="Weak cells in view" value={formatCount(gridQuery.data?.summary.weakCells ?? 0)} tone="#f59e0b" />
               <Stat label="Black spots" value={formatCount(deadZones.length)} tone="#ef4444" />
@@ -580,7 +561,7 @@ export default function CoverageConsole() {
                       <div className="w-20 h-1.5 rounded-full overflow-hidden flex-shrink-0" style={{ background: 'rgba(148,163,184,0.1)' }}>
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${(carrier.meanBars / 4) * 100}%`, background: barsColor(carrier.meanBars) }}
+                          style={{ width: `${(carrier.meanBars / 4) * 100}%`, background: signalBarTextColor(carrier.meanBars) }}
                         />
                       </div>
                       <span className="text-xs tabular-nums w-8 text-right" style={{ color: '#94a3b8' }}>
@@ -647,14 +628,17 @@ export default function CoverageConsole() {
 
 function CellDetail({ cell, metric, onClose }: { cell: CoverageCell; metric: CoverageMetric; onClose: () => void }) {
   const value = metricValue(cell, metric)
+  // The popup is a dark card, so it uses the text-safe scale — the map's
+  // near-black "no signal" would vanish here.
+  const tone = signalBarTextColor(value)
   return (
     <div className="p-1 w-full" style={{ minWidth: 200 }}>
       <div className="flex items-start gap-2.5 mb-2.5">
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${barsColor(value)}22` }}>
-          <Signal className="w-4 h-4" style={{ color: barsColor(value) }} />
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${tone}22` }}>
+          <Signal className="w-4 h-4" style={{ color: tone }} />
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold" style={{ color: barsColor(value) }}>{signalBarLabel(value)}</div>
+          <div className="text-sm font-bold" style={{ color: tone }}>{signalBarLabel(value)}</div>
           <div className="text-[11px]" style={{ color: '#94a3b8' }}>
             {cell.bars.toFixed(1)}/4 average · worst {cell.worstBars}/4
           </div>

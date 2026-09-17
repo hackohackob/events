@@ -1429,10 +1429,20 @@ export const SIGNAL_WEAK_BARS = 1;
 export const SIGNAL_BAR_LABELS = ["No signal", "Very weak", "Weak", "Good", "Excellent"] as const;
 
 /**
- * Bars → colour, low to high. Red for dead through green for excellent: the
- * scale reads the same way as every other risk colour in the dashboard.
+ * Bars → colour, low to high.
+ *
+ * Black for "no signal at all", then orange → green for the usable range. The
+ * black is the point: a hole in coverage is categorically different from a
+ * weak spot, and painting it the darkest thing on a light basemap makes it
+ * findable at a glance instead of one red among several.
  */
-export const SIGNAL_BAR_COLORS = ["#ef4444", "#f97316", "#facc15", "#84cc16", "#22c55e"] as const;
+export const SIGNAL_BAR_COLORS = ["#0a0a0a", "#f97316", "#facc15", "#84cc16", "#22c55e"] as const;
+
+/**
+ * The same scale, but safe as TEXT on the dashboard's dark cards — the map's
+ * near-black would be invisible there. Only the dead end differs.
+ */
+export const SIGNAL_BAR_TEXT_COLORS = ["#94a3b8", "#f97316", "#facc15", "#84cc16", "#22c55e"] as const;
 
 export function signalBarLabel(bars: number): string {
   return SIGNAL_BAR_LABELS[clampBars(bars)];
@@ -1440,6 +1450,11 @@ export function signalBarLabel(bars: number): string {
 
 export function signalBarColor(bars: number): string {
   return SIGNAL_BAR_COLORS[clampBars(bars)];
+}
+
+/** Readable equivalent of {@link signalBarColor} for text on a dark surface. */
+export function signalBarTextColor(bars: number): string {
+  return SIGNAL_BAR_TEXT_COLORS[clampBars(bars)];
 }
 
 function clampBars(bars: number): number {
@@ -1559,6 +1574,47 @@ export interface CoverageFacets {
   generations: { generation: SignalGeneration; samples: number }[];
   summary: CoverageSummary;
 }
+
+// ─── Offline sample backlog ───────────────────────────────────────────────────
+//
+// A medic standing in a hole cannot report from it — which is exactly the
+// reading the survey most needs. The live location queue is last-write-wins
+// (a stale position is worthless once a fresher one exists), so it cannot
+// carry this: every coverage sample is a distinct measurement of a distinct
+// place, and collapsing them would make the survey blind precisely where
+// coverage is worst.
+//
+// So the app keeps its own small append-only buffer through an outage and
+// posts the whole thing as ONE request when it gets back online.
+
+/** One buffered reading, taken while the device could not reach the server. */
+export interface CoverageSampleInput {
+  lat: number;
+  lng: number;
+  /** ISO fix time — NOT the time it was finally delivered. */
+  at: string;
+  signal: SignalSample;
+}
+
+export interface CoverageSampleBatch {
+  eventId: string;
+  medicId: string;
+  samples: CoverageSampleInput[];
+}
+
+export interface CoverageSampleBatchResult {
+  /** Rows actually queued for storage, after validation. */
+  accepted: number;
+  /** Rows thrown away as unusable (bad coordinates, unparsable time). */
+  rejected: number;
+}
+
+/**
+ * Most readings one request may carry. The buffer drains in chunks of this, so
+ * a long outage is a handful of requests rather than one huge body — and a
+ * failed chunk retries without taking the whole backlog with it.
+ */
+export const COVERAGE_MAX_BATCH = 500;
 
 /** Ceiling on grid cells returned in one request. */
 export const COVERAGE_MAX_CELLS = 20_000;

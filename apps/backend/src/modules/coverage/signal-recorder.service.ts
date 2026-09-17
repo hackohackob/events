@@ -139,6 +139,28 @@ export class SignalRecorderService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
+  /**
+   * Queue a reading the device buffered while it was offline.
+   *
+   * Skips the deadband entirely: the app already applied the same thinning
+   * before it stored the sample, and re-applying it here would be wrong twice
+   * over. A backlog arrives with timestamps OLDER than the live position we
+   * have already recorded for this medic, so the elapsed-time checks would
+   * either reject every row or corrupt the deadband anchor for the live feed
+   * that follows. Exact re-sends are harmless — the primary key drops them.
+   */
+  recordBackfill(sample: SignalSampleInput): boolean {
+    if (!Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) return false;
+    const atMs = Date.parse(sample.recordedAt);
+    if (!Number.isFinite(atMs)) return false;
+
+    const bars = intOrNull(sample.signal.bars, 0, 4);
+    if (bars === null && !sample.signal.networkType && !sample.signal.carrier) return false;
+
+    this.push(sample, atMs, bars);
+    return true;
+  }
+
   private push(sample: SignalSampleInput, atMs: number, bars: number | null): void {
     if (this.buffer.length >= MAX_BUFFER_ROWS) {
       this.droppedRows += 1;
