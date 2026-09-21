@@ -6,7 +6,13 @@ import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { VEHICLE_TYPE_META } from '@events/contracts'
 import type { PlanMedic, VehicleType } from '@events/contracts'
-import { styleFor, type BaseLayer } from '@/lib/map-styles'
+import {
+  isStreets3dReady,
+  loadStreets3dStyle,
+  styleFor,
+  TERRAIN_PITCH,
+  type BaseLayer,
+} from '@/lib/map-styles'
 import { PoiIcon } from '@/lib/poi-icons'
 import { POI_CONFIGS } from '@/lib/constants'
 import type { PointOfInterest } from '@/lib/types'
@@ -38,6 +44,8 @@ export interface PlannedMedicView {
 interface Props {
   center: [number, number]
   baseLayer: BaseLayer
+  /** DEM terrain + a tilted camera, independent of the base layer. */
+  enable3d: boolean
   disciplines: PlannerDiscipline[]
   fields: Record<string, FieldState>
   /** Disciplines the user has hidden on the map. */
@@ -188,6 +196,7 @@ function gradientExpression(colorAt: (bin: number) => string): unknown[] {
 export default function PlannerMap({
   center,
   baseLayer,
+  enable3d,
   disciplines,
   fields,
   hiddenDisciplineIds,
@@ -235,6 +244,45 @@ export default function PlannerMap({
   useEffect(() => {
     applyBounds(fitBounds)
   }, [fitBounds, applyBounds])
+
+  // Tilt into the 3D view and flatten back out. Without the pitch the terrain
+  // is there but invisible — looking straight down at relief shows nothing.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    map.easeTo({ pitch: enable3d ? TERRAIN_PITCH : 0, duration: 800 })
+  }, [enable3d])
+
+  // Streets 3D is a remote vector style that has to be fetched and merged with
+  // the DEM; the bump re-renders once it is cached so styleFor picks it up.
+  const [, bumpStreets3d] = useState(0)
+  useEffect(() => {
+    if (!enable3d || baseLayer !== 'streets' || isStreets3dReady()) return
+    let alive = true
+    void loadStreets3dStyle().then(() => {
+      if (alive) bumpStreets3d(n => n + 1)
+    })
+    return () => {
+      alive = false
+    }
+  }, [enable3d, baseLayer])
+
+  // Leaving a 3D style lags the toggle by one commit: the terrain has to be
+  // torn down first (setTerrain is synchronous), or maplibre's terrain depth
+  // pass renders against a half-replaced style and throws in shaderPreludeCode.
+  const [applied, setApplied] = useState({ base: baseLayer, is3d: enable3d })
+  useEffect(() => {
+    if (applied.base === baseLayer && applied.is3d === enable3d) return
+    if (applied.is3d) {
+      try {
+        const map = mapRef.current?.getMap()
+        if (map?.getTerrain()) map.setTerrain(null)
+      } catch {
+        /* style mid-load — swapping it out is safe anyway */
+      }
+    }
+    setApplied({ base: baseLayer, is3d: enable3d })
+  }, [baseLayer, enable3d, applied])
 
   const visible = useMemo(
     () => disciplines.filter(d => d.hasCourse && !hiddenDisciplineIds.has(d.id)),
@@ -392,7 +440,7 @@ export default function PlannerMap({
     <MapGL
       ref={mapRef}
       initialViewState={{ longitude: center[0], latitude: center[1], zoom: 11 }}
-      mapStyle={styleFor(baseLayer, false)}
+      mapStyle={styleFor(applied.base, applied.is3d)}
       style={{ width: '100%', height: '100%' }}
       cursor={viaDrag ? 'grabbing' : selectedMedicId ? 'crosshair' : 'grab'}
       onLoad={() => applyBounds(pendingBounds.current ?? fitBounds)}
@@ -402,7 +450,7 @@ export default function PlannerMap({
       onMouseUp={handleMapMouseUp}
       attributionControl={false}
     >
-      <NavigationControl position="top-right" showCompass={false} />
+      <NavigationControl position="top-right" showCompass={enable3d} visualizePitch={enable3d} />
 
       {/* ── Courses ─────────────────────────────────────────────────────── */}
       {/* Grouped by ROLE, not by course. MapLibre draws layers in the order

@@ -8,6 +8,7 @@ import {
   CloudOff,
   Layers,
   Loader2,
+  Mountain,
   Redo2,
   ShieldAlert,
   Sparkles,
@@ -96,6 +97,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
   const [selectedMedicId, setSelectedMedicId] = useState<string | null>(null)
   const [hiddenDisciplineIds, setHiddenDisciplineIds] = useState<Set<string>>(new Set())
   const [baseLayer, setBaseLayer] = useState<BaseLayer>('terrain')
+  const [enable3d, setEnable3d] = useState(false)
   const [showDensity, setShowDensity] = useState(true)
   const [showRunners, setShowRunners] = useState(true)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
@@ -869,6 +871,18 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
         </div>
 
         <button
+          onClick={() => setEnable3d(v => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
+          style={{
+            background: enable3d ? 'rgba(56,189,248,0.12)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${enable3d ? 'rgba(56,189,248,0.3)' : 'rgba(148,163,184,0.12)'}`,
+            color: enable3d ? '#38bdf8' : '#64748b',
+          }}
+          title="Tilt into 3D terrain — how the ground actually climbs"
+        >
+          <Mountain className="w-3 h-3" /> 3D
+        </button>
+        <button
           onClick={() => setShowDensity(v => !v)}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
           style={{
@@ -990,6 +1004,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
             <PlannerMap
               center={center}
               baseLayer={baseLayer}
+              enable3d={enable3d}
               disciplines={disciplines}
               fields={fields}
               hiddenDisciplineIds={hiddenDisciplineIds}
