@@ -7,6 +7,7 @@ import { RouteRequestDto } from "./dto/route-request.dto";
 import { ClosestMedicsService } from "./closest-medics.service";
 import { ExitPointsService } from "./exit-points.service";
 import { RoutingService } from "./routing.service";
+import { TrackAccessService } from "./track-access.service";
 import type { LngLat, RouteResponse } from "./routing.types";
 
 @Controller("routing")
@@ -16,6 +17,7 @@ export class RoutingController {
     private readonly routingService: RoutingService,
     private readonly exitPoints: ExitPointsService,
     private readonly closestMedicsService: ClosestMedicsService,
+    private readonly trackAccess: TrackAccessService,
   ) {}
 
   /**
@@ -53,6 +55,27 @@ export class RoutingController {
       : DEFAULT_VEHICLE_TYPE;
     const buckets = Number.isFinite(Number(body.buckets)) ? Number(body.buckets) : 3;
     return this.routingService.isochrone(vehicleType, point, minutes, buckets);
+  }
+
+  /**
+   * What can drive each stretch of a course.
+   *
+   * The planner sends the course it has already loaded rather than an id: the
+   * GPX lives with the event's files, the client has parsed it, and shipping
+   * the geometry costs one request against the backend re-fetching and
+   * re-parsing the same track on every call.
+   */
+  @Post("track-access")
+  async courseAccess(@Body() body: { coordinates?: unknown; bins?: number }) {
+    if (!Array.isArray(body.coordinates) || body.coordinates.length < 2) {
+      throw new BadRequestException("coordinates must be a [lng, lat] line of at least two points");
+    }
+    if (body.coordinates.length > 20000) {
+      throw new BadRequestException("course is too long to classify — send it simplified");
+    }
+    const coordinates = body.coordinates.map(validatePoint);
+    const bins = Math.max(8, Math.min(240, Math.round(Number(body.bins) || 96)));
+    return this.trackAccess.report(coordinates, bins);
   }
 
   /** Nearest paved-road access points around a location (e.g. an incident).  /** Nearest paved-road access points around a location (e.g. an incident).

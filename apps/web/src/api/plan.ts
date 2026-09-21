@@ -1,4 +1,4 @@
-import type { EventPlan, VehicleType } from "@events/contracts";
+import type { EventPlan, TrackAccessReport, VehicleType } from "@events/contracts";
 import client from "./client";
 import { routeProfileFor } from "@events/planner";
 
@@ -101,4 +101,39 @@ export async function fetchIsochrone(
   } catch {
     return null;
   }
+}
+
+/**
+ * What can drive each stretch of one course.
+ *
+ * The course is simplified before it goes out: a GPX carries a point every few
+ * metres and the answer is binned to ~100 of them, so the full track is pure
+ * upload. Null on any failure — the access view then says it could not read the
+ * ground rather than painting a confident wrong answer.
+ */
+export async function fetchTrackAccess(
+  eventId: string,
+  coordinates: [number, number][],
+  bins: number,
+): Promise<TrackAccessReport | null> {
+  try {
+    const { data } = await client.post<TrackAccessReport>(
+      "/routing/track-access",
+      { coordinates: simplifyForUpload(coordinates), bins },
+      { headers: { "x-event-id": eventId }, timeout: 120_000 },
+    );
+    return data?.tiers?.length ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every nth point, capped — the shape survives, the payload does not. */
+function simplifyForUpload(coordinates: [number, number][], max = 4000): [number, number][] {
+  if (coordinates.length <= max) return coordinates;
+  const step = Math.ceil(coordinates.length / max);
+  const out = coordinates.filter((_, i) => i % step === 0);
+  const last = coordinates[coordinates.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
 }

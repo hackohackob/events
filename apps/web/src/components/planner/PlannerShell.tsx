@@ -6,11 +6,9 @@ import {
   ArrowLeft,
   Check,
   CloudOff,
-  Layers,
   Loader2,
   Mountain,
   Redo2,
-  ShieldAlert,
   Sparkles,
   Undo2,
   Users,
@@ -26,7 +24,11 @@ import type {
 import { planMedicColor, planSweeps, planVehicleAt } from '@events/contracts'
 import { usePlanner } from '@/hooks/usePlanner'
 import type { BaseLayer } from '@/lib/map-styles'
-import { fieldAt, EMPTY_FIELD, type FieldState } from '@events/planner'
+import type { TrackAccessTier } from '@events/contracts'
+import MapModeMenu, { type PlannerMapMode } from './MapModeMenu'
+import AccessLegend from './AccessLegend'
+import { fetchTrackAccess } from '@/api/plan'
+import { fieldAt, DENSITY_BINS, EMPTY_FIELD, type FieldState } from '@events/planner'
 import {
   medicPositionAt,
   resolveMedicTimeline,
@@ -71,7 +73,7 @@ const TIME_GRID_MS = 5 * 60_000
 const SWEEP_ALONG_COURSE_CAP_METERS = 3000
 
 export default function PlannerShell({ eventId }: { eventId: string }) {
-  const [showCoverage, setShowCoverage] = useState(true)
+  const [mapMode, setMapMode] = useState<PlannerMapMode>('gaps')
   const [reachMinutes, setReachMinutes] = useState(DEFAULT_REACH_MINUTES)
   const planner = usePlanner(eventId, { reachMinutes })
   const {
@@ -98,7 +100,10 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
   const [hiddenDisciplineIds, setHiddenDisciplineIds] = useState<Set<string>>(new Set())
   const [baseLayer, setBaseLayer] = useState<BaseLayer>('terrain')
   const [enable3d, setEnable3d] = useState(false)
-  const [showDensity, setShowDensity] = useState(true)
+  // The three readings are one switch, not three: they all paint the same line.
+  const showDensity = mapMode === 'field'
+  const showCoverage = mapMode === 'gaps'
+  const accessMode = mapMode === 'access'
   const [showRunners, setShowRunners] = useState(true)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [fitBounds, setFitBounds] = useState<[[number, number], [number, number]] | undefined>()
@@ -205,6 +210,62 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
       }),
     [medics, timelines, cursor, sweepsFor],
   )
+
+  // ── What can drive the course ──────────────────────────────────────────────
+
+  /**
+   * Access per course, fetched once per course and kept.
+   *
+   * Reading a course costs the routing engine a couple of dozen map-matching
+   * calls, and the answer is a property of the ground: it cannot change while
+   * the plan is open. So it is fetched the first time the access view is opened
+   * and never again, and switching away and back is instant.
+   */
+  const [access, setAccess] = useState<Record<string, TrackAccessTier[] | undefined>>({})
+  const [accessMeta, setAccessMeta] = useState<Record<string, { unmappedMeters: number } | null>>({})
+  const [accessLoading, setAccessLoading] = useState(false)
+  const accessAsked = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!accessMode) return
+    const wanted = disciplines.filter(
+      d => d.hasCourse && !hiddenDisciplineIds.has(d.id) && !accessAsked.current.has(d.id),
+    )
+    if (wanted.length === 0) return
+
+    // Deliberately NOT abandoned when the effect re-runs. A course is marked as
+    // asked before the request goes out, so a run that was cancelled half way
+    // would leave courses nobody will ever ask about again — and the result is
+    // worth keeping whatever else has changed since, because it describes
+    // ground that has not.
+    for (const d of wanted) accessAsked.current.add(d.id)
+    setAccessLoading(true)
+    void (async () => {
+      for (const d of wanted) {
+        const report = await fetchTrackAccess(eventId, d.course.coordinates, DENSITY_BINS)
+        setAccess(prev => ({ ...prev, [d.id]: report?.tiers }))
+        setAccessMeta(prev => ({
+          ...prev,
+          [d.id]: report ? { unmappedMeters: report.unmappedMeters } : null,
+        }))
+        // A course that failed is worth asking about again next time the view
+        // is opened — the engine may simply have been down.
+        if (!report) accessAsked.current.delete(d.id)
+      }
+      setAccessLoading(false)
+    })()
+  }, [accessMode, disciplines, hiddenDisciplineIds, eventId])
+
+  /** Courses asked about that came back with nothing, and the carry total. */
+  const accessSummary = useMemo(() => {
+    const shown = disciplines.filter(d => d.hasCourse && !hiddenDisciplineIds.has(d.id))
+    const answered = shown.filter(d => access[d.id]?.length)
+    const unmapped = shown.reduce((sum, d) => sum + (accessMeta[d.id]?.unmappedMeters ?? 0), 0)
+    return {
+      failed: !accessLoading && shown.length > 0 && answered.length === 0,
+      unmappedMeters: answered.length > 0 ? unmapped : null,
+    }
+  }, [disciplines, hiddenDisciplineIds, access, accessMeta, accessLoading])
 
   /**
    * Reach analysis, per course.
@@ -882,30 +943,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
         >
           <Mountain className="w-3 h-3" /> 3D
         </button>
-        <button
-          onClick={() => setShowDensity(v => !v)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
-          style={{
-            background: showDensity ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.03)',
-            border: `1px solid ${showDensity ? 'rgba(251,191,36,0.3)' : 'rgba(148,163,184,0.12)'}`,
-            color: showDensity ? '#fbbf24' : '#64748b',
-          }}
-          title="Heat the course where the field is bunched up"
-        >
-          <Layers className="w-3 h-3" /> Field
-        </button>
-        <button
-          onClick={() => setShowCoverage(v => !v)}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
-          style={{
-            background: showCoverage ? 'rgba(248,113,113,0.12)' : 'rgba(255,255,255,0.03)',
-            border: `1px solid ${showCoverage ? 'rgba(248,113,113,0.3)' : 'rgba(148,163,184,0.12)'}`,
-            color: showCoverage ? '#f87171' : '#64748b',
-          }}
-          title="Mark stretches of occupied course with no medic in reach"
-        >
-          <ShieldAlert className="w-3 h-3" /> Gaps
-        </button>
+        <MapModeMenu mode={mapMode} onMode={setMapMode} />
         <button
           onClick={() => setShowRunners(v => !v)}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold"
@@ -959,7 +997,7 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
                 reachMinutes={reachMinutes}
                 onReachMinutes={setReachMinutes}
                 showCoverage={showCoverage}
-                onToggleCoverage={() => setShowCoverage(v => !v)}
+                onToggleCoverage={() => setMapMode(m => (m === 'gaps' ? 'field' : 'gaps'))}
               />
             )}
             {tab === 'team' && (
@@ -1024,10 +1062,20 @@ export default function PlannerShell({ eventId }: { eventId: string }) {
               fitBounds={fitBounds}
               showRunners={showRunners}
               showDensity={showDensity}
+              access={access}
+              accessMode={accessMode}
               coverage={coverage}
               reachMinutes={reachMinutes}
               sweepColors={sweepColors}
             />
+
+            {accessMode && (
+              <AccessLegend
+                loading={accessLoading}
+                failed={accessSummary.failed}
+                unmappedMeters={accessSummary.unmappedMeters}
+              />
+            )}
 
             {/* Placement hint */}
             {selectedMedic && (

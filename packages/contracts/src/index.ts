@@ -60,6 +60,65 @@ export const VEHICLE_TYPE_META: Record<VehicleType, VehicleTypeMeta> = {
 };
 
 /**
+ * What can physically get onto a stretch of course.
+ *
+ * Ordered from "anything drives here" to "nothing does", and named after the
+ * HEAVIEST vehicle that still gets through — which is the question a planner is
+ * actually asking when they look at a course: can I put an ambulance at that
+ * bend, or is it a quad job, or do we carry?
+ *
+ * `none` is not a failure to classify but an answer in its own right: there is
+ * no mapped way there at all, which for an off-piste mountain leg is the truth.
+ */
+export const TRACK_ACCESS_TIERS = [
+  "ambulance",
+  "car",
+  "offroad-car",
+  "atv",
+  "e-motorcycle",
+  "bike",
+  "foot",
+  "none",
+] as const;
+
+export type TrackAccessTier = (typeof TRACK_ACCESS_TIERS)[number];
+
+export interface TrackAccessTierMeta {
+  /** What gets through — the legend's first line. */
+  label: string;
+  /** The ground it describes, in the words a marshal would use. */
+  hint: string;
+  /** The roster vehicle this tier is named after, when there is one. */
+  vehicle?: VehicleType;
+}
+
+export const TRACK_ACCESS_TIER_META: Record<TrackAccessTier, TrackAccessTierMeta> = {
+  ambulance: { label: "Ambulance", hint: "Sealed road", vehicle: "ambulance" },
+  car: { label: "Any car", hint: "Road or firm track", vehicle: "car" },
+  "offroad-car": { label: "4×4", hint: "Forest track", vehicle: "offroad-car" },
+  atv: { label: "ATV", hint: "Rough track", vehicle: "atv" },
+  "e-motorcycle": { label: "Trail bike", hint: "Trail or bridleway", vehicle: "e-motorcycle" },
+  bike: { label: "Bike", hint: "Narrow footpath", vehicle: "bike" },
+  foot: { label: "On foot", hint: "Steps or scramble", vehicle: "foot" },
+  none: { label: "No way mapped", hint: "Open ground — carry" },
+};
+
+/** Rank in the ladder; lower means more vehicles get through. */
+export function trackAccessRank(tier: TrackAccessTier): number {
+  const index = TRACK_ACCESS_TIERS.indexOf(tier);
+  return index < 0 ? TRACK_ACCESS_TIERS.length - 1 : index;
+}
+
+/** Per-bin access along one course, as the planner draws it. */
+export interface TrackAccessReport {
+  /** One tier per bin, evenly spaced along the course by distance. */
+  tiers: TrackAccessTier[];
+  /** Metres of course that no mapped way covers. */
+  unmappedMeters: number;
+  totalMeters: number;
+}
+
+/**
  * Coerce anything stored in the legacy free-text `vehicle` column (or sent by an
  * older client) into a canonical type. Rosters created before typed vehicles
  * hold values like "Ambulance Type B" or "Rapid Response SUV", and the event

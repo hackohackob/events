@@ -5,7 +5,8 @@ import MapGL, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/ma
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { VEHICLE_TYPE_META } from '@events/contracts'
-import type { PlanMedic, VehicleType } from '@events/contracts'
+import type { PlanMedic, TrackAccessTier, VehicleType } from '@events/contracts'
+import { TRACK_ACCESS_COLORS } from '@/lib/track-access'
 import {
   isStreets3dReady,
   loadStreets3dStyle,
@@ -72,6 +73,9 @@ interface Props {
   fitBounds?: [[number, number], [number, number]]
   showRunners: boolean
   showDensity: boolean
+  /** Per discipline: what can drive each course bin. Only in access mode. */
+  access: Record<string, TrackAccessTier[] | undefined>
+  accessMode: boolean
   /** Reach analysis per discipline; drives the course colouring in gaps mode. */
   coverage: Record<string, CoverageReport>
   /** Only for the legend wording; the ratios already carry the maths. */
@@ -186,6 +190,20 @@ function reachColor(ratio: number, occupied: boolean, _forGlow = false): string 
   return rgba(REACH_RAMP[REACH_RAMP.length - 1][1], 0.98)
 }
 
+/**
+ * Colour for a stretch by what can drive it.
+ *
+ * Flat, unshaded colour on purpose: this is a property of the ground, not a
+ * measurement that varies in strength, and grading it by opacity the way the
+ * field and reach ramps do would read as confidence we do not have. A stretch
+ * with no mapped way is painted with nothing at all, so the neutral course line
+ * shows through — the one honest way to draw "we have no information here".
+ */
+function accessColor(tier: TrackAccessTier | undefined): string {
+  const hex = tier ? TRACK_ACCESS_COLORS[tier] : null
+  return hex ? rgba(hexToRgb(hex), 0.96) : TRANSPARENT
+}
+
 /** MapLibre `line-gradient` expression from a per-bin colour function. */
 function gradientExpression(colorAt: (bin: number) => string): unknown[] {
   const stops: unknown[] = ['interpolate', ['linear'], ['line-progress']]
@@ -219,6 +237,8 @@ export default function PlannerMap({
   fitBounds,
   showRunners,
   showDensity,
+  access,
+  accessMode,
   coverage,
   sweepColors,
 }: Props) {
@@ -303,34 +323,42 @@ export default function PlannerMap({
       visible.map(d => {
         const density = fields[d.id]?.density ?? []
         const report = coverage[d.id]
-      const reachMode = report != null && report.ratio.length > 0
+        const reachMode = report != null && report.ratio.length > 0
+        const tiers = accessMode ? access[d.id] : undefined
+        const accessPainted = Boolean(tiers && tiers.length > 0)
         return {
           id: d.id,
           color: d.color,
           reachMode,
+          accessPainted,
           geojson: {
             type: 'Feature' as const,
             properties: {},
             geometry: { type: 'LineString' as const, coordinates: d.course.coordinates },
           },
-          gradient: reachMode
-            ? gradientExpression(bin =>
-                reachColor(report.ratio[bin] ?? Number.POSITIVE_INFINITY, report.occupied[bin] ?? false),
-              )
-            : gradientExpression(bin => densityColor(d.color, density[bin] ?? 0)),
+          gradient: accessPainted
+            ? gradientExpression(bin => accessColor(tiers![Math.min(tiers!.length - 1, bin)]))
+            : reachMode
+              ? gradientExpression(bin =>
+                  reachColor(report.ratio[bin] ?? Number.POSITIVE_INFINITY, report.occupied[bin] ?? false),
+                )
+              : gradientExpression(bin => densityColor(d.color, density[bin] ?? 0)),
           glowGradient: reachMode
             ? gradientExpression(bin =>
                 reachColor(report.ratio[bin] ?? Number.POSITIVE_INFINITY, report.occupied[bin] ?? false, true),
               )
             : gradientExpression(bin => densityColor(d.color, density[bin] ?? 0, true)),
-          hasSeries: reachMode || density.length > 0,
+          hasSeries: accessPainted || reachMode || density.length > 0,
         }
       }),
-    [visible, fields, coverage],
+    [visible, fields, coverage, access, accessMode],
   )
 
   /** Gaps mode owns the colour of everything; field mode hands it back. */
-  const reachActive = useMemo(() => trackData.some(t => t.reachMode), [trackData])
+  const reachActive = useMemo(
+    () => accessMode || trackData.some(t => t.reachMode),
+    [trackData, accessMode],
+  )
 
   const runnerDots = useMemo(() => {
     if (!showRunners) return null
@@ -492,7 +520,8 @@ export default function PlannerMap({
           type="line"
           layout={{ 'line-cap': 'round', 'line-join': 'round' }}
           paint={{
-            'line-color': track.reachMode ? '#7c8ba1' : idleCourseColor(track.color),
+            'line-color':
+              track.reachMode || accessMode ? '#7c8ba1' : idleCourseColor(track.color),
             // Carries the idle stretches on its own now, so it has to read as a
             // route in its own right — same weight the gradient line has, or an
             // empty course looks like a thinner, lesser thing than a busy one.
@@ -504,7 +533,7 @@ export default function PlannerMap({
 
       {/* Glow makes a dense pack — or a long gap — read from a zoomed-out view. */}
       {trackData.map(track =>
-        track.hasSeries && (showDensity || track.reachMode) ? (
+        track.hasSeries && !accessMode && (showDensity || track.reachMode) ? (
           <Layer
             key={`glow-${track.id}`}
             id={`course-glow-${track.id}`}
@@ -522,7 +551,7 @@ export default function PlannerMap({
       )}
 
       {trackData.map(track =>
-        track.hasSeries && (showDensity || track.reachMode) ? (
+        track.hasSeries && (showDensity || track.reachMode || track.accessPainted) ? (
           <Layer
             key={`field-${track.id}`}
             id={`course-field-${track.id}`}
