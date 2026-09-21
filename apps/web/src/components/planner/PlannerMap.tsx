@@ -137,6 +137,17 @@ const REACH_RAMP: Array<[number, [number, number, number]]> = [
 /** Slate for course nobody is on — present, but plainly out of play. */
 const IDLE_COURSE: [number, number, number] = [148, 163, 184]
 
+/**
+ * The resting colour of a course in field mode: slate, carrying just enough of
+ * the discipline's hue to tell two courses apart where they run side by side.
+ * The line itself is scenery — what the eye is meant to catch is the field on
+ * it, so the colour that means "people" belongs to the density gradient and the
+ * runner dots, not to the road under them.
+ */
+function idleCourseColor(hex: string): string {
+  return rgba(mix(IDLE_COURSE, hexToRgb(hex), 0.22), 1)
+}
+
 const TRANSPARENT = 'rgba(0,0,0,0)'
 
 /**
@@ -263,6 +274,9 @@ export default function PlannerMap({
       }),
     [visible, fields, coverage],
   )
+
+  /** Gaps mode owns the colour of everything; field mode hands it back. */
+  const reachActive = useMemo(() => trackData.some(t => t.reachMode), [trackData])
 
   const runnerDots = useMemo(() => {
     if (!showRunners) return null
@@ -424,7 +438,7 @@ export default function PlannerMap({
           type="line"
           layout={{ 'line-cap': 'round', 'line-join': 'round' }}
           paint={{
-            'line-color': track.reachMode ? '#7c8ba1' : track.color,
+            'line-color': track.reachMode ? '#7c8ba1' : idleCourseColor(track.color),
             // Carries the idle stretches on its own now, so it has to read as a
             // route in its own right — same weight the gradient line has, or an
             // empty course looks like a thinner, lesser thing than a busy one.
@@ -471,15 +485,20 @@ export default function PlannerMap({
         <Source id="planner-runners" type="geojson" data={runnerDots}>
           {/* Deliberately tiny and unstroked: at the gun the whole field sits
               in a few hundred metres, and fat dots there paint over the very
-              gradient they are meant to annotate. */}
+              gradient they are meant to annotate.
+
+              In field mode each dot wears its own course's colour — that is
+              what tells you whose runners these are on a shared stretch. In
+              gaps mode colour is spoken for by reach, so they go back to a
+              neutral white that cannot be mistaken for a reading. */}
           <Layer
             id="planner-runner-dots"
             source="planner-runners"
             type="circle"
             paint={{
-              'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.1, 12, 1.5, 16, 2.2],
-              'circle-color': '#ffffff',
-              'circle-opacity': 0.8,
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.1, 12, 1.6, 16, 2.4],
+              'circle-color': reachActive ? '#ffffff' : (['get', 'color'] as never),
+              'circle-opacity': reachActive ? 0.8 : 0.95,
             }}
           />
         </Source>
