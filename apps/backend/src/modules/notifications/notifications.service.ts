@@ -258,6 +258,40 @@ export class NotificationsService implements OnModuleInit {
     return rows.length;
   }
 
+  /**
+   * Push to whoever is signed in under a given roster name, on any event.
+   *
+   * Addressed by NAME rather than by id on purpose: this is for the handful of
+   * alerts that belong to one person — the operator who keeps the bridges
+   * running — whose medic id differs from event to event, and who wants to hear
+   * about it whichever event is live. Matching is case- and whitespace-
+   * insensitive; the name captured at registration wins, with the live roster
+   * as the fallback for devices registered before that column existed.
+   *
+   * Returns how many devices were pushed, so a caller can log the silence when
+   * that person has no device registered anywhere.
+   */
+  async sendToUserName(
+    name: string,
+    title: string,
+    body: string,
+    data?: Record<string, unknown>,
+    opts?: PushOptions,
+  ): Promise<number> {
+    const wanted = name.trim();
+    if (!wanted) return 0;
+    const { rows } = await this.db.query<{ token: string }>(
+      `SELECT DISTINCT p.token
+         FROM push_tokens p
+         LEFT JOIN event_medics em ON em.id::text = p.user_id AND em.event_id = p.event_id
+        WHERE lower(btrim(COALESCE(p.user_name, em.name, ''))) = lower(btrim($1))`,
+      [wanted],
+    );
+    if (rows.length === 0) return 0;
+    await this.sendMessages(rows.map((r) => buildMessage(r.token, title, body, data, opts)));
+    return rows.length;
+  }
+
   async sendToEvent(
     eventId: string,
     title: string,

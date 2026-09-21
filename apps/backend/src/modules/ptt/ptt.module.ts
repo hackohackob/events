@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { EventChatModule } from "../event-chat/event-chat.module";
 import { EventsModule } from "../events/events.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { TranscriptionService } from "../incidents/transcription.service";
 import { PttBridgeService } from "./ptt-bridge.service";
 import { PttController } from "./ptt.controller";
@@ -23,7 +24,7 @@ import { TtsService } from "./tts.service";
  * of a user session and so cannot live behind the app's guards.
  */
 @Module({
-  imports: [EventsModule, EventChatModule],
+  imports: [EventsModule, EventChatModule, NotificationsModule],
   controllers: [PttController, RadioGatewayController],
   providers: [
     PttBridgeService,

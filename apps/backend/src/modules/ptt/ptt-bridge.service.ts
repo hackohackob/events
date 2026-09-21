@@ -10,6 +10,7 @@ import type {
 import { PTT_CHANNEL_KINDS } from "@events/contracts";
 import { EventChatService } from "../event-chat/event-chat.service";
 import { EventsService } from "../events/events.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { PttBusService } from "../infra/ptt-bus.service";
 import { RedisService } from "../infra/redis.service";
 import { TranscriptionService } from "../incidents/transcription.service";
@@ -35,6 +36,23 @@ import { ZelloProvider } from "./providers/zello/zello.provider";
  * Zello via the app) is deliberately not done — it would need loop detection
  * the current tagging cannot provide.
  */
+/**
+ * Who hears about a bridge that has dropped. Deliberately ONE person, by roster
+ * name: an offline bridge is an operator's problem, not something to alarm a
+ * field team about mid-event. Override with PTT_ALERT_USER_NAME.
+ */
+const BRIDGE_ALERT_USER_NAME = process.env.PTT_ALERT_USER_NAME?.trim() || "Atanas Atanasov";
+
+/**
+ * How long a bridge has to stay down before it counts as an outage.
+ *
+ * Zello drops and reconnects on its own — a kicked session, a flaky uplink, a
+ * settings reload all show as a few seconds offline. Alerting on the transition
+ * itself would buzz a phone several times an hour and teach its owner to ignore
+ * it, so the alert waits and is sent only if the bridge is still down.
+ */
+const BRIDGE_DOWN_ALERT_DELAY_MS = 60_000;
+
 @Injectable()
 export class PttBridgeService implements OnModuleInit {
   private readonly logger = new Logger(PttBridgeService.name);
@@ -42,6 +60,10 @@ export class PttBridgeService implements OnModuleInit {
   private readonly counters = new Map<PttChannelKind, { inbound: number; outbound: number; lastInboundAt?: string; lastOutboundAt?: string }>();
   /** Rolling activity log surfaced in the dashboard for troubleshooting. */
   private readonly activity: Array<{ at: string; kind: PttChannelKind | "bridge"; level: string; message: string }> = [];
+  /** Pending "still down?" checks, one per channel. */
+  private readonly downTimers = new Map<PttChannelKind, NodeJS.Timeout>();
+  /** Channels already alerted on, so one outage sends one notification. */
+  private readonly alerted = new Set<PttChannelKind>();
 
   constructor(
     private readonly settings: PttSettingsService,
@@ -52,6 +74,7 @@ export class PttBridgeService implements OnModuleInit {
     private readonly bus: PttBusService,
     private readonly redis: RedisService,
     private readonly tts: TtsService,
+    private readonly notifications: NotificationsService,
     zello: ZelloProvider,
     radio: RadioProvider,
   ) {
@@ -60,7 +83,10 @@ export class PttBridgeService implements OnModuleInit {
       this.counters.set(provider.kind, { inbound: 0, outbound: 0 });
       provider.bind({
         onMessage: (message) => void this.handleInbound(provider.kind, message),
-        onStatus: () => void this.broadcastStatus(),
+        onStatus: () => {
+          void this.broadcastStatus();
+          this.watchConnection(provider);
+        },
         onLog: (level, message) => this.note(provider.kind, level, message),
       });
     }
@@ -146,6 +172,68 @@ export class PttBridgeService implements OnModuleInit {
       }
     }
     await this.broadcastStatus();
+  }
+
+  // ── Outage alerts ──────────────────────────────────────────────────────────
+
+  /**
+   * Watch one bridge's connection and raise an alert when it stays down.
+   *
+   * Zello only: the radio fleet is a set of appliances that come and go with
+   * the vehicles they ride in, so "offline" there is normal and its own page
+   * already says so. A channel switched off in the settings reads as
+   * `disabled`, not as an outage, and never alerts.
+   */
+  private watchConnection(provider: PttProvider): void {
+    if (provider.kind !== "zello") return;
+    const kind = provider.kind;
+    const state = provider.status().state;
+    const down = state === "offline" || state === "error";
+
+    if (!down) {
+      const pending = this.downTimers.get(kind);
+      if (pending) clearTimeout(pending);
+      this.downTimers.delete(kind);
+      this.alerted.delete(kind);
+      return;
+    }
+
+    // Already counted: either the wait is running or the alert has been sent.
+    if (this.alerted.has(kind) || this.downTimers.has(kind)) return;
+
+    const timer = setTimeout(() => {
+      this.downTimers.delete(kind);
+      const now = provider.status();
+      if (now.state !== "offline" && now.state !== "error") return; // came back
+      this.alerted.add(kind);
+      void this.alertBridgeDown(provider, now.detail);
+    }, BRIDGE_DOWN_ALERT_DELAY_MS);
+    timer.unref?.();
+    this.downTimers.set(kind, timer);
+  }
+
+  private async alertBridgeDown(provider: PttProvider, detail?: string): Promise<void> {
+    const minutes = Math.round(BRIDGE_DOWN_ALERT_DELAY_MS / 60_000);
+    const body = detail
+      ? `${detail} (down for ${minutes} min)`
+      : `No connection for ${minutes} min — radio traffic is not reaching the app.`;
+    try {
+      const devices = await this.notifications.sendToUserName(
+        BRIDGE_ALERT_USER_NAME,
+        `${provider.label} bridge is down`,
+        body,
+        { type: "ptt-bridge-down", kind: provider.kind },
+      );
+      this.note(
+        provider.kind,
+        "warn",
+        devices > 0
+          ? `bridge down — alerted ${BRIDGE_ALERT_USER_NAME} on ${devices} device(s)`
+          : `bridge down — no device registered for ${BRIDGE_ALERT_USER_NAME}, nobody was alerted`,
+      );
+    } catch (err) {
+      this.note(provider.kind, "error", `could not send the outage alert: ${(err as Error).message}`);
+    }
   }
 
   /** Send a probe message so an operator can confirm the wiring end to end. */
