@@ -110,9 +110,15 @@ function mix(a: [number, number, number], b: [number, number, number], t: number
 
 /**
  * Colour for a stretch of course carrying `density` of the field: the
- * discipline's own hue where the field is thin, burning towards a hot amber
- * white where it bunches up. Empty course keeps a dim trace of the hue, so the
- * route is always legible even where nobody is running yet.
+ * discipline's own hue, throughout.
+ *
+ * It used to burn towards a hot amber white as the field bunched up, which
+ * meant the one moment you most want to read at a glance — the gun, with the
+ * whole field still packed on the first kilometre — painted every course the
+ * same white, and the colours only appeared once the field had spread out.
+ * Density now speaks through weight instead: the hue holds, and a busy stretch
+ * comes up in opacity (and in the glow beneath it). Lightening is capped at a
+ * sliver, just enough to keep a packed stretch from reading as a flat block.
  */
 function densityColor(hex: string, density: number, forGlow = false): string {
   const base = hexToRgb(hex)
@@ -123,8 +129,8 @@ function densityColor(hex: string, density: number, forGlow = false): string {
   // route itself is already drawn by the casing and base beneath.
   if (density <= 0.002) return TRANSPARENT
   const heat = Math.min(1, density * 1.45)
-  const hot: [number, number, number] = [255, 246, 214]
-  return rgba(mix(base, hot, Math.pow(heat, 1.6)), 0.6 + 0.4 * Math.min(1, density * 2.2))
+  const lift: [number, number, number] = [255, 255, 255]
+  return rgba(mix(base, lift, 0.12 * Math.pow(heat, 1.6)), 0.55 + 0.45 * Math.min(1, density * 2.2))
 }
 
 /**
