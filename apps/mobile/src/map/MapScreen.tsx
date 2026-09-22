@@ -57,7 +57,8 @@ import { mapDebugDirtyCount, useMapDebug } from "../debug/map-debug";
 import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
-import { PlanControl } from "../plan/PlanControl";
+import { usePlanEntry } from "../plan/usePlanEntry";
+import { formatTime } from "@events/planner";
 import { PlanScreen } from "../plan/PlanScreen";
 import { IMPRECISE_ACCURACY_M, MedicDot } from "./MedicDot";
 import { MedicSheet } from "./MedicSheet";
@@ -1573,6 +1574,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const planEntry = usePlanEntry();
   const [mapZoom, setMapZoom] = useState(FALLBACK_ZOOM);
   const [mapCenterLat, setMapCenterLat] = useState(FALLBACK_LAT);
   /** Last settled map centre `[lng, lat]` — a ref so it never re-renders the map. */
@@ -3173,21 +3175,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     if (center) setPendingPoi({ lat: center[1], lng: center[0] });
   }, []);
 
-  const centerOnCurrentPosition = async () => {
-    const permission = await ExpoLocation.requestForegroundPermissionsAsync();
-    if (permission.status !== "granted") {
-      return;
-    }
-
-    const location = await ExpoLocation.getCurrentPositionAsync({});
-    cameraRef.current?.easeTo({
-      center: [location.coords.longitude, location.coords.latitude],
-      zoom: USER_FOCUS_ZOOM,
-      padding: { top: 0, bottom: 0, left: 0, right: 0 }, // clear any focus offset
-      duration: 420,
-    });
-  };
-
   const resetMapNorth = async () => {
     const viewState = await mapRef.current?.getViewState();
     if (!viewState) {
@@ -4229,6 +4216,12 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           }}
         >
           <Text style={styles.menuButtonText}>Menu</Text>
+          {/* Tracking trouble — the fix is under Location diagnostics. */}
+          {!trackingHealth.ok ? (
+            <View style={styles.healthBadge}>
+              <Text style={styles.healthBadgeText}>!</Text>
+            </View>
+          ) : null}
         </Pressable>
 
         <Pressable style={styles.eventChip}>
@@ -4269,21 +4262,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               }}
             >
               <Feather name="layers" size={20} color={layersOpen ? "#34d399" : "#ecf4ff"} />
-            </Pressable>
-
-            <Pressable
-              style={styles.headerActionButton}
-              onPress={centerOnCurrentPosition}
-              onLongPress={() => {
-                if (!trackingHealth.ok) setActiveTab("location");
-              }}
-            >
-              <Feather name="crosshair" size={20} color="#ecf4ff" />
-              {!trackingHealth.ok ? (
-                <View style={styles.healthBadge}>
-                  <Text style={styles.healthBadgeText}>!</Text>
-                </View>
-              ) : null}
             </Pressable>
 
             <Pressable
@@ -4347,6 +4325,32 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.menuPopupTitle}>Menu</Text>
+          {planEntry.visible ? (
+            <Pressable
+              style={[styles.menuPageRow, planEntry.urgent && styles.menuPlanRowUrgent]}
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setMenuOpen(false);
+                planEntry.open();
+              }}
+            >
+              <Feather
+                name="clipboard"
+                size={18}
+                color={planEntry.urgent ? "#fbbf24" : "#93c5fd"}
+                style={styles.menuPageIcon}
+              />
+              <View style={styles.menuPageTextWrap}>
+                <Text style={styles.menuPageTitle}>Plan</Text>
+                <Text style={styles.menuPageSubtitle} numberOfLines={1}>
+                  {planEntry.next
+                    ? `${planEntry.next.minutes >= 60 ? formatTime(planEntry.next.departMs) : `in ${planEntry.next.minutes}m`} · ${planEntry.next.label}`
+                    : "Deployment plan & call sheet"}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={16} color="#475569" />
+            </Pressable>
+          ) : null}
           <Pressable
             style={styles.menuPageRow}
             onPress={() => {
@@ -5335,7 +5339,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           unless the desk has actually put this user on a plan. Hidden under the
           same conditions as the status control — every one of them means the
           screen already belongs to something more urgent. */}
-      {activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <PlanControl /> : null}
       <PlanScreen />
       {/* Also hidden while a trail is open: the transport occupies the same
           corner, and the FAB sat directly on top of its LIVE button. */}
@@ -5942,6 +5945,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+  },
+  menuPlanRowUrgent: {
+    borderColor: "rgba(251,191,36,0.45)",
+    backgroundColor: "rgba(31,22,6,0.85)",
   },
   menuPageIcon: {
     marginRight: 2,
