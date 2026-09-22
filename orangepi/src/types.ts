@@ -102,4 +102,6 @@ export interface Recording {
   text?: string;
   /** rx only: whether the server accepted it (false while queued offline). */
   uploaded?: boolean;
+  /** rx only: taken out of the upload queue from the console — never sent. */
+  dropped?: boolean;
 }

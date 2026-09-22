@@ -109,11 +109,25 @@ export function TrafficTab({ bump }: { bump: number }) {
                 <Sparkline row={row} />
               </div>
 
-              {row.direction === "rx" && (
-                <span className={`tag ${row.uploaded ? "ok" : "warn"}`}>
-                  {row.uploaded ? "Sent" : "Queued"}
-                </span>
-              )}
+              {row.direction === "rx" &&
+                (row.uploaded ? (
+                  <span className="tag ok">Sent</span>
+                ) : row.dropped ? (
+                  <span className="tag">Not sent</span>
+                ) : (
+                  <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                    <span className="tag warn">Queued</span>
+                    <button
+                      className="btn sm ghost"
+                      onClick={() => {
+                        if (!confirm("Drop this transmission? It will not be sent when the link returns. The recording stays on this box.")) return;
+                        void api.dropQueued(row.id).then(reload);
+                      }}
+                    >
+                      Drop
+                    </button>
+                  </span>
+                ))}
             </div>
           ))
         )}

@@ -97,6 +97,23 @@ export function LiveTab({
           >
             Try now
           </button>
+          <button
+            className="btn sm ghost"
+            style={{ marginTop: 8, marginLeft: 8 }}
+            onClick={() => {
+              const count = status.server.queued;
+              if (!confirm(`Drop ${count === 1 ? "the waiting transmission" : `all ${count} waiting transmissions`}? ${count === 1 ? "It" : "They"} will not be sent when the link returns. The recordings stay on this box.`)) return;
+              void act("Dropping", async () => {
+                const result = await api.dropQueued();
+                return { ok: result.ok, detail: `Dropped ${result.dropped}.` };
+              });
+            }}
+          >
+            Drop all
+          </button>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+            To drop just one, use its Drop button under Traffic.
+          </div>
         </Banner>
       )}
 

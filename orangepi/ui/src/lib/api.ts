@@ -77,6 +77,7 @@ export interface Recording {
   party?: string;
   text?: string;
   uploaded?: boolean;
+  dropped?: boolean;
 }
 
 export interface WifiNetwork {
@@ -180,6 +181,10 @@ export const api = {
   selectEvent: (eventId: string | null) => post<{ ok: boolean; confirmed: boolean; status: Status }>("/event", { eventId }),
   checkIn: () => post<{ ok: boolean; status: Status }>("/check-in"),
   retryQueue: () => post<{ ok: boolean; sent: number }>("/retry-queue"),
+  dropQueued: (recordingId?: string) =>
+    request<{ ok: boolean; dropped: number }>(`/queue${recordingId ? `/${encodeURIComponent(recordingId)}` : ""}`, {
+      method: "DELETE",
+    }),
 
   audioDevices: () => request<{ capture: AudioDevice[]; playback: AudioDevice[] }>("/audio/devices"),
   testTone: () => post<{ ok: boolean; detail: string }>("/radio/test-tone"),

@@ -67,6 +67,18 @@ export class RecordingStore {
     this.save();
   }
 
+  /** The upload was cancelled from the console; the audio stays on the box. */
+  markDropped(ids: string[]): void {
+    let changed = false;
+    for (const row of this.index) {
+      if (ids.includes(row.id)) {
+        row.dropped = true;
+        changed = true;
+      }
+    }
+    if (changed) this.save();
+  }
+
   /** Newest first — the order the console wants. */
   list(limit = 200, direction?: "rx" | "tx"): Recording[] {
     return this.index

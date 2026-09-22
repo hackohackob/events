@@ -291,6 +291,17 @@ export class GatewayDaemon extends EventEmitter {
   }
 
   /**
+   * Cancel queued uploads (one, or all with no id) so they are not sent when
+   * the WiFi returns. The recordings stay on the box, marked as never sent.
+   */
+  async dropQueued(recordingId?: string): Promise<number> {
+    const dropped = await this.uplink.dropQueued(recordingId);
+    this.recordings.markDropped(dropped);
+    this.emit("state");
+    return dropped.length;
+  }
+
+  /**
    * The "test transmit" button.
    *
    * Speaks a phrase rather than sounding a tone, because the question an

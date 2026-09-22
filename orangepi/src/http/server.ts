@@ -250,6 +250,15 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
     void daemon.uplink.flushOutbox().then((sent) => res.json({ ok: true, sent }));
   });
 
+  // Drop queued transmissions so they are not sent when the link returns.
+  app.delete("/api/queue", (_req, res) => {
+    void daemon.dropQueued().then((dropped) => res.json({ ok: true, dropped }));
+  });
+
+  app.delete("/api/queue/:recordingId", (req, res) => {
+    void daemon.dropQueued(req.params.recordingId).then((dropped) => res.json({ ok: dropped > 0, dropped }));
+  });
+
   // ── Audio hardware ─────────────────────────────────────────────────────────
 
   app.get("/api/audio/devices", (_req, res) => {

@@ -384,20 +384,18 @@ export class Uplink extends EventEmitter {
       const files = (await readdir(OUTBOX_DIR)).filter((f) => f.endsWith(".json")).sort();
       for (const file of files) {
         const stem = join(OUTBOX_DIR, file.replace(/\.json$/, ""));
+        // Either half can vanish under us: the console may drop an entry while
+        // this loop is still working through the ones before it.
+        if (!existsSync(`${stem}.json`)) continue;
         if (!existsSync(`${stem}.ogg`)) {
-          unlinkSync(`${stem}.json`);
+          removeQuietly(`${stem}.json`);
           continue;
         }
-        const meta = JSON.parse(readFileSync(`${stem}.json`, "utf8")) as {
-          durationMs: number;
-          peakLevel: number;
-          from: string;
-          recordingId: string;
-        };
+        const meta = JSON.parse(readFileSync(`${stem}.json`, "utf8")) as OutboxMeta;
         const ok = await this.postVoice({ audio: readFileSync(`${stem}.ogg`), ...meta });
         if (!ok) break; // The link is down again; the rest keeps for later.
-        unlinkSync(`${stem}.ogg`);
-        unlinkSync(`${stem}.json`);
+        removeQuietly(`${stem}.ogg`);
+        removeQuietly(`${stem}.json`);
         this.emit("uploaded", meta.recordingId);
         this.counters.inbound++;
         sent++;
@@ -410,6 +408,44 @@ export class Uplink extends EventEmitter {
     return sent;
   }
 
+  /**
+   * Throw away queued transmissions instead of sending them when the link
+   * returns — for traffic that is stale by then, or should never reach the
+   * team chat at all. With no id, the whole outbox goes. The box keeps its own
+   * recording either way; only the upload is cancelled.
+   *
+   * Returns the recording ids that were dropped.
+   */
+  async dropQueued(recordingId?: string): Promise<string[]> {
+    const dropped: string[] = [];
+    try {
+      const files = (await readdir(OUTBOX_DIR)).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        const stem = join(OUTBOX_DIR, file.replace(/\.json$/, ""));
+        let meta: OutboxMeta | null = null;
+        try {
+          meta = JSON.parse(readFileSync(`${stem}.json`, "utf8")) as OutboxMeta;
+        } catch {
+          // Unreadable metadata can never be sent; it only goes with "drop all".
+        }
+        if (recordingId && meta?.recordingId !== recordingId) continue;
+        removeQuietly(`${stem}.ogg`);
+        removeQuietly(`${stem}.json`);
+        if (meta?.recordingId) dropped.push(meta.recordingId);
+      }
+    } catch (err) {
+      log.warn("server", `could not drop from the queue: ${(err as Error).message}`);
+    }
+    if (dropped.length > 0) {
+      log.warn(
+        "console",
+        `dropped ${dropped.length} queued transmission${dropped.length === 1 ? "" : "s"} — ${dropped.length === 1 ? "it" : "they"} will not be sent`,
+      );
+    }
+    await this.refreshQueueCount();
+    return dropped;
+  }
+
   async refreshQueueCount(): Promise<number> {
     try {
       const queued = (await readdir(OUTBOX_DIR)).filter((f) => f.endsWith(".json")).length;
@@ -418,6 +454,21 @@ export class Uplink extends EventEmitter {
     } catch {
       return 0;
     }
+  }
+}
+
+interface OutboxMeta {
+  durationMs: number;
+  peakLevel: number;
+  from: string;
+  recordingId: string;
+}
+
+function removeQuietly(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    // Already gone, which is the desired end state anyway.
   }
 }
 
