@@ -10,8 +10,8 @@ import { useMinuteClock } from "./usePlanModel";
  *
  * Only `visible` when the desk has actually put this medic (or, for a
  * coordinator, anyone) on a deployment plan — an event planned on paper should
- * leave the menu exactly as it was. `next` is the next move and how long until
- * it, so the row can answer the common question without opening anything.
+ * leave the menu exactly as it was. `urgent` tints the row when the next move
+ * is 15 minutes away or less.
  */
 export function usePlanEntry() {
   const role = useSessionStore((s) => s.role);

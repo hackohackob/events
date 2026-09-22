@@ -58,7 +58,6 @@ import { PendingIncidentsSheet } from "../incidents/PendingIncidentsSheet";
 import { Feather } from "@expo/vector-icons";
 import { MedicStatusControl } from "./MedicStatusControl";
 import { usePlanEntry } from "../plan/usePlanEntry";
-import { formatTime } from "@events/planner";
 import { PlanScreen } from "../plan/PlanScreen";
 import { IMPRECISE_ACCURACY_M, MedicDot } from "./MedicDot";
 import { MedicSheet } from "./MedicSheet";
@@ -3175,6 +3174,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     if (center) setPendingPoi({ lat: center[1], lng: center[0] });
   }, []);
 
+  const centerOnCurrentPosition = async () => {
+    const permission = await ExpoLocation.requestForegroundPermissionsAsync();
+    if (permission.status !== "granted") {
+      return;
+    }
+
+    const location = await ExpoLocation.getCurrentPositionAsync({});
+    cameraRef.current?.easeTo({
+      center: [location.coords.longitude, location.coords.latitude],
+      zoom: USER_FOCUS_ZOOM,
+      padding: { top: 0, bottom: 0, left: 0, right: 0 }, // clear any focus offset
+      duration: 420,
+    });
+  };
+
   const resetMapNorth = async () => {
     const viewState = await mapRef.current?.getViewState();
     if (!viewState) {
@@ -4216,12 +4230,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
           }}
         >
           <Text style={styles.menuButtonText}>Menu</Text>
-          {/* Tracking trouble — the fix is under Location diagnostics. */}
-          {!trackingHealth.ok ? (
-            <View style={styles.healthBadge}>
-              <Text style={styles.healthBadgeText}>!</Text>
-            </View>
-          ) : null}
         </Pressable>
 
         <Pressable style={styles.eventChip}>
@@ -4262,6 +4270,21 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               }}
             >
               <Feather name="layers" size={20} color={layersOpen ? "#34d399" : "#ecf4ff"} />
+            </Pressable>
+
+            <Pressable
+              style={styles.headerActionButton}
+              onPress={centerOnCurrentPosition}
+              onLongPress={() => {
+                if (!trackingHealth.ok) setActiveTab("location");
+              }}
+            >
+              <Feather name="crosshair" size={20} color="#ecf4ff" />
+              {!trackingHealth.ok ? (
+                <View style={styles.healthBadge}>
+                  <Text style={styles.healthBadgeText}>!</Text>
+                </View>
+              ) : null}
             </Pressable>
 
             <Pressable
@@ -4342,11 +4365,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               />
               <View style={styles.menuPageTextWrap}>
                 <Text style={styles.menuPageTitle}>Plan</Text>
-                <Text style={styles.menuPageSubtitle} numberOfLines={1}>
-                  {planEntry.next
-                    ? `${planEntry.next.minutes >= 60 ? formatTime(planEntry.next.departMs) : `in ${planEntry.next.minutes}m`} · ${planEntry.next.label}`
-                    : "Deployment plan & call sheet"}
-                </Text>
+                <Text style={styles.menuPageSubtitle}>Deployment plan & call sheet</Text>
               </View>
               <Feather name="chevron-right" size={16} color="#475569" />
             </Pressable>
@@ -5335,10 +5354,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       {/* Hidden while assigned to an incident — the assigned banner takes over
           that slot (status can't be changed while responding anyway). */}
       {showEl("medicStatus") && activeTab === "map" && !selectedMarker && navPhase === "idle" && trackNavPhase === "idle" && !assignedToIncident ? <MedicStatusControl /> : null}
-      {/* The deployment plan, directly under the status control. Renders nothing
-          unless the desk has actually put this user on a plan. Hidden under the
-          same conditions as the status control — every one of them means the
-          screen already belongs to something more urgent. */}
+      {/* The deployment plan screen — opened from the Menu's Plan row. */}
       <PlanScreen />
       {/* Also hidden while a trail is open: the transport occupies the same
           corner, and the FAB sat directly on top of its LIVE button. */}
