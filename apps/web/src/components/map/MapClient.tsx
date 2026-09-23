@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapPin } from 'lucide-react'
 import type { PointOfInterest, POIType } from '@/lib/types'
 import type { EventZone, MedicState, MedicTrail } from '@events/contracts'
+import { MEDIC_LATE_AFTER_MS, MEDIC_OFFLINE_AFTER_MS } from '@events/contracts'
 import TrailLayers from '@/components/trails/TrailLayers'
 import { smoothZonePolygon, zoneFeature } from '@/lib/zone-geometry'
 import { POI_CONFIGS } from '@/lib/constants'
@@ -192,10 +193,6 @@ function formatLastSeen(isoTs: string): string {
   return `${Math.floor(min / 60)}h ago`
 }
 
-function isOnline(lastSeenAt: string): boolean {
-  return Date.now() - new Date(lastSeenAt).getTime() < 90_000
-}
-
 // Routes/destinations are explicit server state (cleared on arrival/stand-down),
 // not a liveness inference — so they get a much longer staleness window. A
 // backgrounded phone reporting every few minutes must not blink its route off
@@ -206,25 +203,29 @@ function isAssignmentFresh(lastSeenAt: string): boolean {
   return Date.now() - new Date(lastSeenAt).getTime() < ASSIGNMENT_VISIBLE_MS
 }
 
-// Freshness coloring, matching the mobile app:
-//   0–20 min : green, fresher = more saturated
-//   20–40 min: yellow
-//   > 40 min : grey
-const FRESH_TWENTY_MIN = 20 * 60_000
-const FRESH_FORTY_MIN = 40 * 60_000
+// Freshness coloring, on the shared presence rule (medicPresence in
+// @events/contracts — judged on when the phone was last HEARD from):
+//   0–10 min : green, fresher = more saturated — reporting normally
+//   10–15 min: yellow — late; the app's watchdog / server ping should be
+//              recovering it
+//   ≥ 15 min : grey — offline
+// The old 20/40 min windows kept a medic who had been dark for half an hour
+// looking healthy.
+const FRESH_LATE_MS = MEDIC_LATE_AFTER_MS
+const FRESH_OFFLINE_MS = MEDIC_OFFLINE_AFTER_MS
 
 function freshnessBucket(ageMs: number): 'fresh' | 'warning' | 'stale' {
-  if (ageMs >= FRESH_FORTY_MIN) return 'stale'
-  if (ageMs >= FRESH_TWENTY_MIN) return 'warning'
+  if (ageMs >= FRESH_OFFLINE_MS) return 'stale'
+  if (ageMs >= FRESH_LATE_MS) return 'warning'
   return 'fresh'
 }
 
 function freshnessColor(ageMs: number): string {
-  if (!Number.isFinite(ageMs) || ageMs >= FRESH_FORTY_MIN) return '#7c8a9c'
-  if (ageMs >= FRESH_TWENTY_MIN) return '#f5c518'
-  // Interpolate a readable saturated green (age 0) → muted sage (20 min edge).
+  if (!Number.isFinite(ageMs) || ageMs >= FRESH_OFFLINE_MS) return '#7c8a9c'
+  if (ageMs >= FRESH_LATE_MS) return '#f5c518'
+  // Interpolate a readable saturated green (age 0) → muted sage (10 min "late" edge).
   // Kept dark enough that white initials stay legible on the dot.
-  const t = Math.max(0, Math.min(1, ageMs / FRESH_TWENTY_MIN))
+  const t = Math.max(0, Math.min(1, ageMs / FRESH_LATE_MS))
   const lerp = (a: number, b: number) => Math.round(a + (b - a) * t)
   const r = lerp(0x16, 0x4d)
   const g = lerp(0xb8, 0x8a)
@@ -530,7 +531,7 @@ function LiveMedicDot({ medic, onAssign, availablePois, openIncidents, onSelect 
   const [flashBlue, setFlashBlue] = useState(false)
   const ageMs = Date.now() - new Date(medic.lastSeenAt).getTime()
   const bucket = freshnessBucket(ageMs)
-  // "online" for the dot visuals = anything not yet stale (>40 min).
+  // "online" for the dot visuals = anything not yet offline (≥15 min).
   const online = bucket !== 'stale'
   // Status visuals matched to the mobile app.
   const isResting = medic.status === 'rest'

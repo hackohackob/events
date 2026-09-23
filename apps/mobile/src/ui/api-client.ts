@@ -1,11 +1,8 @@
 import { useSessionStore } from "../security/session-store";
-import { resolveLocalhostUrl } from "./runtime-host";
+import { API_BASE_URL } from "./api-base";
 import { debugLog } from "../debug/debug-log";
 import { noteEnergyEvent } from "../debug/battery-diagnostics";
-
-const API_BASE_URL = resolveLocalhostUrl(
-  process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
-);
+import { noteServerReachable } from "../offline/connectivity";
 
 /** Server origin without the `/api` prefix — static uploads live at `<origin>/uploads/...`. */
 const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
@@ -58,12 +55,17 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: init?.signal ?? abort.signal });
   } catch (networkErr) {
+    // Our own timeout (or a plain network failure) is evidence the path is
+    // down; a caller cancelling its own request says nothing about coverage.
+    if (!init?.signal?.aborted) noteServerReachable(false);
     noteEnergyEvent("apiNetworkError");
     debugLog("api", "error", `${method} ${path} network error`, String(networkErr));
     throw networkErr;
   } finally {
     clearTimeout(timeout);
   }
+  // Any HTTP response — even an error status — proves the network path works.
+  noteServerReachable(true);
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");

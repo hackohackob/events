@@ -85,3 +85,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * Whether a session is saved on disk: true / false, or null if storage could
+ * not be read. Lets background code tell "the user left" (false) apart from a
+ * failed read (null) — only the first may ever stop tracking.
+ */
+export async function hasStoredSession(): Promise<boolean | null> {
+  try {
+    return (await AsyncStorage.getItem(STORAGE_KEY)) != null;
+  } catch {
+    return null;
+  }
+}

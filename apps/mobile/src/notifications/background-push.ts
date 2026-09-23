@@ -3,7 +3,7 @@ import * as Notifications from "expo-notifications";
 import { shouldRaiseIncidentAlarm } from "./incident-alarm-guard";
 import { playIncidentSiren } from "./incident-siren";
 import { debugLog } from "../debug/debug-log";
-import { ensureTrackingAlive, sendCurrentLocationNow } from "../location/location-tracker";
+import { rebuildTrackingAfterSilence, sendCurrentLocationNow } from "../location/location-tracker";
 import { useSessionStore } from "../security/session-store";
 import { useSettingsStore } from "../settings/settings-store";
 
@@ -78,7 +78,7 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
   //
   // It is delivered with content-available and no title/body, so nothing is
   // shown and nothing sounds — and nothing may be drawn here either. All it
-  // does is report where we are and make sure tracking is still wired up; iOS
+  // does is report where we are and rebuild the tracking subscription; iOS
   // gives roughly 30 s for both.
   if (payload.kind === "location_ping") {
     debugLog("location", "info", "silent location ping received — reporting position", {
@@ -91,7 +91,12 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
     if (!useSessionStore.getState().hydrated) await useSessionStore.getState().hydrate();
     if (!useSettingsStore.getState().hydrated) await useSettingsStore.getState().hydrate();
     await sendCurrentLocationNow();
-    await ensureTrackingAlive();
+    // The server only pings after 10+ minutes without a fresh fix, so the
+    // continuous subscription is dead or frozen — rebuild it, or this ping buys
+    // exactly one position and the phone goes dark again. (The old
+    // ensureTrackingAlive() call could never do that: the fix just sent read as
+    // proof of life, and a fresh runtime has no history to call stale.)
+    await rebuildTrackingAfterSilence("server reported silence (location ping)");
     // Tell iOS the wake produced something. An app that always reports "no
     // data" gets its background pushes throttled, and this one is the whole
     // reason a stationary medic stays on the map. The literal is

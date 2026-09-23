@@ -65,7 +65,6 @@ import { SearchOverlay, type SearchTarget } from "../search/SearchOverlay";
 import { usePlacesStore } from "../search/places-store";
 import { SelectionPulse } from "./SelectionPulse";
 import { ScaleBar } from "./ScaleBar";
-import { unregisterPushToken } from "../notifications/push-registration";
 import { canQuitApp, quitApp } from "../ui/quit-app";
 import { EventChatScreen } from "../chat/EventChatScreen";
 import { ChatTabBadge } from "../chat/ChatTabBadge";
@@ -89,6 +88,7 @@ import { ParticipantsScreen } from "../participants/ParticipantsScreen";
 import { useSettingsStore } from "../settings/settings-store";
 import { useTrackingHealth } from "../location/tracking-health";
 import { setNavModeTracking } from "../location/location-tracker";
+import { leaveEvent } from "../security/leave-event";
 import { archivePoi, assignDestination, moveIncidentLocation, setMyRoute, updatePoi, type PoiDto } from "../ui/event-actions";
 import { PoiIcon } from "./poi-icons";
 import { POI_TYPES } from "./poi-types";
@@ -1473,7 +1473,6 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const eventTitle = useSessionStore((state) => state.eventTitle);
   const sessionUserId = useSessionStore((state) => state.userId);
   const chatUnread = useEventChatStore((s) => s.unread);
-  const clearSession = useSessionStore((state) => state.clear);
   const sessionToken = useSessionStore((state) => state.token);
   const markers = useMapStore((state) => state.markers);
   const tracks = useMapStore((state) => state.tracks);
@@ -4459,10 +4458,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
             style={[styles.menuPageRow, styles.menuLeaveRow]}
             onPress={() => {
               setMenuOpen(false);
-              // Unregister BEFORE clearing the session: apiFetch signs the call
-              // with the session headers, and leaving must also stop the alarms
-              // for the event being left.
-              void unregisterPushToken().finally(() => clearSession());
+              // Stops GPS, the socket, reminders and alarms, then clears the
+              // session — see leaveEvent.
+              void leaveEvent();
             }}
           >
             <Feather name="log-out" size={18} color="#f87171" style={styles.menuPageIcon} />

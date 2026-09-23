@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { CoverageController } from "./coverage.controller";
+import { CoverageProbeController } from "./coverage-probe.controller";
 import { CoverageService } from "./coverage.service";
 import { SignalRecorderService } from "./signal-recorder.service";
 
@@ -17,7 +18,7 @@ import { SignalRecorderService } from "./signal-recorder.service";
  * are resolved on the dashboard, which already holds the event list.
  */
 @Module({
-  controllers: [CoverageController],
+  controllers: [CoverageController, CoverageProbeController],
   providers: [CoverageService, SignalRecorderService],
   exports: [SignalRecorderService],
 })

@@ -1,5 +1,6 @@
-import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
+import type { NetInfoState } from "@react-native-community/netinfo";
 import type { SignalGeneration, SignalNetworkType, SignalSample } from "@events/contracts";
+import { latestNetState, onProbeResult, serverReachable } from "../offline/connectivity";
 
 /**
  * Radio conditions attached to every medic location report, feeding the
@@ -19,7 +20,9 @@ import type { SignalGeneration, SignalNetworkType, SignalSample } from "@events/
  *   • the radio class the OS reports (5G/4G/3G/2G/Wi-Fi/none), which bounds the
  *     best case, with
  *   • whether traffic is really getting through, and how fast — observed from
- *     the location reports themselves, which are already going out on a cadence.
+ *     the location reports themselves, which are already going out on a cadence,
+ *     plus the occasional reachability probe to our own server when the reports
+ *     can't answer (see offline/connectivity.ts).
  *
  * A phone parked on "4G" that cannot complete a 2 KB POST has no usable signal,
  * and the survey says so. That is deliberately a *usability* score rather than
@@ -73,22 +76,17 @@ const FAILURES_BEFORE_DISTRUST = 2;
  */
 const MEANINGLESS_CARRIERS = new Set(["--", "carrier", "unknown", "n/a", "none", ""]);
 
-let latest: NetInfoState | null = null;
 let smoothedRttMs: number | null = null;
 let rttAt = 0;
 let consecutiveFailures = 0;
 
-// One subscription for the lifetime of the app. NetInfo multiplexes listeners
-// over a single native observer, so this costs nothing beyond the callback and
-// keeps `getSignalSample()` synchronous — it is called on the location hot path.
-NetInfo.addEventListener((state) => {
-  latest = state;
+// Reachability probes to our own server (connectivity.ts) are the same kind of
+// evidence as a location report's round trip — and they happen exactly when
+// reports can't tell us anything, e.g. right after the network changes.
+onProbeResult((result) => {
+  if (result.ok) noteReportSuccess(result.rttMs);
+  else noteReportFailure();
 });
-NetInfo.fetch()
-  .then((state) => {
-    latest = state;
-  })
-  .catch(() => undefined);
 
 /**
  * Record the round-trip of a location report that reached the server.
@@ -175,7 +173,7 @@ function ceilingFor(state: NetInfoState): number {
  * `sendLocation`, which is on the battery-sensitive path.
  */
 export function getSignalSample(): SignalSample {
-  const state = latest;
+  const state = latestNetState();
   if (!state) {
     // Before the first NetInfo callback we genuinely do not know. Report the
     // absence rather than guessing: an "unknown" row is filtered out of the
@@ -196,9 +194,10 @@ export function getSignalSample(): SignalSample {
   // Hard evidence beats the OS's optimism, in order of how conclusive it is.
   if (state.isConnected === false || state.type === "none") {
     bars = 0;
-  } else if (state.isInternetReachable === false) {
-    // Attached to a tower, but nothing is routing. For a coordinator trying to
-    // reach this medic, that is the same as no signal.
+  } else if (serverReachable() === false) {
+    // Attached to a tower, but nothing reaches our server (a report or a probe
+    // just died on the network). For a coordinator trying to reach this medic,
+    // that is the same as no signal.
     bars = 0;
   } else if (consecutiveFailures >= FAILURES_BEFORE_DISTRUST) {
     // Reports are failing while the OS still claims a connection — the classic

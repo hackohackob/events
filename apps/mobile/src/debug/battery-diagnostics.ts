@@ -18,7 +18,8 @@ export type EnergyEventKind =
   | "watchdogRestart" // tracking rebuilt because the OS had stopped delivering fixes
   | "queueFlush" // a flush pass over the offline location queue
   | "socketConnectError" // socket.io reconnect attempt failed
-  | "apiNetworkError"; // any apiFetch that died on the network
+  | "apiNetworkError" // any apiFetch that died on the network
+  | "reachProbe"; // a reachability probe to our own server (connectivity.ts)
 
 export const ENERGY_EVENT_LABELS: Record<EnergyEventKind, string> = {
   gpsFix: "GPS fixes",
@@ -31,6 +32,7 @@ export const ENERGY_EVENT_LABELS: Record<EnergyEventKind, string> = {
   queueFlush: "Queue flush passes",
   socketConnectError: "Socket connect errors",
   apiNetworkError: "API network errors",
+  reachProbe: "Reachability probes",
 };
 
 interface BatterySample {
@@ -69,6 +71,7 @@ const emptyTotals = (): Record<EnergyEventKind, number> => ({
   queueFlush: 0,
   socketConnectError: 0,
   apiNetworkError: 0,
+  reachProbe: 0,
 });
 
 export const useBatteryDiagnostics = create<BatteryDiagnosticsState>(() => ({

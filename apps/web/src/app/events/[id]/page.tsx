@@ -35,6 +35,7 @@ import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
 import { updatePoi, archivePoi } from '@/api/events'
 import type { EventMedic, MedicState } from '@events/contracts'
+import { medicPresence } from '@events/contracts'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
 const STATUS_CONFIG = {
@@ -62,8 +63,11 @@ function msToLabel(ms: number): string {
   return `${Math.floor(min / 60)}h ago`
 }
 
+// Shared with the map (medicPresence in @events/contracts). The old 2 min
+// window dated from a 30 s send interval; phones now report every 3–7 min, so
+// it listed healthy medics as offline for most of every cycle.
 function isOnline(lastSeenAt: string) {
-  return Date.now() - new Date(lastSeenAt).getTime() < 120_000 // 2 min — 4× the 30s send interval
+  return medicPresence(lastSeenAt) !== 'offline'
 }
 
 // ─── Active hours badge ───────────────────────────────────────────────────────

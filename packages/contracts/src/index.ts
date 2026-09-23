@@ -423,6 +423,34 @@ export type FreshnessState = "fresh" | "warning" | "stale" | "offline";
  *   5–15 min  → stale
  *   15+ min or no fix yet (`recordedAt` undefined/invalid) → offline
  */
+/**
+ * Is a medic's phone still with us? Judged on `lastSeenAt` — when the server
+ * last HEARD from the device (fresh fix or heartbeat) — not on the fix time.
+ *
+ * The windows are set by what a healthy phone actually does, not by the
+ * nominal cadence:
+ *   • the slowest regular report is the "On post" 7 min cadence plus slack;
+ *   • any longer silence trips the app's own watchdog (rebuild at ≤10 min) and
+ *     the server's silent location ping (10 min);
+ * so past 10 min a phone is LATE (something is wrong, recovery should be under
+ * way) and past 15 min — where computeFreshness also gives up — it is OFFLINE.
+ *
+ * The old dashboard rules (offline after 90 s / 2 min) predate the 3 min
+ * default cadence and flagged healthy medics offline half the time.
+ */
+export const MEDIC_LATE_AFTER_MS = 10 * 60_000;
+export const MEDIC_OFFLINE_AFTER_MS = 15 * 60_000;
+
+export type MedicPresence = "live" | "late" | "offline";
+
+export function medicPresence(lastSeenAt?: string | null, now = Date.now()): MedicPresence {
+  if (!lastSeenAt) return "offline";
+  const ageMs = now - new Date(lastSeenAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs >= MEDIC_OFFLINE_AFTER_MS) return "offline";
+  if (ageMs >= MEDIC_LATE_AFTER_MS) return "late";
+  return "live";
+}
+
 export function computeFreshness(recordedAt?: string): FreshnessState {
   if (!recordedAt) return "offline";
   const ageMs = Date.now() - new Date(recordedAt).getTime();

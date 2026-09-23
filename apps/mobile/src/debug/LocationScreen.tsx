@@ -303,6 +303,7 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
         <EnergyRow kind="queueFlush" windowCounts={windowCounts} totals={energyTotals} />
         <EnergyRow kind="socketConnectError" windowCounts={windowCounts} totals={energyTotals} />
         <EnergyRow kind="apiNetworkError" windowCounts={windowCounts} totals={energyTotals} />
+        <EnergyRow kind="reachProbe" windowCounts={windowCounts} totals={energyTotals} />
       </Section>
       </ScrollView>
     </View>

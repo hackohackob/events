@@ -3,7 +3,6 @@ import { Animated, AppState, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import NetInfo from "@react-native-community/netinfo";
 import { JoinScreen } from "./auth/JoinScreen";
 import { incidentQueue } from "./incidents/persistent-incident-queue";
 import { flushIncidentQueue } from "./incidents/flush-incidents";
@@ -19,6 +18,7 @@ import { hydrateAlarmGuard } from "./notifications/incident-alarm-guard";
 import { MapScreen } from "./map/MapScreen";
 import { syncPlanNotifications } from "./plan/plan-notifications";
 import { useSessionStore } from "./security/session-store";
+import { isOnline, subscribeConnectivity } from "./offline/connectivity";
 import { useSettingsStore } from "./settings/settings-store";
 import { useIncidentReadsStore } from "./incidents/incident-reads-store";
 import { useZoneVisibilityStore } from "./map/zones/zone-visibility-store";
@@ -123,12 +123,14 @@ export default function App() {
       if (!incidentQueue.isEmpty) void flushIncidentQueue();
     });
 
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      const online = state.isConnected === true && state.isInternetReachable !== false;
+    const onConnectivity = () => {
+      const online = isOnline();
       useIncidentStore.getState().setOnline(online);
       if (online && !incidentQueue.isEmpty) void flushIncidentQueue();
       if (online) void flushLocationQueue();
-    });
+    };
+    onConnectivity();
+    const unsubscribe = subscribeConnectivity(onConnectivity);
 
     return () => {
       unsubscribe();

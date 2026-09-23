@@ -5,7 +5,7 @@ import Constants from "expo-constants";
 import { AppState, Linking, Platform } from "react-native";
 import { apiFetch } from "../ui/api-client";
 import { getSocket } from "../realtime/socket-client";
-import { useSessionStore } from "../security/session-store";
+import { hasStoredSession, useSessionStore } from "../security/session-store";
 import { OfflineQueue } from "../offline/offline-queue";
 import { isOnline } from "../offline/connectivity";
 import { noteBatterySample, noteEnergyEvent, setLocationQueueSize } from "../debug/battery-diagnostics";
@@ -601,7 +601,12 @@ async function startDirectWatch(intervalMs: number): Promise<void> {
         noteEnergyEvent("gpsFix");
         // Proof of life first: even a fix we go on to discard shows the pipe
         // from the OS is still open, and that is all the watchdog asks.
-        noteFixReceived();
+        //
+        // Except on iOS, where this watch is foreground-only and the task is
+        // the ONLY background path. Counting the watch there let an open app
+        // mask a dead task: the medic used the map, the watchdog saw fixes,
+        // nothing was rebuilt — and the phone went dark the moment it locked.
+        if (Platform.OS !== "ios") noteFixReceived();
         // Skip anything the task fallback (or a previous watch) already sent.
         if (location.timestamp <= lastDeliveredFixTimestamp) {
           debugLog("location", "info", "watch: skipped already-superseded fix");
@@ -647,6 +652,27 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
   if (!locations.length) return;
   noteEnergyEvent("gpsFix");
   noteFixReceived();
+
+  // The OS can run this task in a JS runtime that has no UI: Android restarts
+  // expo-location's sticky service after the process was killed, iOS relaunches
+  // a terminated app straight into it. App.tsx never mounts there (Android) or
+  // hasn't hydrated yet (iOS), so the session store still holds its defaults —
+  // role "runner", no event — and the guard below threw away EVERY fix until
+  // someone opened the app. Load what's on disk first; a no-op once hydrated.
+  if (!useSessionStore.getState().hydrated) await useSessionStore.getState().hydrate();
+  if (!useSettingsStore.getState().hydrated) await useSettingsStore.getState().hydrate();
+
+  // No session on disk: the user left the event, but the OS still delivered
+  // this task — the stop on leave failed (the known Android NPE) or the task
+  // was restored from a stale registration. Tear it down so GPS and the
+  // foreground service really stop, instead of running for nothing.
+  // Only on a CONFIRMED empty store — a failed storage read must never be
+  // mistaken for a leave and switch a working medic's tracking off.
+  if (!useSessionStore.getState().token && (await hasStoredSession()) === false) {
+    debugLog("location", "warn", "location task fired with no session — stopping orphaned tracking");
+    await ExpoLocation.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => undefined);
+    return;
+  }
 
   // iOS can relaunch a TERMINATED app straight into this handler (the task
   // consumer arms significant-change monitoring alongside the standard
@@ -718,10 +744,12 @@ export async function sendCurrentLocationNow(): Promise<void> {
       ? lastKnown
       : await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced });
     if (location) {
-      // A one-shot that returns a position is also proof the pipe is open —
-      // and it is what the watchdog's own rebuild ends with, so without this
-      // a successful rebuild would not clear the staleness it just fixed.
-      noteFixReceived();
+      // Deliberately NOT noteFixReceived(). A one-shot proves the GPS works,
+      // not that the continuous subscription is alive — and one fires on every
+      // foreground and every silent push, so counting it hid exactly the dead
+      // pipe the watchdog exists to find. A rebuild clears the staleness on its
+      // own: startLocationLoop restamps trackingArmedAt.
+      //
       // Explicit intent (app opened, tracking (re)started, debug button) —
       // always report, never wait out the interval.
       await sendLocation(location, { force: true });
@@ -752,6 +780,9 @@ export async function requestAlwaysLocationPermission(): Promise<boolean> {
 
 export async function startLocationLoop(): Promise<boolean> {
   const session = useSessionStore.getState();
+  // Nothing to track for: never start GPS without a session (after Leave Event
+  // a late watchdog tick or retry timer could otherwise switch it back on).
+  if (!session.token) return false;
   const isMedic = session.role === "medic" || session.role === "paramedic";
 
   if (!(await requestAlwaysLocationPermission())) return false;
@@ -765,7 +796,9 @@ export async function startLocationLoop(): Promise<boolean> {
     const exempt = await isBatteryOptimizationIgnored().catch(() => false);
     debugLog("location", exempt ? "info" : "warn", `battery optimization exemption: ${exempt ? "granted" : "NOT granted — background tracking will freeze in Doze"}`);
   }
-  if (Platform.OS === "android" && !promptedBatteryExemption) {
+  // Only with the app on screen: a tracking rebuild can run headless (silent
+  // push, revived service), and launching a system dialog from there is wrong.
+  if (Platform.OS === "android" && !promptedBatteryExemption && AppState.currentState === "active") {
     promptedBatteryExemption = true;
     try {
       if (!(await isBatteryOptimizationIgnored())) {
@@ -952,6 +985,13 @@ export async function startLocationLoop(): Promise<boolean> {
     return false;
   }
 
+  // The user left the event while this start was in flight (permission and
+  // task calls can take seconds) — undo what we just armed.
+  if (!useSessionStore.getState().token) {
+    await stopLocationLoop();
+    return false;
+  }
+
   // 5. Restart the liveness clock. Everything below this point is armed, so a
   //    silence from here on is the OS's, not ours — and that is what the
   //    freshness watchdog in ensureTrackingAlive measures. Stamping it here
@@ -1089,6 +1129,43 @@ async function restartIfDeliveryStale(): Promise<void> {
     await startLocationLoop();
   } finally {
     staleRestartInFlight = false;
+  }
+}
+
+/**
+ * Rebuild tracking because something OUTSIDE the app saw it go quiet — the
+ * server's silent location ping (see MedicSilenceService), which only fires
+ * after 10+ minutes with no fresh fix.
+ *
+ * Unconditional on purpose. The local watchdog can't judge this case: the ping
+ * often lands in a fresh runtime with no history (so it has nothing to call
+ * stale), or in one whose timers were frozen. The server's view is the one that
+ * matters, and a rebuild when it was wrong costs one GPS reading.
+ *
+ * Requires "Always" location already granted: this runs in the background, and
+ * startLocationLoop would otherwise try to send the user to Settings.
+ */
+export async function rebuildTrackingAfterSilence(reason: string): Promise<void> {
+  try {
+    if (!useSessionStore.getState().token) return;
+    if (navModeActive || staleRestartInFlight) return;
+    const fg = await ExpoLocation.getForegroundPermissionsAsync();
+    const bg = await ExpoLocation.getBackgroundPermissionsAsync();
+    if (fg.status !== "granted" || bg.status !== "granted") {
+      debugLog("location", "warn", "tracking rebuild skipped — background location not granted", { reason });
+      return;
+    }
+    debugLog("location", "warn", `rebuilding tracking — ${reason}`);
+    noteEnergyEvent("watchdogRestart");
+    staleRestartInFlight = true;
+    trackingArmedAt = Date.now();
+    try {
+      await startLocationLoop();
+    } finally {
+      staleRestartInFlight = false;
+    }
+  } catch (err) {
+    debugLog("location", "error", "tracking rebuild failed", describeError(err));
   }
 }
 
