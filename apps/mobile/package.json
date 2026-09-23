@@ -1,6 +1,6 @@
 {
   "name": "@events/mobile",
-  "version": "6.8.0",
+  "version": "7.0.0",
   "private": true,
   "main": "index.js",
   "scripts": {
