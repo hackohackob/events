@@ -63,6 +63,18 @@ export interface GatewayConfig {
      * theory — the presets exist to be compared, and this records the verdict.
      */
     outgoingPreset: string;
+    /**
+     * Silence the card's input-to-output monitoring whenever the capture device
+     * is opened.
+     *
+     * On by default, and it should stay on. A card that monitors its own
+     * microphone to its own output turns a radio into a feedback loop: whatever
+     * the radio receives is played straight back into its microphone, and with
+     * VOX enabled it keys up and never stops. Cards differ in what they enable
+     * out of the box, so swapping one for another can do this with nothing in
+     * the software having changed.
+     */
+    muteMonitorPaths: boolean;
   };
 
   squelch: {
@@ -183,6 +195,21 @@ export interface GatewayConfig {
     maxDays: number;
   };
 
+  /**
+   * Remote access: a reverse SSH tunnel out to a reachable host, so the box can
+   * be worked on from somewhere else while it sits behind a venue's NAT.
+   *
+   * Off unless switched on, and useless until the box's public key — which it
+   * prints to its own log — has been installed on that host by hand.
+   */
+  remoteAccess: {
+    enabled: boolean;
+    host: string;
+    user: string;
+    /** Port on the far host that forwards back to this box's SSH. */
+    port: number;
+  };
+
   /** Console PIN, currently unused — the AP password is the credential. */
   consolePin: string;
 }
@@ -231,7 +258,7 @@ export function defaultConfig(): GatewayConfig {
     // "gentle" — a single high-pass at 250 Hz and nothing else — was the one
     // that sounded best out of a Hytera X1p in the first field comparison.
     // Heavier filtering measured better and sounded worse.
-    audio: { capture: "", playback: "", inputGain: 1, outputGain: 1, outgoingPreset: "gentle" },
+    audio: { capture: "", playback: "", inputGain: 1, outputGain: 1, outgoingPreset: "gentle", muteMonitorPaths: true },
     squelch: {
       openLevel: 0.06,
       closeLevel: 0.035,
@@ -266,6 +293,12 @@ export function defaultConfig(): GatewayConfig {
       "Проверка на връзката от базата. Едно. Две. Три. Четири. Пет. " +
       "Ако чувате това ясно, звуковият път работи. Край.",
     storage: { maxMb: 2048, maxDays: 14 },
+    remoteAccess: {
+      enabled: false,
+      host: "hackohackob.com",
+      user: "hacko",
+      port: 2222,
+    },
     consolePin: "",
   };
 }
@@ -290,6 +323,7 @@ export function loadConfig(): GatewayConfig {
         rogerBeep: { ...base.rogerBeep, ...stored.rogerBeep },
         ptt: { ...base.ptt, ...stored.ptt },
         storage: { ...base.storage, ...stored.storage },
+        remoteAccess: { ...base.remoteAccess, ...stored.remoteAccess },
         // The id is derived, never restored: a cloned SD card must not produce
         // two boxes claiming the same dashboard row.
         id: base.id,
@@ -339,6 +373,7 @@ export function patchConfig(patch: DeepPartial<GatewayConfig>): GatewayConfig {
     rogerBeep: { ...current.rogerBeep, ...patch.rogerBeep },
     ptt: { ...current.ptt, ...patch.ptt },
     storage: { ...current.storage, ...patch.storage },
+    remoteAccess: { ...current.remoteAccess, ...patch.remoteAccess },
     id: current.id,
   };
   return saveConfig(next);

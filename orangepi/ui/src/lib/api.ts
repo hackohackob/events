@@ -186,6 +186,45 @@ export const api = {
       method: "DELETE",
     }),
 
+  mixer: () =>
+    request<{
+      card: number;
+      raw: string;
+      controls: Array<{
+        name: string;
+        hasPlaybackVolume: boolean;
+        hasPlaybackSwitch: boolean;
+        hasCaptureVolume: boolean;
+        hasCaptureSwitch: boolean;
+        playbackPercent: number | null;
+        capturePercent: number | null;
+        playbackOn: boolean | null;
+        captureOn: boolean | null;
+        isMonitorPath: boolean;
+      }>;
+    }>("/audio/mixer"),
+  setMixer: (body: { name: string; side: "playback" | "capture"; volume?: number; on?: boolean }) =>
+    post<{ ok: boolean; detail: string }>("/audio/mixer", body),
+  muteMonitors: () =>
+    post<{ ok: boolean; detail: string; silenced: string[] }>("/audio/mute-monitors"),
+
+  remote: () =>
+    request<{
+      enabled: boolean;
+      connected: boolean;
+      publicKey: string | null;
+      detail: string;
+      instructions: string | null;
+    }>("/remote"),
+  setRemote: (body: { enabled?: boolean; host?: string; user?: string; port?: number }) =>
+    request<{
+      enabled: boolean;
+      connected: boolean;
+      publicKey: string | null;
+      detail: string;
+      instructions: string | null;
+    }>("/remote", { method: "PUT", body: JSON.stringify(body) }),
+
   audioDevices: () => request<{ capture: AudioDevice[]; playback: AudioDevice[] }>("/audio/devices"),
   testTone: () => post<{ ok: boolean; detail: string }>("/radio/test-tone"),
   wakeTone: () => post<{ ok: boolean; detail: string }>("/radio/wake-tone"),

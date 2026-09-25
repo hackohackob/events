@@ -4,6 +4,7 @@ import { log } from "../logger";
 import { FAKE_HARDWARE, sleep } from "../util";
 import type { GatewayConfig } from "../config";
 import { resolveDevice } from "./devices";
+import { cardOf, logMixerState, muteMonitorPaths } from "./mixer";
 import {
   applyGain,
   BYTES_PER_SAMPLE,
@@ -221,6 +222,19 @@ export class AudioCapture extends EventEmitter {
   async start(): Promise<void> {
     this.stopping = false;
     this.device = await resolveDevice(this.config.audio.capture, "capture");
+
+    // Before a single sample is read: log what this card actually looks like,
+    // and shut its monitoring paths. A different card can arrive with its
+    // microphone wired back to its output, which on a radio with VOX means it
+    // keys up the moment it is plugged in and never lets go.
+    const card = cardOf(this.device);
+    await logMixerState(card, this.device);
+    if (this.config.audio.muteMonitorPaths) {
+      await muteMonitorPaths(card);
+    } else {
+      log.warn("audio", "monitor-path muting is switched off — if the radio keys itself, turn it back on");
+    }
+
     this.spawnRecorder();
   }
 

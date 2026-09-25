@@ -18,6 +18,7 @@ import { findPreset, PRESETS } from "./audio/presets";
 import { bytesToMs } from "./audio/format";
 import { readHealth } from "./health";
 import { NetworkManager } from "./net/network";
+import { RemoteAccess } from "./net/remote";
 import { Transceiver } from "./radio/transceiver";
 import { RecordingStore } from "./store/recordings";
 import { Uplink } from "./server/uplink";
@@ -44,6 +45,7 @@ export class GatewayDaemon extends EventEmitter {
   readonly radio: Transceiver;
   readonly recordings: RecordingStore;
   readonly uplink: Uplink;
+  readonly remote: RemoteAccess;
 
   /** Last thing that happened, for the console's status line. */
   private activity = "Starting up";
@@ -55,6 +57,7 @@ export class GatewayDaemon extends EventEmitter {
     this.radio = new Transceiver(this.config);
     this.recordings = new RecordingStore(this.config);
     this.uplink = new Uplink(this.config);
+    this.remote = new RemoteAccess(this.config);
   }
 
   async start(): Promise<void> {
@@ -68,6 +71,7 @@ export class GatewayDaemon extends EventEmitter {
     await this.radio.start();
     await this.network.boot();
     this.uplink.start();
+    if (this.config.remoteAccess.enabled) void this.remote.start();
     this.network.startWatchdog(() => this.uplink.healthy());
 
     if (!isProvisioned(this.config)) {
@@ -276,6 +280,7 @@ export class GatewayDaemon extends EventEmitter {
     this.network.applyConfig(this.config);
     this.recordings.applyConfig(this.config);
     this.uplink.applyConfig(this.config);
+    this.remote.applyConfig(this.config);
     void this.radio.applyConfig(this.config);
     this.emit("state");
   }

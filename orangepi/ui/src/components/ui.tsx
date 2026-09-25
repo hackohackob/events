@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { AlertIcon, CheckIcon, InfoIcon } from "../lib/icons";
+import { useState, type ReactNode } from "react";
+import { AlertIcon, CheckIcon, ChevronIcon, InfoIcon } from "../lib/icons";
 
 /** The shared shapes the console is assembled from. */
 
@@ -8,21 +8,53 @@ export function Card({
   action,
   children,
   tight,
+  collapsible,
+  defaultOpen = false,
+  badge,
 }: {
   title?: string;
   action?: ReactNode;
   children: ReactNode;
   tight?: boolean;
+  /** Fold the card away behind its heading. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  /** A word shown beside the heading while folded, e.g. the current setting. */
+  badge?: ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const folded = collapsible && !open;
+
   return (
     <section className="card enter">
-      {title && (
-        <div className="card-head">
-          <h2>{title}</h2>
-          {action}
-        </div>
-      )}
-      <div className={`card-body${tight ? " tight" : ""}`}>{children}</div>
+      {title &&
+        (collapsible ? (
+          // The setup screen is long, and on a phone that means the thing you
+          // came for is usually several scrolls away. Folded sections make it a
+          // list you can see at once.
+          <button
+            className="card-head card-head-toggle"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+          >
+            <h2>{title}</h2>
+            {badge && <span className="tag">{badge}</span>}
+            <ChevronIcon
+              size={16}
+              style={{
+                color: "var(--text-ghost)",
+                transform: open ? "rotate(180deg)" : "none",
+                transition: "transform 200ms ease",
+              }}
+            />
+          </button>
+        ) : (
+          <div className="card-head">
+            <h2>{title}</h2>
+            {action}
+          </div>
+        ))}
+      {!folded && <div className={`card-body${tight ? " tight" : ""}`}>{children}</div>}
     </section>
   );
 }

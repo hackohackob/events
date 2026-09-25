@@ -259,6 +259,24 @@ button {
   padding: 15px 16px 11px;
 }
 
+/* A folded card's heading is the control that opens it, so it needs to feel
+   like one: full width, its own hit area, and no default button chrome. */
+.card-head-toggle {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  transition: background 140ms ease;
+}
+
+.card-head-toggle:active {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.card-head-toggle h2 {
+  flex: 1;
+}
+
 .card-head h2 {
   font-size: 13px;
   font-weight: 750;

@@ -172,3 +172,9 @@ export const CalendarIcon = (p: IconProps) => (
     <line x1="3" y1="10" x2="21" y2="10" />
   </Icon>
 );
+
+export const ChevronIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);

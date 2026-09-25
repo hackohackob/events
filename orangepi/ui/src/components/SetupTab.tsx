@@ -18,6 +18,8 @@ import {
   ZapIcon,
 } from "../lib/icons";
 import { AbTest } from "./AbTest";
+import { MixerCard } from "./MixerCard";
+import { RemoteCard } from "./RemoteCard";
 import { Banner, Card, Field, SignalBars, Slider, Toggle } from "./ui";
 
 /**
@@ -55,6 +57,12 @@ export function SetupTab({ status, onChanged }: { status: Status; onChanged: () 
   return (
     <>
       {notice && <Banner tone={notice.tone === "info" ? "info" : notice.tone}>{notice.text}</Banner>}
+
+      {/* Remote access and the mixer come first: when something is wrong at an
+          event these are the two screens that matter, and burying them under
+          eight others costs time nobody has. */}
+      <RemoteCard />
+      <MixerCard />
 
       <ServerCard status={status} config={config} onSaved={onChanged} setNotice={setNotice} />
       <EventCard status={status} onChanged={onChanged} />
@@ -109,6 +117,8 @@ function ServerCard({
 
   return (
     <Card
+      collapsible
+      defaultOpen
       title="Server"
       action={
         <span className={`tag ${status.server.connected ? "ok" : "bad"}`}>
@@ -172,7 +182,7 @@ function EventCard({ status, onChanged }: { status: Status; onChanged: () => voi
   };
 
   return (
-    <Card title="Event" action={<CalendarIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
+    <Card title="Event" collapsible defaultOpen action={<CalendarIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
       {!status.server.connected ? (
         <Banner tone="warn">
           The event list comes from the server. Connect this box first and the events will appear here.
@@ -312,6 +322,7 @@ function WifiCard({ status, setNotice }: { status: Status; setNotice: Notice }) 
 
   return (
     <Card
+      collapsible
       title="WiFi"
       action={
         <button
@@ -437,7 +448,7 @@ function AudioCard({
   }, []);
 
   return (
-    <Card title="Sound card">
+    <Card title="Sound card" collapsible>
       <Field
         label="From the radio (capture)"
         hint="The USB sound card's microphone input, wired to the handset's speaker output."
@@ -510,7 +521,7 @@ function SquelchCard({
   };
 
   return (
-    <Card title="Squelch">
+    <Card title="Squelch" collapsible>
       <p className="hint" style={{ marginTop: -4, marginBottom: 14 }}>
         When the box decides somebody is talking. Watch the scope on the Live tab while you set these — the dashed
         green line is the opening threshold, and speech should cross it while hiss does not.
@@ -574,7 +585,7 @@ function BeepCard({
   };
 
   return (
-    <Card title="End-of-transmission tone">
+    <Card title="End-of-transmission tone" collapsible>
       <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>
         Most radios play a short tone when the other side lets go of the button. It is a far better
         end-of-message signal than silence, which cannot tell the end of a call from someone pausing
@@ -687,7 +698,7 @@ function KeyingCard({
   };
 
   return (
-    <Card title="Keying the radio" action={<RadioIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
+    <Card title="Keying the radio" collapsible action={<RadioIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
       <div style={{ margin: "0 -16px 8px" }}>
         {BACKENDS.map((backend) => (
           <button
@@ -845,7 +856,7 @@ function AccessPointCard({
   const [password, setPassword] = useState(config.ap.password);
 
   return (
-    <Card title="Setup access point" action={<WifiIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
+    <Card title="Setup access point" collapsible action={<WifiIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
       <p className="hint" style={{ marginTop: -4, marginBottom: 14 }}>
         The network this page is served on. The board can only do one thing at a time with its radio, so the access
         point is down whenever the box is on the venue's WiFi — bring it back from the dashboard, or it returns by
@@ -917,7 +928,7 @@ function StorageCard({
   patch: (change: Record<string, unknown>) => Promise<void>;
 }) {
   return (
-    <Card title="Recordings kept on this box">
+    <Card title="Recordings kept on this box" collapsible>
       <Slider
         label="Disk limit"
         value={config.storage.maxMb}
@@ -959,7 +970,7 @@ function MaintenanceCard({ status, setNotice }: { status: Status; setNotice: Not
   };
 
   return (
-    <Card title="Maintenance" action={<SettingsIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
+    <Card title="Maintenance" collapsible action={<SettingsIcon size={15} style={{ color: "var(--text-ghost)" }} />}>
       {status.server.updateAvailable && (
         <Banner tone="ok" title={`Version ${status.server.latestVersion} is available`}>
           This box is on {status.version}.

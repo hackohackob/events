@@ -72,7 +72,7 @@ export function AbTest() {
   };
 
   return (
-    <Card title="Compare the outgoing sound">
+    <Card title="Compare the outgoing sound" collapsible>
       <p className="hint" style={{ marginBottom: 14 }}>
         Sends one clip over the air several times, processed differently each time. Listen on the
         second handset and note which number sounds best — clearest, least boomy, and not cutting

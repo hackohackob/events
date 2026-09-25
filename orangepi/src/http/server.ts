@@ -5,6 +5,7 @@ import { log, type LogEntry } from "../logger";
 import { run } from "../util";
 import { CONFIG_PATH, RECORDINGS_DIR, VERSION } from "../config";
 import { captureDevices, playbackDevices } from "../audio/devices";
+import { cardOf, dump, listControls, muteMonitorPaths, setCaptureVolume, setPlaybackVolume, setSwitch } from "../audio/mixer";
 import { SAMPLE_RATE } from "../audio/format";
 import type { GatewayDaemon } from "../daemon";
 
@@ -265,6 +266,87 @@ export function createConsoleServer(daemon: GatewayDaemon): express.Express {
     void Promise.all([captureDevices(), playbackDevices()]).then(([capture, playback]) =>
       res.json({ capture, playback }),
     );
+  });
+
+  // ── Sound card mixer ───────────────────────────────────────────────────────
+  // Exposed because swapping a card can change everything about how it behaves,
+  // and the difference between a working box and one that transmits forever can
+  // be a single switch this screen makes visible.
+
+  app.get("/api/audio/mixer", (_req, res) => {
+    const card = cardOf(daemon.radio.capture.currentDevice);
+    void Promise.all([listControls(card), dump(card)])
+      .then(([controls, raw]) => res.json({ card, controls, raw }))
+      .catch((err: Error) => res.status(500).json({ error: err.message }));
+  });
+
+  app.post("/api/audio/mixer", (req, res) => {
+    const { name, side, volume, on } = req.body as {
+      name?: string;
+      side?: "playback" | "capture";
+      volume?: number;
+      on?: boolean;
+    };
+    if (!name || (side !== "playback" && side !== "capture")) {
+      res.status(400).json({ ok: false, detail: "Which control, and which side?" });
+      return;
+    }
+    const card = cardOf(daemon.radio.capture.currentDevice);
+    const task =
+      typeof on === "boolean"
+        ? setSwitch(card, name, on, side)
+        : side === "capture"
+          ? setCaptureVolume(card, name, Number(volume) || 0)
+          : setPlaybackVolume(card, name, Number(volume) || 0);
+    void task
+      .then((ok) => {
+        if (ok) void run("alsactl", ["store"], { timeoutMs: 8000 });
+        res.json({ ok, detail: ok ? "Applied." : "The card refused that change." });
+      })
+      .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
+  });
+
+  /** The emergency button: silence everything feeding input back to output. */
+  app.post("/api/audio/mute-monitors", (_req, res) => {
+    const card = cardOf(daemon.radio.capture.currentDevice);
+    void muteMonitorPaths(card)
+      .then((silenced) => {
+        void run("alsactl", ["store"], { timeoutMs: 8000 });
+        res.json({
+          ok: true,
+          silenced,
+          detail: silenced.length
+            ? `Silenced: ${silenced.join(", ")}`
+            : "Nothing was feeding input back to the output.",
+        });
+      })
+      .catch((err: Error) => res.status(500).json({ ok: false, detail: err.message }));
+  });
+
+  // ── Remote access ──────────────────────────────────────────────────────────
+
+  app.get("/api/remote", (_req, res) => {
+    void daemon.remote
+      .fullState()
+      .then((state) => res.json(state))
+      .catch((err: Error) => res.status(500).json({ error: err.message }));
+  });
+
+  app.put("/api/remote", (req, res) => {
+    const body = req.body as { enabled?: boolean; host?: string; user?: string; port?: number };
+    daemon.updateConfig({
+      remoteAccess: {
+        ...daemon.config.remoteAccess,
+        ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+        ...(body.host ? { host: body.host.trim() } : {}),
+        ...(body.user ? { user: body.user.trim() } : {}),
+        ...(body.port ? { port: Number(body.port) } : {}),
+      },
+    });
+    void daemon.remote
+      .fullState()
+      .then((state) => res.json(state))
+      .catch((err: Error) => res.status(500).json({ error: err.message }));
   });
 
   app.post("/api/radio/test-tone", (_req, res) => {
