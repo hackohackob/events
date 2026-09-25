@@ -47,6 +47,14 @@ function initials(name: string) {
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
+
+// Messages relayed from a PTT channel (Zello, radio) all have a null authorId,
+// so tell their senders apart by origin + handle instead.
+function sameSender(a: EventMessage, b: EventMessage): boolean {
+  if (a.authorId != null || b.authorId != null) return a.authorId === b.authorId
+  return a.origin === b.origin && (a.originUser ?? a.authorName) === (b.originUser ?? b.authorName)
+}
+
 function dayLabel(iso: string) {
   const d = new Date(iso), t = new Date(), y = new Date()
   y.setDate(t.getDate() - 1)
@@ -118,7 +126,7 @@ export default function ChatDrawer({ messages, loading, onSend, onClose, onFocus
       const mine = msg.authorId != null && msg.authorId === myId
       const gapMin = prev ? (new Date(msg.createdAt).getTime() - new Date(prev.createdAt).getTime()) / 60000 : 999
       const showHeader =
-        msg.kind !== 'system' && (!prev || prev.kind === 'system' || prev.authorId !== msg.authorId || gapMin > 5)
+        msg.kind !== 'system' && (!prev || prev.kind === 'system' || !sameSender(prev, msg) || gapMin > 5)
       const dateSep = !prev || dayLabel(prev.createdAt) !== dayLabel(msg.createdAt) ? dayLabel(msg.createdAt) : null
       return { msg, mine, showHeader, dateSep }
     })
