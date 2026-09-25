@@ -143,6 +143,19 @@ export interface ApiPoi {
 }
 
 /**
+ * Drop a new point on the live board — the same endpoint the native app's
+ * long-press sheet uses. Persisted to the event and broadcast to every client.
+ */
+export async function createPoi(
+  eventId: string,
+  input: { lat: number; lng: number; type: string; name?: string; description?: string; icon?: string },
+): Promise<ApiPoi> {
+  // Like archive, this endpoint scopes by the caller's event header.
+  const res = await client.post(`/events/pois`, input, { headers: { "x-event-id": eventId } });
+  return res.data;
+}
+
+/**
  * Edit a live point: rename/retype it, move it, or put an archived one back on
  * the board (`archived: false`). Broadcast to every connected client.
  */

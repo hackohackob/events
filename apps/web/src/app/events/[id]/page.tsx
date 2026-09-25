@@ -19,6 +19,7 @@ import IncidentDrawer from '@/components/IncidentDrawer'
 import MedicDrawer from '@/components/MedicDrawer'
 import ChatDrawer from '@/components/ChatDrawer'
 import PoiDrawer, { type PoiPatch } from '@/components/PoiDrawer'
+import NewPoiModal, { type NewPoiInput } from '@/components/NewPoiModal'
 import ParticipantsPanel from '@/components/ParticipantsPanel'
 import { useEventChat } from '@/hooks/useEventChat'
 import { useParticipants } from '@/hooks/useParticipants'
@@ -33,7 +34,7 @@ import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
 import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
-import { updatePoi, archivePoi } from '@/api/events'
+import { createPoi, updatePoi, archivePoi } from '@/api/events'
 import type { EventMedic, MedicState } from '@events/contracts'
 import { medicPresence } from '@events/contracts'
 import type { PointOfInterest, POIType } from '@/lib/types'
@@ -279,9 +280,6 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   // -1 = All days, 0+ = specific day index
   const [selectedDayIdx, setSelectedDayIdx] = useState<number>(-1)
   const [addPoiCoords, setAddPoiCoords] = useState<[number, number] | null>(null)
-  const [addPoiType, setAddPoiType] = useState<POIType>('medical-point')
-  const [addPoiName, setAddPoiName] = useState('')
-  const [localExtraPois, setLocalExtraPois] = useState<PointOfInterest[]>([])
   // Point whose detail drawer is open (clicked on the map or in the panel).
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null)
   // Move-point mode: the next map click becomes the point's new position.
@@ -296,6 +294,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   // points off the event document — so refetch it after every change.
   const queryClient = useQueryClient()
   const refreshEvent = () => queryClient.invalidateQueries({ queryKey: ['events', id] })
+
+  async function addPoint(input: NewPoiInput) {
+    const poi = await createPoi(id, input)
+    setAddPoiCoords(null)
+    await refreshEvent()
+    // Open the new point straight away, as the native sheet hands it back.
+    setSelectedPoiId(poi.id)
+  }
 
   async function savePoi(poiId: string, patch: PoiPatch) {
     await updatePoi(id, poiId, patch)
@@ -511,29 +517,16 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
       icon: p.icon,
       archived: p.archived,
     })),
-    ...localExtraPois,
   ]
 
   // On the map: the selected day only, and archived points only in review mode.
   const poisInSelectedDays = new Set(filteredDays.flatMap(d => d.pois || []))
   const mapPois = allPoiPoints.filter((point, i) => {
     const stored = allPois[i]
-    if (!stored) return true // locally-added points are never day-filtered
     return poisInSelectedDays.has(stored) && (showArchived || !stored.archived)
   })
 
   const selectedPoi = allPoiPoints.find(p => p.id === selectedPoiId) ?? null
-
-  function handleAddPoi() {
-    if (!addPoiCoords) return
-    const newPoi: PointOfInterest = {
-      id: `local-${Date.now()}`,
-      type: addPoiType,
-      coordinates: addPoiCoords,
-      name: addPoiName.trim() || undefined,
-    }
-    setLocalExtraPois(prev => [...prev, newPoi])
-  }
 
   const mapFitBounds = useMemo(() => {
     const coords: [number, number][] = [
@@ -1705,83 +1698,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
       {/* Add POI Modal */}
       {addPoiCoords && (
-        <div
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: 50, background: 'rgba(5,10,20,0.82)', backdropFilter: 'blur(14px)' }}
-          onClick={() => setAddPoiCoords(null)}
-        >
-          <div
-            className="relative flex flex-col gap-4 p-6 rounded-3xl"
-            style={{
-              maxWidth: 480, width: '90%',
-              background: 'rgba(8,15,28,0.97)',
-              border: '1px solid rgba(34,197,94,0.2)',
-              boxShadow: '0 0 60px rgba(34,197,94,0.08), 0 24px 80px rgba(0,0,0,0.7)',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div>
-              <div className="text-xs font-bold mb-1" style={{ color: '#64748b', letterSpacing: 1.5 }}>NEW POINT OF INTEREST</div>
-              <div className="text-lg font-bold text-slate-100">
-                {addPoiCoords[1].toFixed(5)}, {addPoiCoords[0].toFixed(5)}
-              </div>
-            </div>
-
-            {/* POI type grid */}
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color: '#64748b' }}>SELECT TYPE</div>
-              <div className="grid grid-cols-3 gap-2">
-                {POI_CONFIGS.map(cfg => (
-                  <button
-                    key={cfg.type}
-                    onClick={() => setAddPoiType(cfg.type as POIType)}
-                    style={{
-                      padding: '8px 6px', borderRadius: 10, textAlign: 'center',
-                      background: addPoiType === cfg.type ? `${cfg.bg}` : 'rgba(255,255,255,0.03)',
-                      border: `1.5px solid ${addPoiType === cfg.type ? cfg.color : 'rgba(148,163,184,0.1)'}`,
-                      cursor: 'pointer', transition: 'all 0.15s',
-                    }}
-                  >
-                    <div className="text-base mb-1">{POI_ICON[cfg.type] ?? '•'}</div>
-                    <div className="text-[10px] font-semibold leading-tight" style={{ color: addPoiType === cfg.type ? cfg.color : '#64748b' }}>
-                      {cfg.label}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Name input */}
-            <input
-              placeholder="Name (optional)"
-              value={addPoiName}
-              onChange={e => setAddPoiName(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl text-sm text-slate-200"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(148,163,184,0.15)', outline: 'none' }}
-            />
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  handleAddPoi()
-                  setAddPoiCoords(null)
-                  setAddPoiName('')
-                }}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold"
-                style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff', boxShadow: '0 4px 14px rgba(34,197,94,0.35)' }}
-              >
-                Add POI
-              </button>
-              <button
-                onClick={() => setAddPoiCoords(null)}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(148,163,184,0.12)', color: '#64748b' }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <NewPoiModal coords={addPoiCoords} onClose={() => setAddPoiCoords(null)} onCreate={addPoint} />
       )}
     </div>
   )
