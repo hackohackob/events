@@ -81,6 +81,14 @@ function formatDuration(ms?: number): string {
   const s = Math.max(1, Math.round((ms ?? 0) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
+
+// Messages relayed from a PTT channel (Zello, radio) all have a null authorId,
+// so tell their senders apart by origin + handle instead.
+function sameSender(a: EventMessageDto, b: EventMessageDto): boolean {
+  if (a.authorId != null || b.authorId != null) return a.authorId === b.authorId;
+  return a.origin === b.origin && (a.originUser ?? a.authorName) === (b.originUser ?? b.authorName);
+}
+
 function dayLabel(iso: string): string {
   const d = new Date(iso);
   const today = new Date();
@@ -203,7 +211,7 @@ export function EventChatScreen({
       const gapMin = prev ? (new Date(msg.createdAt).getTime() - new Date(prev.createdAt).getTime()) / 60000 : 999;
       const showHeader =
         msg.kind !== "system" &&
-        (!prev || prev.kind === "system" || prev.authorId !== msg.authorId || gapMin > 5);
+        (!prev || prev.kind === "system" || !sameSender(prev, msg) || gapMin > 5);
       const dateSep = !prev || dayLabel(prev.createdAt) !== dayLabel(msg.createdAt) ? dayLabel(msg.createdAt) : null;
       return { msg, showHeader, dateSep, mine };
     });
