@@ -83,6 +83,8 @@ interface ActiveStream {
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_MAX_MS = 60_000;
 const KEEPALIVE_MS = 30_000;
+/** Unanswered keepalives in a row before the connection is declared dead. */
+const KEEPALIVE_MAX_MISSED = 2;
 const REPLY_TIMEOUT_MS = 15_000;
 /** How long an announced image waits for its binary frames before giving up. */
 const IMAGE_TIMEOUT_MS = 20_000;
@@ -105,6 +107,7 @@ export class ZelloClient extends EventEmitter {
   private readonly pendingImages: PendingImage[] = [];
   private readonly streams = new Map<number, ActiveStream>();
   private keepaliveTimer: NodeJS.Timeout | null = null;
+  private missedKeepalives = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempt = 0;
   private stopped = true;
@@ -352,14 +355,34 @@ export class ZelloClient extends EventEmitter {
     }
   }
 
+  /**
+   * Liveness probe. The Channel API has no keepalive command — Zello answers
+   * `unknown command` (confirmed on prod, Sept 2026) — but ANY answer proves
+   * the connection is alive, and Node's built-in WebSocket has no ping() to
+   * ask that any other way. So an error reply counts as success, and only
+   * silence counts against the connection: a half-open socket (Zello or a NAT
+   * dropping it without a close) would otherwise sit "online" forever, relaying
+   * nothing, until someone noticed the radio traffic had stopped.
+   */
   private startKeepalive(): void {
     this.stopKeepalive();
+    this.missedKeepalives = 0;
     this.keepaliveTimer = setInterval(() => {
-      // The reason tells a silent server ("no reply to keepalive") from one
-      // that answers with an error — the two need very different fixes.
-      this.command({ command: "keepalive" }).catch((err: Error) => {
-        this.log("warn", `keepalive not acknowledged: ${err.message}`);
-      });
+      this.command({ command: "keepalive" }).then(
+        () => { this.missedKeepalives = 0; },
+        (err: Error & { noReply?: boolean }) => {
+          if (!err.noReply) {
+            this.missedKeepalives = 0;
+            return;
+          }
+          this.missedKeepalives += 1;
+          this.log("warn", `keepalive: no reply from Zello (${this.missedKeepalives}/${KEEPALIVE_MAX_MISSED})`);
+          if (this.missedKeepalives >= KEEPALIVE_MAX_MISSED && !this.stopped) {
+            this.setState("offline", "Zello stopped answering — reconnecting");
+            this.reopen();
+          }
+        },
+      );
     }, KEEPALIVE_MS);
   }
 
@@ -599,7 +622,7 @@ export class ZelloClient extends EventEmitter {
     return new Promise<ZelloReply>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(seq);
-        reject(new Error(`no reply to ${String(payload.command)}`));
+        reject(Object.assign(new Error(`no reply to ${String(payload.command)}`), { noReply: true }));
       }, REPLY_TIMEOUT_MS);
       this.pending.set(seq, { resolve, reject, timer });
       try {
