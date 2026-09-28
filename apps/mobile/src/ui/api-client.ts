@@ -37,7 +37,7 @@ export class ApiError extends Error {
  * at remote events. Failing fast also hands the payload to the offline queue
  * sooner, which is where it belongs.
  */
-const REQUEST_TIMEOUT_MS = 15_000;
+export const REQUEST_TIMEOUT_MS = 15_000;
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const state = useSessionStore.getState();

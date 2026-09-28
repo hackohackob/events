@@ -1,3 +1,4 @@
+import { REQUEST_TIMEOUT_MS } from "../ui/api-client";
 import type { NetInfoState } from "@react-native-community/netinfo";
 import type { SignalGeneration, SignalNetworkType, SignalSample } from "@events/contracts";
 import { latestNetState, onProbeResult, serverReachable } from "../offline/connectivity";
@@ -95,9 +96,15 @@ onProbeResult((result) => {
 export function noteReportSuccess(roundTripMs: number): void {
   consecutiveFailures = 0;
   if (!Number.isFinite(roundTripMs) || roundTripMs < 0) return;
-  const clamped = Math.min(roundTripMs, 120_000);
+  // Every request is aborted at REQUEST_TIMEOUT_MS, so a longer "round trip"
+  // can't be network time: it is a JS runtime frozen mid-request (Doze, iOS
+  // suspension) — our abort timer stops with it, Date.now() doesn't. At
+  // k3-ultra a third of the samples were such sleeps (up to the old 120 s
+  // clamp), and through the smoothing each one dragged the next few samples
+  // and their bars down too. Drop them; the report itself still succeeded.
+  if (roundTripMs > REQUEST_TIMEOUT_MS) return;
   smoothedRttMs =
-    smoothedRttMs == null ? clamped : smoothedRttMs * (1 - RTT_SMOOTHING) + clamped * RTT_SMOOTHING;
+    smoothedRttMs == null ? roundTripMs : smoothedRttMs * (1 - RTT_SMOOTHING) + roundTripMs * RTT_SMOOTHING;
   rttAt = Date.now();
 }
 

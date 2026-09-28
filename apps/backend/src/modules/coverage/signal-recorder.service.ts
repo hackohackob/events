@@ -180,7 +180,9 @@ export class SignalRecorderService implements OnModuleInit, OnModuleDestroy {
       networkType: textOrNull(signal.networkType),
       generation: textOrNull(signal.generation),
       carrier: textOrNull(signal.carrier, 64),
-      latencyMs: intOrNull(signal.latencyMs, 0, 120_000),
+      // The app aborts every request at 15 s, so anything longer is a phone
+      // that slept mid-request, not network time (older builds still send it).
+      latencyMs: intOrNull(signal.latencyMs, 0, MAX_PLAUSIBLE_LATENCY_MS),
     });
     if (this.buffer.length >= FLUSH_AT_ROWS) void this.flush();
   }
@@ -291,6 +293,9 @@ export class SignalRecorderService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
+
+/** Mirrors the mobile app's REQUEST_TIMEOUT_MS. */
+const MAX_PLAUSIBLE_LATENCY_MS = 15_000;
 
 function intOrNull(value: number | undefined, min: number, max: number): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
