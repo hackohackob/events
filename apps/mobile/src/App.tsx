@@ -8,6 +8,7 @@ import { incidentQueue } from "./incidents/persistent-incident-queue";
 import { flushIncidentQueue } from "./incidents/flush-incidents";
 import { startIncidentReport } from "./incidents/start-report";
 import { useIncidentStore } from "./incidents/incident-store";
+import { hydrateLocationTuning, refreshLocationTuning } from "./location/location-tuning";
 import { startLocationLoop, sendCurrentLocationNow, requestAlwaysLocationPermission, ensureTrackingAlive, flushLocationQueue, resetTransientTrackingBackoff } from "./location/location-tracker";
 import { hideTrackingNotification, consumeInitialNotification } from "./notifications/foreground-notification";
 import { registerPushToken, registerPushTapHandler } from "./notifications/push-registration";
@@ -79,6 +80,7 @@ export default function App() {
   useEffect(() => {
     void hydrate();
     void useSettingsStore.getState().hydrate();
+    void hydrateLocationTuning().then(() => refreshLocationTuning(true));
     void useIncidentReadsStore.getState().hydrate();
     void useZoneVisibilityStore.getState().hydrate();
     // Which incidents have already rung — loaded early so a push arriving
@@ -155,6 +157,7 @@ export default function App() {
         // the dismissal.
         stopIncidentSiren();
         void flushLocationQueue();
+        void refreshLocationTuning();
         void sendCurrentLocationNow();
         // Foregrounding clears transient start failures (e.g. the Android 12+
         // "foreground service start not allowed" hit while bounced to system

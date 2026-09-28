@@ -15,6 +15,15 @@ import { effectiveLocationIntervalMs, useSettingsStore } from "../settings/setti
 import { isBatteryOptimizationIgnored, requestDisableBatteryOptimization } from "./battery-optimization";
 import { getSignalSample, noteReportFailure, noteReportSuccess } from "./signal-probe";
 import { bufferSignalSample, flushSignalBuffer, hydrateSignalBuffer } from "./signal-buffer";
+import { acquireAccurateFix } from "./accurate-fix";
+import { getLocationTuning, hydrateLocationTuning, onLocationTuningChange, applyLocationTuning } from "./location-tuning";
+import {
+  describeFix,
+  flushLocationDiagnostics,
+  locationContext,
+  noteLocationDiag,
+  precisionBlockers,
+} from "./location-diagnostics";
 
 export const LOCATION_TASK_NAME = "background-location-task";
 
@@ -58,7 +67,10 @@ const IOS_IDLE_DISTANCE_FILTER_M = 35;
  */
 function effectiveAccuracy(): ExpoLocation.LocationAccuracy {
   if (navModeActive) return ExpoLocation.Accuracy.BestForNavigation;
-  return useSettingsStore.getState().stationaryMode
+  // Coordinators can overrule the cheap tier from the dashboard: out in the
+  // open there is no Wi-Fi to locate from, and Balanced degrades to a cell
+  // tower — see LocationTuning.stationaryHighAccuracy.
+  return useSettingsStore.getState().stationaryMode && !getLocationTuning().stationaryHighAccuracy
     ? ExpoLocation.Accuracy.Balanced
     : ExpoLocation.Accuracy.High;
 }
@@ -236,7 +248,7 @@ async function readBatteryCharging(): Promise<boolean | undefined> {
  */
 async function sendLocation(
   location: ExpoLocation.LocationObject,
-  opts: { force?: boolean; heartbeat?: boolean } = {},
+  opts: { force?: boolean; heartbeat?: boolean; refined?: boolean; source?: string } = {},
 ): Promise<void> {
   const session = useSessionStore.getState();
   const isMedic = session.role === "medic" || session.role === "paramedic";
@@ -287,6 +299,11 @@ async function sendLocation(
   // otherwise sail through the gate and queue at the OS delivery rate.
   lastSendAt = Date.now();
   lastReportedFixTimestamp = location.timestamp;
+
+  // Only fixes we actually REPORT are judged — judging the throttled ones would
+  // re-measure at the OS delivery rate. The heartbeat resends an old fix and a
+  // refined fix is the answer to a judgement, so neither is judged again.
+  if (isMedic && !opts.heartbeat && !opts.refined) assessFixQuality(location, opts.source ?? "tracking");
 
   const battery = await readBatteryLevel();
   const charging = await readBatteryCharging();
@@ -351,6 +368,7 @@ async function sendLocation(
         fixAgeSec: Math.round((Date.now() - location.timestamp) / 1000),
       });
       useLocationStatus.getState().setReport({ at: Date.now(), ok: true, via: "ws" });
+      void flushLocationDiagnostics();
       return;
     }
 
@@ -371,10 +389,14 @@ async function sendLocation(
     }
     const startedAt = Date.now();
     try {
-      await apiFetch(`/events/${eventId}/medics/${medicId}/location`, {
+      const res = await apiFetch<{ locationTuning?: unknown } | undefined>(`/events/${eventId}/medics/${medicId}/location`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
+      // The coordinator's accuracy knobs ride back on this response — the one
+      // request a medic out in the open makes without opening the app.
+      applyLocationTuning(res?.locationTuning);
+      void flushLocationDiagnostics();
       // The round-trip of this very POST is the survey's throughput evidence —
       // measured on the request we were sending anyway, so it costs no radio
       // time of its own.
@@ -443,6 +465,188 @@ function queueLocation(type: string, payload: Record<string, unknown>, reason: s
   );
   useLocationStatus.getState().setReport({ at: Date.now(), ok: false, via: "queue", error: reason });
 }
+
+// ─── Vague-fix handling ──────────────────────────────────────────────────────
+//
+// A vague fix is still REPORTED (see the note above isMedicSession — a frozen
+// dot is worse than a wide one). What changes is what happens next: it is
+// logged with the context that usually explains it, and a short
+// high-accuracy GPS burst re-measures and reports the better position. Every
+// threshold comes from the coordinator's LocationTuning.
+
+/** While a vague spell lasts, log it again this often (not on every fix). */
+const VAGUE_LOG_EVERY_MS = 5 * 60_000;
+/** A failed re-measure gets this many scheduled follow-ups per vague spell. */
+const MAX_SCHEDULED_REFINES = 2;
+
+let vagueSince = 0;
+let lastVagueLogAt = 0;
+let lastBaselineAt = 0;
+let lastRefineAt = 0;
+let refineInFlight = false;
+let scheduledRefines = 0;
+let refineTimer: ReturnType<typeof setTimeout> | null = null;
+
+function assessFixQuality(location: ExpoLocation.LocationObject, source: string): void {
+  try {
+    const tuning = getLocationTuning();
+    const accuracy = location.coords.accuracy;
+    const now = Date.now();
+
+    if (accuracy == null || accuracy <= tuning.inaccurateThresholdM) {
+      if (vagueSince) {
+        noteLocationDiag("inaccurate_fix", "info", `accuracy recovered: ±${Math.round(accuracy ?? 0)} m after ${Math.round((now - vagueSince) / 1000)} s vague`, {
+          location,
+          data: { source, ...describeFix(location) },
+        });
+        vagueSince = 0;
+        scheduledRefines = 0;
+        if (refineTimer) clearTimeout(refineTimer);
+        refineTimer = null;
+      }
+      if (tuning.baselineSampleMin > 0 && now - lastBaselineAt >= tuning.baselineSampleMin * 60_000) {
+        lastBaselineAt = now;
+        void locationContext().then((ctx) =>
+          noteLocationDiag("baseline", "info", `fix ±${Math.round(accuracy ?? 0)} m (${source})`, {
+            location,
+            data: { source, ...describeFix(location), ...ctx },
+          }),
+        );
+      }
+      return;
+    }
+
+    const firstOfSpell = vagueSince === 0;
+    if (firstOfSpell) vagueSince = now;
+    void locationContext().then((ctx) => {
+      const blockers = precisionBlockers(ctx);
+      if (firstOfSpell || now - lastVagueLogAt >= VAGUE_LOG_EVERY_MS) {
+        lastVagueLogAt = now;
+        noteLocationDiag(
+          "inaccurate_fix",
+          "warn",
+          `vague fix ±${Math.round(accuracy)} m (${source})${blockers.length ? ` — ${blockers.join(", ")}` : ""}`,
+          {
+            location,
+            data: {
+              source,
+              ...describeFix(location),
+              ...ctx,
+              tier: effectiveAccuracyName(),
+              vagueForSec: Math.round((now - vagueSince) / 1000),
+            },
+          },
+        );
+      }
+      // Re-measuring can't beat an "Approximate" permission — the OS snaps
+      // every fix to a grid whatever the radio does.
+      if (ctx.precision === "coarse") return;
+      maybeRefine(location, source);
+    });
+  } catch {
+    // judging a fix must never break reporting it
+  }
+}
+
+function effectiveAccuracyName(): string {
+  const a = effectiveAccuracy();
+  return a === ExpoLocation.Accuracy.BestForNavigation ? "best" : a === ExpoLocation.Accuracy.High ? "high" : "balanced";
+}
+
+function maybeRefine(vague: ExpoLocation.LocationObject, source: string): void {
+  const tuning = getLocationTuning();
+  if (!tuning.retryEnabled || navModeActive || refineInFlight) return;
+  if (Date.now() - lastRefineAt < tuning.retryCooldownSec * 1000) return;
+  void refineVagueFix(vague, source);
+}
+
+/**
+ * Re-measure after a vague fix: a GPS burst of up to `retryTimeoutSec`,
+ * stopping at `retryTargetAccuracyM`. Reports the result only when it is
+ * genuinely better. A burst that comes back empty-handed schedules one more
+ * try after the cooldown (bounded), because on iOS nothing else may arrive to
+ * trigger it — a stationary phone behind a distance filter delivers no more
+ * fixes.
+ */
+async function refineVagueFix(vague: ExpoLocation.LocationObject, source: string): Promise<void> {
+  const tuning = getLocationTuning();
+  refineInFlight = true;
+  lastRefineAt = Date.now();
+  const before = vague.coords.accuracy ?? Number.POSITIVE_INFINITY;
+  try {
+    const result = await acquireAccurateFix({
+      timeoutMs: tuning.retryTimeoutSec * 1000,
+      targetAccuracyM: tuning.retryTargetAccuracyM,
+    });
+    const after = result.best?.coords.accuracy ?? null;
+    const better = result.best != null && after != null && after < before * 0.8;
+    if (better && result.best) {
+      if (result.best.timestamp > lastDeliveredFixTimestamp) {
+        lastDeliveredFixTimestamp = result.best.timestamp;
+        lastDeliveredAt = Date.now();
+      }
+      await sendLocation(result.best, { force: true, refined: true });
+    }
+    const good = after != null && after <= tuning.inaccurateThresholdM;
+    noteLocationDiag(
+      "refine",
+      good ? "info" : "warn",
+      `re-measure ±${Math.round(before)} m → ${after != null ? `±${Math.round(after)} m` : "no fresh fix"} in ${Math.round(result.durationMs / 1000)} s${better ? " (reported)" : ""}`,
+      {
+        location: result.best,
+        data: {
+          source,
+          method: result.method,
+          fixes: result.fixes,
+          cachedSkipped: result.cachedSkipped,
+          reachedTarget: result.reachedTarget,
+          reported: better,
+          error: result.error,
+          ...(await locationContext()),
+        },
+      },
+    );
+    if (!good) scheduleRefineRetry(source);
+    else scheduledRefines = 0;
+  } catch (err) {
+    noteLocationDiag("refine", "error", "re-measure failed", { data: { source, error: describeError(err) } });
+  } finally {
+    refineInFlight = false;
+  }
+}
+
+function scheduleRefineRetry(source: string): void {
+  if (refineTimer || scheduledRefines >= MAX_SCHEDULED_REFINES) return;
+  scheduledRefines += 1;
+  const delay = getLocationTuning().retryCooldownSec * 1000 + 1_000;
+  refineTimer = setTimeout(() => {
+    refineTimer = null;
+    if (!vagueSince || !useSessionStore.getState().token) return;
+    const fix = useLocationStatus.getState().lastFix;
+    const accuracy = fix?.accuracy ?? Number.POSITIVE_INFINITY;
+    if (accuracy <= getLocationTuning().inaccurateThresholdM) return;
+    maybeRefine(
+      {
+        coords: { latitude: fix?.lat ?? 0, longitude: fix?.lng ?? 0, accuracy, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+        timestamp: fix?.at ?? Date.now(),
+      } as ExpoLocation.LocationObject,
+      `${source} (scheduled retry ${scheduledRefines})`,
+    );
+  }, delay);
+}
+
+// A dashboard change to the tier knob only matters while holding a post — and
+// then the running subscriptions must be rebuilt to pick it up.
+onLocationTuningChange((next, previous) => {
+  noteLocationDiag("tuning", "info", `tuning v${next.version} applied`, { data: { ...next } });
+  if (
+    next.stationaryHighAccuracy !== previous.stationaryHighAccuracy &&
+    useSettingsStore.getState().stationaryMode &&
+    useSessionStore.getState().token
+  ) {
+    void refreshTrackingInterval();
+  }
+});
 
 // Newest fix timestamp actually delivered to the server, and when we delivered
 // it — used to collapse the post-Doze backlog flush into a single send and to
@@ -661,6 +865,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
   // someone opened the app. Load what's on disk first; a no-op once hydrated.
   if (!useSessionStore.getState().hydrated) await useSessionStore.getState().hydrate();
   if (!useSettingsStore.getState().hydrated) await useSettingsStore.getState().hydrate();
+  await hydrateLocationTuning();
 
   // No session on disk: the user left the event, but the OS still delivered
   // this task — the stop on leave failed (the known Android NPE) or the task
@@ -724,26 +929,33 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
  * Capture a fix immediately and send it. The background updates task is
  * interval/distance-gated, so on a fresh launch nothing is reported until the
  * device moves — this guarantees an immediate position on app open.
+ *
+ * Used to ask for `Balanced`, i.e. Wi-Fi/cell only on Android — out in the
+ * open that is the kilometre-wide guess medics saw until they opened Google
+ * Maps. Now: a fresh cached fix is sent only if it is also PRECISE; otherwise
+ * a GPS burst runs, the first fresh fix is reported straight away (so the dot
+ * appears), and the burst's best is reported when it lands.
  */
-export async function sendCurrentLocationNow(): Promise<void> {
+export async function sendCurrentLocationNow(
+  opts: { reason?: "one_shot" | "remote_fix"; timeoutMs?: number } = {},
+): Promise<void> {
+  const reason = opts.reason ?? "one_shot";
   try {
     const permission = await ExpoLocation.getForegroundPermissionsAsync();
     if (permission.status !== "granted") {
       debugLog("location", "warn", "one-shot send skipped — no foreground permission");
       return;
     }
-    // Prefer the OS-cached fix only when it's actually fresh. On unlock the
-    // last-known position is the one captured when the screen locked (possibly
-    // far behind, after travelling locked), so sending it teleports the medic to
-    // the lock spot before the real position arrives. If the cache is stale, get
-    // a current fix instead.
+    const tuning = getLocationTuning();
+    // Prefer the OS-cached fix only when it's actually fresh AND precise. On
+    // unlock the last-known position is the one captured when the screen
+    // locked (possibly far behind, after travelling locked), so sending it
+    // teleports the medic to the lock spot before the real position arrives.
     const FRESH_ENOUGH_MS = 20_000;
-    const lastKnown = await ExpoLocation.getLastKnownPositionAsync();
+    const lastKnown = await ExpoLocation.getLastKnownPositionAsync().catch(() => null);
     const fresh = lastKnown && Date.now() - lastKnown.timestamp <= FRESH_ENOUGH_MS;
-    const location = fresh
-      ? lastKnown
-      : await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.Balanced });
-    if (location) {
+    const precise = (lastKnown?.coords.accuracy ?? Number.POSITIVE_INFINITY) <= tuning.inaccurateThresholdM;
+    if (fresh && precise && reason === "one_shot") {
       // Deliberately NOT noteFixReceived(). A one-shot proves the GPS works,
       // not that the continuous subscription is alive — and one fires on every
       // foreground and every silent push, so counting it hid exactly the dead
@@ -752,11 +964,93 @@ export async function sendCurrentLocationNow(): Promise<void> {
       //
       // Explicit intent (app opened, tracking (re)started, debug button) —
       // always report, never wait out the interval.
-      await sendLocation(location, { force: true });
+      await sendLocation(lastKnown, { force: true, source: reason });
+      return;
     }
+
+    let reportedFirst = false;
+    const result = await acquireAccurateFix({
+      timeoutMs: opts.timeoutMs ?? Math.max(15_000, tuning.retryTimeoutSec * 1000),
+      targetAccuracyM: tuning.retryTargetAccuracyM,
+      onFix: (location) => {
+        if (reportedFirst) return;
+        reportedFirst = true;
+        void sendLocation(location, { force: true, refined: true, source: reason });
+      },
+    });
+    const best = result.best ?? (fresh ? lastKnown : null);
+    if (best) await sendLocation(best, { force: true, refined: true, source: reason });
+    const accuracy = best?.coords.accuracy ?? null;
+    const good = accuracy != null && accuracy <= tuning.inaccurateThresholdM;
+    // Every remote request is logged (the coordinator asked); app-open ones
+    // only when they come back vague.
+    if (reason === "remote_fix" || !good) {
+      noteLocationDiag(
+        reason,
+        good ? "info" : "warn",
+        `${reason === "remote_fix" ? "dashboard fix request" : "one-shot"}: ${accuracy != null ? `±${Math.round(accuracy)} m` : "no fresh fix"} in ${Math.round(result.durationMs / 1000)} s`,
+        {
+          location: best,
+          data: {
+            method: result.method,
+            fixes: result.fixes,
+            cachedSkipped: result.cachedSkipped,
+            reachedTarget: result.reachedTarget,
+            usedCached: !result.best && !!best,
+            error: result.error,
+            ...(await locationContext()),
+          },
+        },
+      );
+    }
+    if (reason === "remote_fix") await flushLocationDiagnostics({ urgent: true });
   } catch (err) {
     debugLog("location", "error", "one-shot send failed", String(err));
   }
+}
+
+/**
+ * "Center on me": ALWAYS a fresh measurement, never a cached position. Runs a
+ * GPS burst (see acquireAccurateFix) and streams each improving fix to
+ * `onFix` so the camera can follow it in; the best one is reported to the
+ * server so the dashboard sees the same sharp dot. Returns the best fix plus
+ * any reason the phone cannot do better (Approximate permission, GPS off).
+ */
+export async function locateMeAccurately(
+  onFix: (location: ExpoLocation.LocationObject) => void,
+): Promise<{ best: ExpoLocation.LocationObject | null; blockers: string[] }> {
+  const TARGET_M = 20;
+  const result = await acquireAccurateFix({
+    timeoutMs: 25_000,
+    targetAccuracyM: TARGET_M,
+    onFix: (location, improved) => {
+      if (improved) onFix(location);
+    },
+  });
+  const ctx = await locationContext();
+  const blockers = precisionBlockers(ctx);
+  const best = result.best;
+  if (best && useSessionStore.getState().token) {
+    await sendLocation(best, { force: true, refined: true, source: "locate" });
+  }
+  const accuracy = best?.coords.accuracy ?? null;
+  noteLocationDiag(
+    "locate",
+    accuracy != null && accuracy <= getLocationTuning().inaccurateThresholdM ? "info" : "warn",
+    `center-on-me: ${accuracy != null ? `±${Math.round(accuracy)} m` : "no fresh fix"} in ${Math.round(result.durationMs / 1000)} s${blockers.length ? ` — ${blockers.join(", ")}` : ""}`,
+    {
+      location: best,
+      data: {
+        method: result.method,
+        fixes: result.fixes,
+        cachedSkipped: result.cachedSkipped,
+        reachedTarget: result.reachedTarget,
+        error: result.error,
+        ...ctx,
+      },
+    },
+  );
+  return { best, blockers };
 }
 
 export async function requestAlwaysLocationPermission(): Promise<boolean> {

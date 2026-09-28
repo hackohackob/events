@@ -12,6 +12,7 @@ import { SetMedicRouteDto } from "./dto/set-medic-route.dto";
 import { RegisterParticipantDto } from "./dto/register-participant.dto";
 import { MedicsService } from "./medics.service";
 import { IncidentsService } from "../incidents/incidents.service";
+import { LocationDiagnosticsService } from "../location-diagnostics/location-diagnostics.service";
 
 /** "external_ivan_petrov" → "Ivan Petrov" — readable fallback for external
  *  guests (their slugged userId is derived from the name they typed). */
@@ -28,6 +29,7 @@ export class MedicsController {
   constructor(
     private readonly medicsService: MedicsService,
     private readonly incidentsService: IncidentsService,
+    private readonly locationDiagnostics: LocationDiagnosticsService,
   ) {}
 
   @Get("medics")
@@ -58,9 +60,13 @@ export class MedicsController {
   /**
    * HTTP fallback for background location updates when the WebSocket is not
    * available (e.g. app was killed and restarted by the OS task manager).
+   *
+   * Answers with the current location tuning: this is the one request a medic
+   * out in the open keeps making without ever opening the app, so it is how a
+   * coordinator's change reaches them. (Older builds ignore the body.)
    */
   @Post("medics/:medicId/location")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   async postMedicLocation(
     @Param("eventId") eventId: string,
     @Param("medicId") medicId: string,
@@ -86,6 +92,7 @@ export class MedicsController {
       timestamp: body.timestamp,
     });
     await this.incidentsService.noteNearbyResponderArrivals(eventId, medicId, body.lat, body.lng);
+    return { locationTuning: this.locationDiagnostics.getTuning() };
   }
 
   @Patch("medics/:medicId/assign")

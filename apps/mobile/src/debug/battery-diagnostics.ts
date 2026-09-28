@@ -16,6 +16,7 @@ export type EnergyEventKind =
   | "sendSkippedOffline" // send short-circuited by the connectivity gate (no radio touched)
   | "heartbeat" // cached position resent because the GPS was legitimately quiet
   | "watchdogRestart" // tracking rebuilt because the OS had stopped delivering fixes
+  | "gpsBurst" // a short high-accuracy GPS burst (locate button, vague-fix re-measure)
   | "queueFlush" // a flush pass over the offline location queue
   | "socketConnectError" // socket.io reconnect attempt failed
   | "apiNetworkError" // any apiFetch that died on the network
@@ -29,6 +30,7 @@ export const ENERGY_EVENT_LABELS: Record<EnergyEventKind, string> = {
   sendSkippedOffline: "Sends skipped (offline)",
   heartbeat: "Heartbeats (no GPS)",
   watchdogRestart: "Tracking rebuilds",
+  gpsBurst: "High-accuracy GPS bursts",
   queueFlush: "Queue flush passes",
   socketConnectError: "Socket connect errors",
   apiNetworkError: "API network errors",
@@ -68,6 +70,7 @@ const emptyTotals = (): Record<EnergyEventKind, number> => ({
   sendSkippedOffline: 0,
   heartbeat: 0,
   watchdogRestart: 0,
+  gpsBurst: 0,
   queueFlush: 0,
   socketConnectError: 0,
   apiNetworkError: 0,

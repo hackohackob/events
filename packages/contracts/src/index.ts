@@ -1708,3 +1708,86 @@ export const COVERAGE_MAX_CELLS = 20_000;
 
 /** Default look-back for the coverage map when no range is given, in days. */
 export const COVERAGE_DEFAULT_DAYS = 365;
+
+// ─── Location accuracy tuning & diagnostics ─────────────────────────────────
+//
+// Coordinator-tunable knobs for how the medic app treats a vague fix. They
+// travel to the phone in the response to every background location POST, so a
+// medic out in the open picks up a change without ever opening the app.
+
+export interface LocationTuning {
+  /** A tracked fix vaguer than this (metres) is logged and re-measured. */
+  inaccurateThresholdM: number;
+  /** Run a short high-accuracy GPS burst after an inaccurate fix. */
+  retryEnabled: boolean;
+  /** How long one re-measure burst may keep the GPS on (seconds). */
+  retryTimeoutSec: number;
+  /** The burst stops early once a fix is at least this good (metres). */
+  retryTargetAccuracyM: number;
+  /** Minimum gap between two automatic re-measures (seconds). */
+  retryCooldownSec: number;
+  /** Keep the GPS on even while a medic is "On post" (costs battery). */
+  stationaryHighAccuracy: boolean;
+  /** Upload sampled location diagnostics to the server. */
+  diagnosticsEnabled: boolean;
+  /** Also log one ordinary (good) fix this often, as a baseline (minutes; 0 = off). */
+  baselineSampleMin: number;
+  /** Bumped on every save — the app only re-applies when it changes. */
+  version: number;
+  updatedAt?: string;
+}
+
+export const DEFAULT_LOCATION_TUNING: LocationTuning = {
+  inaccurateThresholdM: 100,
+  retryEnabled: true,
+  retryTimeoutSec: 30,
+  retryTargetAccuracyM: 30,
+  retryCooldownSec: 180,
+  stationaryHighAccuracy: false,
+  diagnosticsEnabled: true,
+  baselineSampleMin: 30,
+  version: 0,
+};
+
+export type LocationDiagKind =
+  | "inaccurate_fix" // a tracked fix came in vaguer than the threshold
+  | "refine" // outcome of an automatic re-measure burst
+  | "locate" // the user pressed "center on me"
+  | "one_shot" // app open / silent ping / remote request one-shot
+  | "remote_fix" // dashboard asked for a precise fix
+  | "baseline" // an ordinary fix, sampled
+  | "tuning" // new tuning applied on the phone
+  | "tracking"; // tracking (re)start / watchdog events worth seeing remotely
+
+export interface LocationDiagEntry {
+  /** Client time (ISO). */
+  at: string;
+  kind: LocationDiagKind;
+  level: "info" | "warn" | "error";
+  message: string;
+  accuracy?: number | null;
+  lat?: number | null;
+  lng?: number | null;
+  /** Free-form structured context (fix age, provider state, permission, …). */
+  data?: Record<string, unknown>;
+}
+
+export interface LocationDiagUpload {
+  medicId: string;
+  name?: string;
+  platform?: string;
+  appVersion?: string;
+  device?: string;
+  entries: LocationDiagEntry[];
+}
+
+export interface LocationDiagRecord extends LocationDiagEntry {
+  id: string;
+  eventId: string;
+  medicId: string;
+  name: string | null;
+  platform: string | null;
+  appVersion: string | null;
+  device: string | null;
+  receivedAt: string;
+}

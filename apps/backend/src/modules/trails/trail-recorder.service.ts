@@ -52,6 +52,11 @@ const MIN_GAP_MS = 10_000;
  *  buildings. Dropped unless nothing has been stored for a heartbeat. */
 const MAX_ACCURACY_M = 150;
 
+/** Hard ceiling, heartbeat or not: a fix this vague (a lone cell tower, a
+ *  Wi-Fi AP geolocated to the wrong town) is not a place the medic was, and
+ *  one of them draws a kilometre-long spike through the replay and the stats. */
+export const HISTORY_MAX_ACCURACY_M = 500;
+
 /** How often the buffer drains. */
 const FLUSH_INTERVAL_MS = 5_000;
 
@@ -104,6 +109,7 @@ export class TrailRecorderService implements OnModuleInit, OnModuleDestroy {
    */
   record(sample: TrailSampleInput): boolean {
     if (!Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) return false;
+    if (sample.accuracy != null && sample.accuracy > HISTORY_MAX_ACCURACY_M) return false;
 
     const atMs = Date.parse(sample.recordedAt);
     if (!Number.isFinite(atMs)) return false;

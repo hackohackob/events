@@ -14,6 +14,7 @@ import { HealthModule } from "./health/health.module";
 import { HospitalsModule } from "./hospitals/hospitals.module";
 import { IncidentsModule } from "./incidents/incidents.module";
 import { InfraModule } from "./infra/infra.module";
+import { LocationDiagnosticsModule } from "./location-diagnostics/location-diagnostics.module";
 import { LocationsModule } from "./locations/locations.module";
 import { MapModule } from "./map/map.module";
 import { MedicsModule } from "./medics/medics.module";
@@ -40,6 +41,7 @@ import { WeatherModule } from "./weather/weather.module";
     EventsModule,
     FieldGuideModule,
     EventUsersModule,
+    LocationDiagnosticsModule,
     LocationsModule,
     MapModule,
     MedicsModule,

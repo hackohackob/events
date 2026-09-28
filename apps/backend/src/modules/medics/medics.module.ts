@@ -8,10 +8,11 @@ import { IncidentsModule } from "../incidents/incidents.module";
 import { EventsModule } from "../events/events.module";
 import { TrailsModule } from "../trails/trails.module";
 import { CoverageModule } from "../coverage/coverage.module";
+import { LocationDiagnosticsModule } from "../location-diagnostics/location-diagnostics.module";
 
 @Module({
   // forwardRef: IncidentsService injects MedicsService (mutual dependency).
-  imports: [NotificationsModule, forwardRef(() => IncidentsModule), EventsModule, TrailsModule, CoverageModule],
+  imports: [NotificationsModule, forwardRef(() => IncidentsModule), EventsModule, TrailsModule, CoverageModule, LocationDiagnosticsModule],
   controllers: [MedicsController],
   providers: [MedicsService, MedicsGateway, MedicSilenceService],
   exports: [MedicsService],

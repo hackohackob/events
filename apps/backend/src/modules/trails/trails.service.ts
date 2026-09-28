@@ -14,6 +14,7 @@ import { DbService } from "../infra/db.service";
 import { RedisService } from "../infra/redis.service";
 import { EventsService } from "../events/events.service";
 import { haversineMeters } from "../routing/geo";
+import { HISTORY_MAX_ACCURACY_M } from "./trail-recorder.service";
 
 interface HistoryRow {
   recorded_at: string | Date;
@@ -186,6 +187,7 @@ export class TrailsService {
       `SELECT recorded_at, lat, lng, speed, battery
          FROM medic_location_history
         WHERE event_id = $1 AND medic_id = $2 AND ${where.sql}
+          AND (accuracy IS NULL OR accuracy <= ${HISTORY_MAX_ACCURACY_M})
         ORDER BY recorded_at ASC`,
       [eventId, medicId, ...where.params],
     );
@@ -258,6 +260,7 @@ export class TrailsService {
          LEFT JOIN medic_last_location l ON l.event_id = h.event_id AND l.medic_id = h.medic_id
          LEFT JOIN event_medics em       ON em.event_id = h.event_id AND em.id::text = h.medic_id
         WHERE h.event_id = $1 AND ${where.sql.replace(/recorded_at/g, "h.recorded_at")}
+          AND (h.accuracy IS NULL OR h.accuracy <= ${HISTORY_MAX_ACCURACY_M})
         GROUP BY h.medic_id, COALESCE(l.name, em.name)
         ORDER BY 2 NULLS LAST`,
       [eventId, ...where.params],

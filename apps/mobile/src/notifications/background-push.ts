@@ -3,7 +3,8 @@ import * as Notifications from "expo-notifications";
 import { shouldRaiseIncidentAlarm } from "./incident-alarm-guard";
 import { playIncidentSiren } from "./incident-siren";
 import { debugLog } from "../debug/debug-log";
-import { rebuildTrackingAfterSilence, sendCurrentLocationNow } from "../location/location-tracker";
+import { ensureTrackingAlive, rebuildTrackingAfterSilence, sendCurrentLocationNow } from "../location/location-tracker";
+import { hydrateLocationTuning, refreshLocationTuning } from "../location/location-tuning";
 import { useSessionStore } from "../security/session-store";
 import { useSettingsStore } from "../settings/settings-store";
 
@@ -90,7 +91,18 @@ TaskManager.defineTask(BACKGROUND_PUSH_TASK, async ({ data, error }) => {
     // event to report to and bails. Hydration is a no-op once it has happened.
     if (!useSessionStore.getState().hydrated) await useSessionStore.getState().hydrate();
     if (!useSettingsStore.getState().hydrated) await useSettingsStore.getState().hydrate();
-    await sendCurrentLocationNow();
+    // `precise` = a coordinator pressed "request precise fix" on the dashboard
+    // (sent as a location_ping so older builds still do something sensible).
+    // Either way the budget is iOS's ~30 s background window.
+    const precise = payload.precise === "1" || (payload as Record<string, unknown>).precise === true;
+    await refreshLocationTuning(true);
+    await sendCurrentLocationNow(precise ? { reason: "remote_fix", timeoutMs: 20_000 } : { timeoutMs: 12_000 });
+    if (precise) {
+      // A healthy tracker doesn't need rebuilding just because someone wanted
+      // a sharper dot — only check it's alive.
+      await ensureTrackingAlive();
+      return 2;
+    }
     // The server only pings after 10+ minutes without a fresh fix, so the
     // continuous subscription is dead or frozen — rebuild it, or this ping buys
     // exactly one position and the phone goes dark again. (The old

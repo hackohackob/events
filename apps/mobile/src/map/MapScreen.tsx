@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   AppState,
@@ -50,6 +51,7 @@ import {
   type MedicActiveResponse,
 } from "./marker-mappers";
 import { LocationScreen } from "../debug/LocationScreen";
+import { locateMeAccurately } from "../location/location-tracker";
 import { DebugScreen } from "../debug/DebugScreen";
 import { useLocationStatus } from "../debug/location-status";
 import { debugLog } from "../debug/debug-log";
@@ -1477,6 +1479,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const markers = useMapStore((state) => state.markers);
   const tracks = useMapStore((state) => state.tracks);
   const centerOnUserRequestId = useMapStore((state) => state.centerOnUserRequestId);
+  // A "center on me" GPS burst is running — the button shows a spinner.
+  const [locating, setLocating] = useState(false);
+  const locatingRef = useRef(false);
   // Field bisect for "the map won't pan" (Debug ▸ Map settings). With nothing
   // switched off and the layer at Default, every branch below behaves exactly
   // as it did before this existed.
@@ -2221,23 +2226,10 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   }, [setMarkers, sessionToken]);
 
   useEffect(() => {
-    const centerOnUser = async () => {
-      const permission = await ExpoLocation.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted") {
-        return;
-      }
-
-      const location = await ExpoLocation.getCurrentPositionAsync({});
-      cameraRef.current?.easeTo({
-        center: [location.coords.longitude, location.coords.latitude],
-        zoom: USER_FOCUS_ZOOM,
-        duration: 450,
-      });
-    };
-
     if (centerOnUserRequestId > 0) {
-      void centerOnUser();
+      void centerOnCurrentPosition();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [centerOnUserRequestId]);
 
   useEffect(() => {
@@ -3173,20 +3165,50 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     if (center) setPendingPoi({ lat: center[1], lng: center[0] });
   }, []);
 
-  const centerOnCurrentPosition = async () => {
+  // Always a FRESH measurement: a bare getCurrentPositionAsync({}) is
+  // Balanced accuracy (Wi-Fi / cell, and a cached fused fix on Android), which
+  // out in the open is the kilometre-off dot that only corrected itself after
+  // Google Maps had switched the GPS on. See acquireAccurateFix.
+  async function centerOnCurrentPosition() {
+    if (locatingRef.current) return; // one burst at a time; it's already coming
     const permission = await ExpoLocation.requestForegroundPermissionsAsync();
     if (permission.status !== "granted") {
       return;
     }
-
-    const location = await ExpoLocation.getCurrentPositionAsync({});
-    cameraRef.current?.easeTo({
-      center: [location.coords.longitude, location.coords.latitude],
-      zoom: USER_FOCUS_ZOOM,
-      padding: { top: 0, bottom: 0, left: 0, right: 0 }, // clear any focus offset
-      duration: 420,
-    });
-  };
+    locatingRef.current = true;
+    setLocating(true);
+    let first = true;
+    try {
+      const { best, blockers } = await locateMeAccurately((location) => {
+        // First fix: fly there at the focus zoom. Each sharper one after
+        // that just re-centres, keeping whatever zoom the user settled on.
+        cameraRef.current?.easeTo({
+          center: [location.coords.longitude, location.coords.latitude],
+          ...(first ? { zoom: USER_FOCUS_ZOOM } : {}),
+          padding: { top: 0, bottom: 0, left: 0, right: 0 }, // clear any focus offset
+          duration: first ? 420 : 300,
+        });
+        first = false;
+      });
+      if (!best) {
+        Alert.alert(
+          "No GPS fix",
+          blockers.length
+            ? `Couldn't get your position: ${blockers.join(", ")}.`
+            : "Couldn't get a fresh position. Move to open sky and try again.",
+        );
+      } else if (blockers.length) {
+        Alert.alert(
+          "Location is imprecise",
+          `Your position is only accurate to ±${Math.round(best.coords.accuracy ?? 0)} m because ${blockers.join(", ")}. ` +
+            "Turn on precise location for Extreme Medics in the phone's settings.",
+        );
+      }
+    } finally {
+      locatingRef.current = false;
+      setLocating(false);
+    }
+  }
 
   const resetMapNorth = async () => {
     const viewState = await mapRef.current?.getViewState();
@@ -4278,7 +4300,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 if (!trackingHealth.ok) setActiveTab("location");
               }}
             >
-              <Feather name="crosshair" size={20} color="#ecf4ff" />
+              {locating ? (
+                <ActivityIndicator size="small" color="#34d399" />
+              ) : (
+                <Feather name="crosshair" size={20} color="#ecf4ff" />
+              )}
               {!trackingHealth.ok ? (
                 <View style={styles.healthBadge}>
                   <Text style={styles.healthBadgeText}>!</Text>
