@@ -125,7 +125,9 @@ jobs:
 
             # Free disk space before pulling new images
             docker system prune -f
-            journalctl --vacuum-size=200M || true
+            # No journal vacuum here: the API logs to journald now, and
+            # trimming it on every deploy would erase the logs of the event
+            # that just ended. journald caps its own size.
 
             docker pull hackohackob1/events-api:latest
             docker pull hackohackob1/events-web:latest

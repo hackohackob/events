@@ -355,8 +355,10 @@ export class ZelloClient extends EventEmitter {
   private startKeepalive(): void {
     this.stopKeepalive();
     this.keepaliveTimer = setInterval(() => {
-      this.command({ command: "keepalive" }).catch(() => {
-        this.log("warn", "keepalive not acknowledged");
+      // The reason tells a silent server ("no reply to keepalive") from one
+      // that answers with an error — the two need very different fixes.
+      this.command({ command: "keepalive" }).catch((err: Error) => {
+        this.log("warn", `keepalive not acknowledged: ${err.message}`);
       });
     }, KEEPALIVE_MS);
   }

@@ -2,6 +2,16 @@ services:
   api:
     image: hackohackob1/events-api:latest
     restart: unless-stopped
+    # Logs go to the host's systemd journal, not Docker's json-file: json-file
+    # logs are deleted with the container, and every deploy recreates it — so
+    # an event's logs vanished the moment anyone deployed after it (k3-ultra,
+    # Sept 2026). `docker logs` still works; history across deploys:
+    #   journalctl CONTAINER_TAG=events-api --since "2026-09-25" --no-pager
+    # (the deploy user needs the systemd-journal group to read it).
+    logging:
+      driver: journald
+      options:
+        tag: events-api
     ports:
       - "8891:8500"
     environment:
