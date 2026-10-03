@@ -305,7 +305,7 @@ export class ZelloClient extends EventEmitter {
             ? `kicked: another client is signed in as "${this.options.username}". ` +
               "Only one connection per Zello account is allowed — check for a second server, " +
               "a local test tool, or the phone app, and give this bridge its own account."
-            : `disconnected (${event.code})`,
+            : `disconnected (code ${event.code}${event.reason ? `, "${event.reason}"` : ""}${event.wasClean ? "" : ", not clean"})`,
         );
         this.scheduleReconnect();
       }
@@ -627,7 +627,9 @@ export class ZelloClient extends EventEmitter {
       this.pending.set(seq, { resolve, reject, timer });
       try {
         socket.send(JSON.stringify(frame));
-        this.log("info", `→ ${redact(frame)}`);
+        // The keepalive goes out every 30 s and was 95% of the API log; it
+        // only earns a line when it goes unanswered (startKeepalive).
+        if (payload.command !== "keepalive") this.log("info", `→ ${redact(frame)}`);
       } catch (err) {
         clearTimeout(timer);
         this.pending.delete(seq);
@@ -657,6 +659,10 @@ export class ZelloClient extends EventEmitter {
   private setState(state: ConnectionState, detail?: string): void {
     // Emitting only on real transitions keeps one-shot listeners honest.
     if (this.state === state && !detail) return;
+    // Every drop and recovery goes into the log with its reason — at Aleko
+    // Steps the bridge reconnected at 04:40 and the log could not say why.
+    if (state === "offline" || state === "error") this.log("warn", `connection ${state}: ${detail ?? "no detail"}`);
+    else if (state === "online" && this.state !== "online") this.log("info", `connection online${detail ? `: ${detail}` : ""}`);
     this.state = state;
     this.emit("state", state, detail);
   }

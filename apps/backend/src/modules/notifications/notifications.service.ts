@@ -83,8 +83,17 @@ function buildMessage(token: string, title: string, body: string, data: Record<s
  * On Android the same message arrives as a data-only FCM message, which the
  * background push task receives without the OS drawing a notification.
  */
-function buildSilentMessage(token: string, data: Record<string, unknown>): PushMessage {
-  return { to: token, data, priority: "normal", _contentAvailable: true };
+function buildSilentMessage(token: string, data: Record<string, unknown>, priority: "normal" | "high" = "normal"): PushMessage {
+  return { to: token, data, priority, _contentAvailable: true };
+}
+
+/**
+ * Tokens carry no platform (every row says "expo"), but `device_id` is
+ * Constants.deviceName, which iOS 16+ reports as plain "iPhone"/"iPad". Used
+ * only to keep a high-priority silent push away from APNs, which rejects it.
+ */
+function looksLikeIos(deviceId: string | null): boolean {
+  return /\bi(phone|pad|pod)\b/i.test(deviceId ?? "");
 }
 
 @Injectable()
@@ -248,13 +257,26 @@ export class NotificationsService implements OnModuleInit {
    * audible; the app's background push task is the only thing that sees it.
    * Returns how many devices were pinged.
    */
-  async sendSilentToUser(userId: string, eventId: string, data: Record<string, unknown>): Promise<number> {
-    const { rows } = await this.db.query<{ token: string }>(
-      `SELECT token FROM push_tokens WHERE user_id = $1 AND event_id = $2`,
+  /**
+   * `urgent` sends Android devices a HIGH-priority FCM message: normal-priority
+   * data messages are held while the phone dozes, which delayed dashboard
+   * "Fix now" answers by ~15 min at Aleko Steps (Oct 2026). iOS stays at
+   * normal regardless — APNs rejects high-priority background pushes.
+   */
+  async sendSilentToUser(
+    userId: string,
+    eventId: string,
+    data: Record<string, unknown>,
+    opts: { urgent?: boolean } = {},
+  ): Promise<number> {
+    const { rows } = await this.db.query<{ token: string; device_id: string | null }>(
+      `SELECT token, device_id FROM push_tokens WHERE user_id = $1 AND event_id = $2`,
       [userId, eventId],
     );
     if (rows.length === 0) return 0;
-    await this.sendMessages(rows.map((r) => buildSilentMessage(r.token, data)));
+    await this.sendMessages(
+      rows.map((r) => buildSilentMessage(r.token, data, opts.urgent && !looksLikeIos(r.device_id) ? "high" : "normal")),
+    );
     return rows.length;
   }
 

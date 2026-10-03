@@ -278,7 +278,7 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
         eventId,
         medicId: id,
         sentAt: new Date().toISOString(),
-      });
+      }, { urgent: true });
     }
     this.logger.log(`Precise-fix request → ${medicIds.length} medic(s), ${devices} device(s) on ${eventId}`);
     return { medics: medicIds.length, devices };
