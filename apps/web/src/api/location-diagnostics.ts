@@ -15,6 +15,12 @@ export interface MedicDiagSummary {
   inaccurate6h: number;
   refineOk6h: number;
   refineFail6h: number;
+  /** Error entries (or entries carrying an error) in the last 24 h. */
+  errors24h: number;
+  lastErrorAt: string | null;
+  lastErrorHint: string | null;
+  /** Standing problems with this phone, in plain language. */
+  problems: string[];
 }
 
 export async function fetchLocationTuning(): Promise<LocationTuning> {

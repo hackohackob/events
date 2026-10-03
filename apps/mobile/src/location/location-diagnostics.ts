@@ -101,6 +101,14 @@ export function describeFix(location: ExpoLocation.LocationObject | null | undef
   };
 }
 
+/**
+ * The same failure repeats on a timer (a phone without "Always" fails every
+ * silent ping, every 5 min) — upload it once per window, then say how many
+ * times it recurred, instead of burying the log in identical lines.
+ */
+const REPEAT_WINDOW_MS = 15 * 60_000;
+const repeats = new Map<string, { at: number; suppressed: number }>();
+
 export function noteLocationDiag(
   kind: LocationDiagKind,
   level: LocationDiagEntry["level"],
@@ -108,8 +116,24 @@ export function noteLocationDiag(
   fields: { location?: ExpoLocation.LocationObject | null; data?: Record<string, unknown> } = {},
 ): void {
   try {
+    // An entry that carries an error IS an error, whatever the caller judged —
+    // the dashboard's error view keys on the level.
+    const error = fields.data?.error as { code?: unknown; message?: unknown } | undefined;
+    if (error != null) level = "error";
     debugLog("location", level, `[diag:${kind}] ${message}`, fields.data);
     if (!getLocationTuning().diagnosticsEnabled) return;
+    if (level === "error") {
+      const key = `${kind}:${String(error?.code ?? message)}`;
+      const seen = repeats.get(key);
+      if (seen && Date.now() - seen.at < REPEAT_WINDOW_MS) {
+        seen.suppressed += 1;
+        return;
+      }
+      repeats.set(key, { at: Date.now(), suppressed: 0 });
+      if (seen?.suppressed) {
+        message = `${message} (repeated ${seen.suppressed}× since the last entry)`;
+      }
+    }
     const c = fields.location?.coords;
     buffer.push({
       at: new Date().toISOString(),

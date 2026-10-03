@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Crosshair, Info, Loader2, LocateFixed, RefreshCw, Save, Smartphone } from 'lucide-react'
+import { AlertTriangle, Crosshair, Info, Loader2, LocateFixed, RefreshCw, Save, Smartphone } from 'lucide-react'
 import type { LocationDiagRecord, LocationTuning } from '@events/contracts'
 import { DEFAULT_LOCATION_TUNING } from '@events/contracts'
 import { fetchEvents } from '@/api/events'
@@ -56,6 +56,18 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 const LEVEL_COLOR: Record<string, string> = { info: '#60a5fa', warn: '#f59e0b', error: '#f87171' }
+
+/** A medic needs attention when the phone has a standing problem or logged errors. */
+function needsAttention(m: MedicDiagSummary): boolean {
+  return m.problems.length > 0 || m.errors24h > 0
+}
+
+const RED = '#f87171'
+
+/** Standing problems, plus one for "has logged errors". */
+function issueCount(m: MedicDiagSummary): number {
+  return m.problems.length + (m.errors24h > 0 ? 1 : 0)
+}
 
 // ─── Tuning form ─────────────────────────────────────────────────────────────
 
@@ -196,6 +208,9 @@ export default function LocationPage() {
     refetchInterval,
   })
 
+  const attention = (summary.data ?? []).filter(needsAttention)
+  const selected = (summary.data ?? []).find(m => m.medicId === medicFilter) ?? null
+
   const nameOf = useMemo(() => {
     const m = new Map((summary.data ?? []).map(s => [s.medicId, s.name]))
     return (id: string, fallback: string | null) => m.get(id) ?? fallback ?? id
@@ -262,6 +277,40 @@ export default function LocationPage() {
         </div>
       )}
 
+      {attention.length > 0 && (
+        <div className="px-8 pt-5">
+          <div className="rounded-2xl px-5 py-4 flex flex-col gap-3" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.22)' }}>
+            <div className="flex items-center gap-2 text-sm font-bold" style={{ color: RED }}>
+              <AlertTriangle className="w-4 h-4" />
+              {attention.length} medic{attention.length === 1 ? '' : 's'} need{attention.length === 1 ? 's' : ''} attention
+            </div>
+            <div className="flex flex-col gap-2">
+              {attention.map(m => (
+                <button
+                  key={m.medicId}
+                  onClick={() => { setMedicFilter(m.medicId); setLevelFilter('problems') }}
+                  className="text-left rounded-xl px-3 py-2 hover:bg-white/5 transition-colors"
+                  style={{ background: medicFilter === m.medicId ? 'rgba(239,68,68,0.08)' : undefined }}
+                >
+                  <div className="text-sm font-semibold text-slate-100">
+                    {m.name ?? m.medicId}
+                    <span className="ml-2 text-xs font-normal" style={{ color: '#64748b' }}>
+                      {[m.platform, m.device].filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                  <ul className="mt-0.5 text-xs leading-relaxed" style={{ color: '#fca5a5' }}>
+                    {m.problems.map(p => <li key={p}>• {p}</li>)}
+                    {m.errors24h > 0 && (
+                      <li>• {m.errors24h} error{m.errors24h === 1 ? '' : 's'} in 24 h{m.lastErrorHint ? ` — last: ${m.lastErrorHint}` : ''}</li>
+                    )}
+                  </ul>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-5 px-8 py-5">
         <TuningCard />
 
@@ -286,6 +335,7 @@ export default function LocationPage() {
                     <th className="px-3 py-2 font-medium">Battery</th>
                     <th className="px-3 py-2 font-medium" title="Vague fixes logged in the last 6 h">Vague</th>
                     <th className="px-3 py-2 font-medium" title="Re-measures that got a good fix / didn't">Re-measure ✓/✗</th>
+                    <th className="px-3 py-2 font-medium" title="Standing problems + errors in the last 24 h">Issues</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -297,7 +347,9 @@ export default function LocationPage() {
                       className="cursor-pointer transition-colors hover:bg-white/5"
                       style={{
                         borderTop: '1px solid rgba(148,163,184,0.06)',
-                        background: medicFilter === m.medicId ? 'rgba(34,197,94,0.06)' : undefined,
+                        background: medicFilter === m.medicId
+                          ? 'rgba(34,197,94,0.06)'
+                          : needsAttention(m) ? 'rgba(239,68,68,0.04)' : undefined,
                       }}
                     >
                       <td className="px-5 py-2.5">
@@ -322,6 +374,16 @@ export default function LocationPage() {
                         <span style={{ color: '#475569' }}> / </span>
                         <span style={{ color: m.refineFail6h ? '#f87171' : '#475569' }}>{m.refineFail6h}</span>
                       </td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap" title={[...m.problems, m.lastErrorHint].filter(Boolean).join('\n')}>
+                        {needsAttention(m) ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold" style={{ background: 'rgba(239,68,68,0.12)', color: RED }}>
+                            <AlertTriangle className="w-3 h-3" />
+                            {issueCount(m)} issue{issueCount(m) === 1 ? '' : 's'}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#475569' }}>—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5 text-right">
                         <button
                           onClick={e => { e.stopPropagation(); precise.mutate(m.medicId) }}
@@ -344,6 +406,43 @@ export default function LocationPage() {
 
       {/* Log */}
       <div className="px-8 pb-8 flex flex-col gap-3">
+        {selected && (
+          <div className="rounded-2xl px-5 py-4 flex flex-wrap items-start justify-between gap-4" style={CARD}>
+            <div className="min-w-0">
+              <div className="text-base font-bold text-slate-100">{selected.name ?? selected.medicId}</div>
+              <div className="text-xs mt-0.5" style={{ color: '#64748b' }}>
+                {[selected.platform, selected.appVersion && `v${selected.appVersion}`, selected.device].filter(Boolean).join(' · ') || 'no diagnostics yet'}
+                {' · last fix '}{ago(selected.lastFixAt)}
+                {selected.lastAccuracy != null && ` (±${Math.round(selected.lastAccuracy)} m)`}
+                {selected.battery != null && ` · battery ${Math.round(selected.battery * 100)}%`}
+              </div>
+              {needsAttention(selected) ? (
+                <ul className="mt-2 text-sm leading-relaxed" style={{ color: '#fca5a5' }}>
+                  {selected.problems.map(p => <li key={p}>• {p}</li>)}
+                  {selected.errors24h > 0 && (
+                    <li>
+                      • {selected.errors24h} error{selected.errors24h === 1 ? '' : 's'} in 24 h, last {ago(selected.lastErrorAt)}
+                      {selected.lastErrorHint ? ` — ${selected.lastErrorHint}` : ''}
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <div className="mt-2 text-sm" style={{ color: '#4ade80' }}>No known problems with this phone</div>
+              )}
+              <div className="mt-2 text-xs" style={{ color: '#64748b' }}>
+                Last 6 h: {selected.inaccurate6h} vague fix{selected.inaccurate6h === 1 ? '' : 'es'} · re-measures {selected.refineOk6h} ✓ / {selected.refineFail6h} ✗
+              </div>
+            </div>
+            <button
+              onClick={() => precise.mutate(selected.medicId)}
+              disabled={precise.isPending}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap disabled:opacity-40"
+              style={{ background: 'rgba(34,197,94,0.08)', color: '#4ade80' }}
+            >
+              <Crosshair className="w-3.5 h-3.5" /> Fix now
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-bold text-slate-100 mr-2">Diagnostics log</h2>
           {medicFilter && (
@@ -359,6 +458,7 @@ export default function LocationPage() {
           </select>
           <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)} className="px-3 py-2 rounded-lg text-xs outline-none" style={INPUT}>
             <option value="" style={{ background: '#0a1424' }}>All levels</option>
+            <option value="problems" style={{ background: '#0a1424' }}>Problems only</option>
             <option value="warn" style={{ background: '#0a1424' }}>Warnings</option>
             <option value="error" style={{ background: '#0a1424' }}>Errors</option>
             <option value="info" style={{ background: '#0a1424' }}>Info</option>
@@ -384,7 +484,7 @@ export default function LocationPage() {
                   onClick={() => setExpanded(x => (x === row.id ? null : row.id))}
                   className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-white/5"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: LEVEL_COLOR[row.level] ?? '#64748b' }} />
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: row.problem ? RED : LEVEL_COLOR[row.level] ?? '#64748b' }} />
                   <span className="text-xs tabular-nums w-[118px] flex-shrink-0" style={{ color: '#64748b' }}>
                     {new Date(row.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
@@ -392,7 +492,10 @@ export default function LocationPage() {
                   <span className="text-[11px] px-2 py-0.5 rounded-md flex-shrink-0" style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}>
                     {KIND_LABEL[row.kind] ?? row.kind}
                   </span>
-                  <span className="text-xs truncate flex-1" style={{ color: row.level === 'info' ? '#cbd5e1' : LEVEL_COLOR[row.level] }}>{row.message}</span>
+                  <span className="text-xs flex-1 min-w-0">
+                    <span className="block truncate" style={{ color: row.problem ? RED : row.level === 'info' ? '#cbd5e1' : LEVEL_COLOR[row.level] }}>{row.message}</span>
+                    {row.hint && <span className="block truncate text-[11px]" style={{ color: '#fca5a5' }}>{row.hint}</span>}
+                  </span>
                   {row.accuracy != null && (
                     <span className="text-xs font-semibold flex-shrink-0" style={{ color: accuracyColor(row.accuracy, threshold) }}>
                       ±{Math.round(row.accuracy)} m
@@ -401,6 +504,9 @@ export default function LocationPage() {
                 </button>
                 {expanded === row.id && (
                   <div className="px-5 pb-3 pl-[30px] flex flex-col gap-2">
+                    {row.hint && (
+                      <div className="text-sm rounded-lg px-3 py-2" style={{ background: 'rgba(239,68,68,0.08)', color: '#fca5a5' }}>{row.hint}</div>
+                    )}
                     <div className="text-xs" style={{ color: '#64748b' }}>
                       {[row.platform, row.appVersion && `v${row.appVersion}`, row.device].filter(Boolean).join(' · ')}
                       {' · received '}{ago(row.receivedAt)}

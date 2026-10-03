@@ -1790,4 +1790,8 @@ export interface LocationDiagRecord extends LocationDiagEntry {
   appVersion: string | null;
   device: string | null;
   receivedAt: string;
+  /** Entry is an error, or carries one (older builds logged errors as warn). */
+  problem?: boolean;
+  /** Plain-language reading of a known error (e.g. iOS "Always" not granted). */
+  hint?: string;
 }

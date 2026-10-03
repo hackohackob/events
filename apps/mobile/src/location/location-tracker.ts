@@ -946,6 +946,16 @@ export async function sendCurrentLocationNow(
       debugLog("location", "warn", "one-shot send skipped — no foreground permission");
       return;
     }
+    // In the background without "Always", the OS refuses every reading
+    // (iOS: kCLErrorDomain error 1) — don't spin up a doomed attempt on each
+    // silent ping; say why once instead.
+    if (AppState.currentState !== "active" && (await ExpoLocation.getBackgroundPermissionsAsync()).status !== "granted") {
+      noteLocationDiag(reason, "error", "no position in the background — no background location permission", {
+        data: { ...(await locationContext()), error: { code: "NO_BACKGROUND_PERMISSION" } },
+      });
+      if (reason === "remote_fix") await flushLocationDiagnostics({ urgent: true });
+      return;
+    }
     const tuning = getLocationTuning();
     // Prefer the OS-cached fix only when it's actually fresh AND precise. On
     // unlock the last-known position is the one captured when the screen
@@ -1079,7 +1089,20 @@ export async function startLocationLoop(): Promise<boolean> {
   if (!session.token) return false;
   const isMedic = session.role === "medic" || session.role === "paramedic";
 
-  if (!(await requestAlwaysLocationPermission())) return false;
+  if (!(await requestAlwaysLocationPermission())) {
+    // The most damaging state a medic's phone can be in, and silent on the
+    // phone itself: no background permission means a dot only while the app
+    // is open (Hrisi and Irena at Aleko Steps). Make it visible remotely.
+    void locationContext().then((ctx) =>
+      noteLocationDiag(
+        "tracking",
+        "error",
+        "tracking not started — no background location permission (\"Always\" / \"Allow all the time\")",
+        { data: ctx },
+      ),
+    );
+    return false;
+  }
 
   // Without a Doze exemption Android throttles the foreground service's network
   // (and often its GPS) once the screen locks, so updates arrive minutes apart

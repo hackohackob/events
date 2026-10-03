@@ -26,6 +26,44 @@ const TUNING_LIMITS: Record<string, [number, number]> = {
   baselineSampleMin: [0, 24 * 60],
 };
 
+/**
+ * Plain-language reading of the location errors phones actually report.
+ * The raw text ("kCLErrorDomain error 1") means nothing to a coordinator.
+ */
+export function explainLocationError(error: unknown): string | undefined {
+  if (error == null) return undefined;
+  const text = typeof error === "string" ? error : JSON.stringify(error);
+  if (/NO_BACKGROUND_PERMISSION/.test(text))
+    return "No background location permission — the phone gives no position while the app is closed";
+  if (/kCLErrorDomain error 1\b/.test(text))
+    return "iOS denied location access — \"Always\" not granted (Settings → Extreme Medics → Location → Always)";
+  if (/kCLErrorDomain error 0\b/.test(text)) return "iOS could not determine a position right now (no GPS/Wi-Fi signal)";
+  if (/SettingsUnsatisfied|location settings/i.test(text)) return "The phone's location settings do not allow a precise position";
+  if (/Unauthorized|permission/i.test(text)) return "No location permission";
+  if (/ERR_LOCATION_UNAVAILABLE|unavailable/i.test(text)) return "The phone returned no position";
+  if (/NullPointerException|SharedPreferences/i.test(text)) return "Known Android background-task bug (NPE) — tracking continues via the direct watch";
+  const message = (error as { message?: unknown })?.message;
+  return typeof message === "string" ? message.split("\n")[0]!.slice(0, 160) : undefined;
+}
+
+/** What is wrong with a phone, judged from the newest context it reported. */
+function describeProblems(ctx: Record<string, unknown> | null, hasPush: boolean): string[] {
+  const out: string[] = [];
+  if (ctx?.background === "denied" || ctx?.background === "undetermined")
+    out.push("No background permission — tracked only while the app is open");
+  if (ctx?.permission && ctx.permission !== "granted") out.push("No location permission");
+  if (ctx?.precision === "coarse") out.push("\"Approximate\" location is on");
+  if (ctx?.servicesOn === false) out.push("Location services are off");
+  if (ctx?.gpsProvider === false) out.push("GPS is off");
+  if (!hasPush) out.push("No push registration — gets no alarms and cannot be woken");
+  return out;
+}
+
+const RECENT_MS = 24 * 60 * 60_000;
+function isRecent(...times: (string | Date | null)[]): boolean {
+  return times.some((t) => t != null && Date.now() - new Date(t).getTime() < RECENT_MS);
+}
+
 export interface MedicDiagSummary {
   medicId: string;
   name: string | null;
@@ -40,6 +78,12 @@ export interface MedicDiagSummary {
   inaccurate6h: number;
   refineOk6h: number;
   refineFail6h: number;
+  /** Error entries (or entries carrying an error) in the last 24 h. */
+  errors24h: number;
+  lastErrorAt: string | null;
+  lastErrorHint: string | null;
+  /** Standing problems with this phone, in plain language. */
+  problems: string[];
 }
 
 @Injectable()
@@ -168,7 +212,8 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
     const values: unknown[] = [params.eventId];
     if (params.medicId) where.push(`medic_id = $${values.push(params.medicId)}`);
     if (params.kind) where.push(`kind = $${values.push(params.kind)}`);
-    if (params.level) where.push(`level = $${values.push(params.level)}`);
+    if (params.level === "problems") where.push(`(level <> 'info' OR data ? 'error')`);
+    else if (params.level) where.push(`level = $${values.push(params.level)}`);
     if (params.before && Number.isFinite(Date.parse(params.before))) where.push(`at < $${values.push(params.before)}`);
     const limit = Math.min(Math.max(params.limit ?? 200, 1), 1_000);
 
@@ -198,6 +243,8 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
       lat: r.lat,
       lng: r.lng,
       data: r.data ?? undefined,
+      problem: r.level === "error" || r.data?.error != null,
+      hint: explainLocationError(r.data?.error),
     }));
   }
 
@@ -218,6 +265,24 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
            FROM location_diagnostics
           WHERE event_id = $1
           ORDER BY medic_id, at DESC
+       ),
+       ctx AS (
+         SELECT DISTINCT ON (medic_id) medic_id, data
+           FROM location_diagnostics
+          WHERE event_id = $1 AND data ? 'permission'
+          ORDER BY medic_id, at DESC
+       ),
+       errs AS (
+         SELECT medic_id, COUNT(*) AS n
+           FROM location_diagnostics
+          WHERE event_id = $1 AND at > now() - interval '24 hours' AND (level = 'error' OR data ? 'error')
+          GROUP BY medic_id
+       ),
+       last_err AS (
+         SELECT DISTINCT ON (medic_id) medic_id, at, message, data->'error' AS error
+           FROM location_diagnostics
+          WHERE event_id = $1 AND (level = 'error' OR data ? 'error')
+          ORDER BY medic_id, at DESC
        )
        SELECT COALESCE(l.medic_id, d.medic_id)         AS medic_id,
               COALESCE(l.name, d.name)                 AS name,
@@ -225,10 +290,16 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
               d.platform, d.app_version, d.device, d.at AS last_diag_at,
               COALESCE(r.inaccurate, 0)  AS inaccurate,
               COALESCE(r.refine_ok, 0)   AS refine_ok,
-              COALESCE(r.refine_fail, 0) AS refine_fail
+              COALESCE(r.refine_fail, 0) AS refine_fail,
+              c.data AS ctx, COALESCE(e.n, 0) AS errors, le.at AS last_err_at, le.message AS last_err_msg, le.error AS last_err,
+              EXISTS (SELECT 1 FROM push_tokens p
+                       WHERE p.event_id = $1 AND p.user_id = COALESCE(l.medic_id, d.medic_id)) AS has_push
          FROM (SELECT * FROM medic_last_location WHERE event_id = $1) l
          FULL OUTER JOIN latest d ON d.medic_id = l.medic_id
          LEFT JOIN recent r ON r.medic_id = COALESCE(l.medic_id, d.medic_id)
+         LEFT JOIN ctx c ON c.medic_id = COALESCE(l.medic_id, d.medic_id)
+         LEFT JOIN errs e ON e.medic_id = COALESCE(l.medic_id, d.medic_id)
+         LEFT JOIN last_err le ON le.medic_id = COALESCE(l.medic_id, d.medic_id)
         ORDER BY 2 NULLS LAST`,
       [eventId],
     );
@@ -246,6 +317,12 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
       inaccurate6h: Number(r.inaccurate),
       refineOk6h: Number(r.refine_ok),
       refineFail6h: Number(r.refine_fail),
+      errors24h: Number(r.errors),
+      lastErrorAt: r.last_err_at ? new Date(r.last_err_at).toISOString() : null,
+      lastErrorHint: r.last_err_at ? explainLocationError(r.last_err) ?? r.last_err_msg : null,
+      // Only phones seen in the last day: a medic from last month's event has
+      // no push token by design, and listing them buries today's problems.
+      problems: isRecent(r.recorded_at, r.last_diag_at) ? describeProblems(r.ctx, r.has_push) : [],
     }));
   }
 
