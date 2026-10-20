@@ -143,7 +143,9 @@ export class MedicSilenceService implements OnModuleInit, OnModuleDestroy {
           eventId: row.event_id,
           medicId: row.medic_id,
           sentAt: new Date(now).toISOString(),
-        });
+        // High priority on Android: a normal-priority data message is held
+        // while the phone dozes, which is exactly when this ping is needed.
+        }, { urgent: true });
         // No registered device — nothing to wake, and no point holding state.
         if (devices === 0) {
           this.pings.delete(key);

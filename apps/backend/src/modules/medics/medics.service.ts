@@ -32,6 +32,12 @@ interface RosterRow {
 }
 
 /** Columns every roster read selects — one list so they cannot drift apart. */
+/** A fix this tight is GPS; one this loose is a cell-tower / Wi-Fi guess. */
+const PRECISE_FIX_M = 40;
+const COARSE_FIX_M = 150;
+/** How long a precise fix outranks coarse ones that arrive after it. */
+const COARSE_HOLD_MS = 2 * 60_000;
+
 const ROSTER_COLUMNS = "id, name, unit, vehicle, vehicle_type, type, skills, capabilities";
 
 function asStringArray(value: unknown): string[] {
@@ -302,6 +308,41 @@ export class MedicsService implements OnModuleInit {
     // Preserve existing status/destination so a location ping doesn't clear an assignment
     const existing = await this.getMedicLastLocation(params.eventId, params.medicId);
 
+    // Which fix wins the live position. A backlog flushed out of order (Doze
+    // wake, offline queue) must not drag the medic back to where they were, and
+    // a coarse cell/Wi-Fi fix must not yank a fresh GPS fix hundreds of metres
+    // away. Either way the ping still counts as proof of life (last_seen_at)
+    // and still refreshes battery. The SQL repeats the ordering check so two
+    // concurrent pings can't race past it.
+    //
+    // A rejected coarse fix leaves recorded_at on the GPS fix it lost to, so
+    // the window is measured from the last good fix: a medic who walks indoors
+    // and only gets coarse fixes moves again after COARSE_HOLD_MS instead of
+    // being pinned to the doorway forever.
+    const incomingAt = Date.parse(recordedAt);
+    // pg hands timestamptz back as a Date despite the string typing; Date.parse
+    // would round-trip it through toString() and drop the milliseconds.
+    const existingAt = existing ? new Date(existing.recordedAt).getTime() : NaN;
+    const outOfOrder = Number.isFinite(existingAt) && incomingAt < existingAt;
+    const coarseOverGps =
+      !!existing &&
+      existing.accuracy != null && existing.accuracy < PRECISE_FIX_M &&
+      params.accuracy != null && params.accuracy > COARSE_FIX_M &&
+      incomingAt - existingAt < COARSE_HOLD_MS;
+    const keepPosition = !!existing && (outOfOrder || coarseOverGps);
+    const fix = keepPosition
+      ? {
+          lat: existing.lat, lng: existing.lng, heading: existing.heading, speed: existing.speed,
+          accuracy: existing.accuracy, recordedAt: existing.recordedAt,
+        }
+      : {
+          lat: params.lat, lng: params.lng, heading: params.heading, speed: params.speed,
+          accuracy: params.accuracy, recordedAt,
+        };
+    // A stale backlog's battery is older than the one we already hold.
+    const battery = outOfOrder ? existing?.battery : params.battery ?? existing?.battery;
+    const charging = outOfOrder ? existing?.charging : params.charging ?? existing?.charging;
+
     const state: MedicState = {
       medicId: params.medicId,
       eventId: params.eventId,
@@ -312,13 +353,13 @@ export class MedicsService implements OnModuleInit {
         existing?.vehicleType ??
         (await this.getMedicById(params.eventId, params.medicId))?.vehicleType ??
         DEFAULT_VEHICLE_TYPE,
-      lat: params.lat,
-      lng: params.lng,
-      heading: params.heading,
-      speed: params.speed,
-      accuracy: params.accuracy,
-      battery: params.battery,
-      charging: params.charging,
+      lat: fix.lat,
+      lng: fix.lng,
+      heading: fix.heading,
+      speed: fix.speed,
+      accuracy: fix.accuracy,
+      battery,
+      charging,
       // Carried on the live state so the dashboard can show a medic's current
       // signal without a second lookup; not persisted — the survey table is the
       // record, this is only the latest value.
@@ -326,7 +367,7 @@ export class MedicsService implements OnModuleInit {
       status: existing?.status ?? "available",
       destination: existing?.destination ?? null,
       route: existing?.route ?? null,
-      recordedAt,
+      recordedAt: fix.recordedAt,
       lastSeenAt: now,
     };
 
@@ -336,23 +377,23 @@ export class MedicsService implements OnModuleInit {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (event_id, medic_id) DO UPDATE SET
          name        = EXCLUDED.name,
-         lat         = EXCLUDED.lat,
-         lng         = EXCLUDED.lng,
-         heading     = EXCLUDED.heading,
-         speed       = EXCLUDED.speed,
-         accuracy    = EXCLUDED.accuracy,
-         battery     = EXCLUDED.battery,
-         charging    = EXCLUDED.charging,
-         recorded_at = EXCLUDED.recorded_at,
+         lat         = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN EXCLUDED.lat ELSE medic_last_location.lat END,
+         lng         = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN EXCLUDED.lng ELSE medic_last_location.lng END,
+         heading     = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN EXCLUDED.heading ELSE medic_last_location.heading END,
+         speed       = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN EXCLUDED.speed ELSE medic_last_location.speed END,
+         accuracy    = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN EXCLUDED.accuracy ELSE medic_last_location.accuracy END,
+         battery     = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN COALESCE(EXCLUDED.battery, medic_last_location.battery) ELSE medic_last_location.battery END,
+         charging    = CASE WHEN EXCLUDED.recorded_at >= medic_last_location.recorded_at THEN COALESCE(EXCLUDED.charging, medic_last_location.charging) ELSE medic_last_location.charging END,
+         recorded_at = GREATEST(medic_last_location.recorded_at, EXCLUDED.recorded_at),
          last_seen_at = EXCLUDED.last_seen_at`,
       [
         params.medicId, params.eventId, params.name,
-        params.lat, params.lng, params.heading ?? null,
-        params.speed ?? null, params.accuracy ?? null, params.battery ?? null,
-        params.charging ?? null,
+        state.lat, state.lng, state.heading ?? null,
+        state.speed ?? null, state.accuracy ?? null, state.battery ?? null,
+        state.charging ?? null,
         state.status, state.destination ? JSON.stringify(state.destination) : null,
         state.route ? JSON.stringify(state.route) : null,
-        recordedAt, now,
+        state.recordedAt, now,
       ],
     );
 
