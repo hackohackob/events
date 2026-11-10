@@ -21,8 +21,20 @@ export class LocationDiagnosticsController {
     return this.service.ingest(eventId, body);
   }
 
+  /**
+   * Everything below describes OTHER people's phones — permissions, battery,
+   * where they were when a fix went wrong. That is a coordinator's business
+   * and nobody else's.
+   */
+  private async assertCoordinator(user: RequestUser, eventId: string): Promise<void> {
+    if (!(await this.service.isCoordinator(eventId, user.userId, user.role))) {
+      throw new ForbiddenException("Only coordinators can see the team's phone diagnostics");
+    }
+  }
+
   @Get("events/:eventId/location-diagnostics")
-  list(
+  async list(
+    @CurrentUser() user: RequestUser,
     @Param("eventId") eventId: string,
     @Query("medicId") medicId?: string,
     @Query("kind") kind?: string,
@@ -30,22 +42,26 @@ export class LocationDiagnosticsController {
     @Query("before") before?: string,
     @Query("limit") limit?: string,
   ) {
+    await this.assertCoordinator(user, eventId);
     return this.service.list({ eventId, medicId, kind, level, before, limit: limit ? Number(limit) : undefined });
   }
 
   @Get("events/:eventId/location-diagnostics/summary")
-  summary(@Param("eventId") eventId: string) {
+  async summary(@CurrentUser() user: RequestUser, @Param("eventId") eventId: string) {
+    await this.assertCoordinator(user, eventId);
     return this.service.summary(eventId);
   }
 
   /** Wake one medic's phone (or all of them) for a fresh high-accuracy fix. */
   @Post("events/:eventId/location-diagnostics/precise-fix")
-  preciseFix(
+  async preciseFix(
     @CurrentUser() user: RequestUser,
     @Param("eventId") eventId: string,
     @Body() body: { medicId?: string },
   ) {
-    if (user.role !== "coordinator") throw new ForbiddenException("Only coordinators can request fixes");
+    if (!(await this.service.isCoordinator(eventId, user.userId, user.role))) {
+      throw new ForbiddenException("Only coordinators can request fixes");
+    }
     return this.service.requestPreciseFix(eventId, body?.medicId || undefined);
   }
 

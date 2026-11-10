@@ -21,6 +21,12 @@ export interface MedicDiagSummary {
   lastErrorHint: string | null;
   /** Standing problems with this phone, in plain language. */
   problems: string[];
+  /** When the server last heard from the phone (a fix or a heartbeat). */
+  lastSeenAt?: string | null;
+  /** A push token is registered — without one the phone gets no alarms. */
+  hasPush?: boolean;
+  /** Reports positions but no diagnostics: a build older than v7.1. */
+  oldBuild?: boolean;
 }
 
 export async function fetchLocationTuning(): Promise<LocationTuning> {

@@ -47,7 +47,10 @@ export function explainLocationError(error: unknown): string | undefined {
 }
 
 /** What is wrong with a phone, judged from the newest context it reported. */
-function describeProblems(ctx: Record<string, unknown> | null, hasPush: boolean): string[] {
+function describeProblems(
+  ctx: Record<string, unknown> | null,
+  phone: { hasPush: boolean; pushError: string | null; appVersion: string | null; newestVersion: string | null },
+): string[] {
   const out: string[] = [];
   if (ctx?.background === "denied" || ctx?.background === "undetermined")
     out.push("No background permission — tracked only while the app is open");
@@ -55,8 +58,28 @@ function describeProblems(ctx: Record<string, unknown> | null, hasPush: boolean)
   if (ctx?.precision === "coarse") out.push("\"Approximate\" location is on");
   if (ctx?.servicesOn === false) out.push("Location services are off");
   if (ctx?.gpsProvider === false) out.push("GPS is off");
-  if (!hasPush) out.push("No push registration — gets no alarms and cannot be woken");
+  if (!phone.hasPush) out.push("No push registration — gets no alarms and cannot be woken");
+  else if (phone.pushError) out.push(`Pushes are failing (${phone.pushError}) — alarms may not arrive`);
+  // A phone that reports a position but has never sent a diagnostic line is
+  // almost certainly on a build from before diagnostics existed (v7.1) — which
+  // also means nothing above can be known about it. At Pushka (Nov 2026) that
+  // was half the team. (A phone that joined a minute ago reads the same until
+  // its first batch lands, hence "most likely".)
+  if (!phone.appVersion) out.push("Reports nothing about itself — most likely an old app version; update the app");
+  else if (phone.newestVersion && compareVersions(phone.appVersion, phone.newestVersion) < 0)
+    out.push(`App ${phone.appVersion} is behind the team's ${phone.newestVersion} — update the app`);
   return out;
+}
+
+/** Numeric semver compare: negative when `a` is older than `b`. Non-numeric parts count as 0. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 const RECENT_MS = 24 * 60 * 60_000;
@@ -84,6 +107,12 @@ export interface MedicDiagSummary {
   lastErrorHint: string | null;
   /** Standing problems with this phone, in plain language. */
   problems: string[];
+  /** When the server last HEARD from the phone (a fix or a heartbeat). */
+  lastSeenAt: string | null;
+  /** A push token is registered — without one the phone gets no alarms. */
+  hasPush: boolean;
+  /** Reports positions but no diagnostics: a build older than v7.1. */
+  oldBuild: boolean;
 }
 
 @Injectable()
@@ -286,7 +315,7 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
        )
        SELECT COALESCE(l.medic_id, d.medic_id)         AS medic_id,
               COALESCE(l.name, d.name)                 AS name,
-              l.recorded_at, l.accuracy, l.battery, l.status,
+              l.recorded_at, l.last_seen_at, l.accuracy, l.battery, l.status,
               d.platform, d.app_version, d.device, d.at AS last_diag_at,
               COALESCE(r.inaccurate, 0)  AS inaccurate,
               COALESCE(r.refine_ok, 0)   AS refine_ok,
@@ -303,6 +332,13 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
         ORDER BY 2 NULLS LAST`,
       [eventId],
     );
+    // What "up to date" means is whatever the newest phone on this event runs —
+    // no version constant to forget to bump on release.
+    const newestVersion = rows
+      .map((r) => r.app_version as string | null)
+      .filter((v): v is string => !!v)
+      .reduce<string | null>((best, v) => (best == null || compareVersions(v, best) > 0 ? v : best), null);
+    const delivery = await this.notifications.deliveryForEvent(eventId).catch(() => new Map());
     return rows.map((r) => ({
       medicId: r.medic_id,
       name: r.name,
@@ -322,8 +358,38 @@ export class LocationDiagnosticsService implements OnModuleInit, OnModuleDestroy
       lastErrorHint: r.last_err_at ? explainLocationError(r.last_err) ?? r.last_err_msg : null,
       // Only phones seen in the last day: a medic from last month's event has
       // no push token by design, and listing them buries today's problems.
-      problems: isRecent(r.recorded_at, r.last_diag_at) ? describeProblems(r.ctx, r.has_push) : [],
+      problems: isRecent(r.recorded_at, r.last_diag_at)
+        ? describeProblems(r.ctx, {
+            hasPush: r.has_push,
+            pushError: delivery.get(r.medic_id)?.ok === false ? delivery.get(r.medic_id)?.error ?? "failed" : null,
+            appVersion: r.app_version,
+            newestVersion,
+          })
+        : [],
+      lastSeenAt: r.last_seen_at ? new Date(r.last_seen_at).toISOString() : null,
+      hasPush: r.has_push === true,
+      oldBuild: !r.app_version && isRecent(r.recorded_at),
     }));
+  }
+
+  /**
+   * May this session see the whole team's phone state? The dashboard signs in
+   * as a coordinator; the mobile app stamps everyone "medic", so there the
+   * answer is the user's global role from `users`, matched through the roster
+   * by name — the same rule the trails module uses.
+   */
+  async isCoordinator(eventId: string, userId: string, sessionRole?: string): Promise<boolean> {
+    if (sessionRole === "coordinator") return true;
+    const { rows } = await this.db
+      .query<{ role: string | null }>(
+        `SELECT u.role
+           FROM event_medics em
+           LEFT JOIN users u ON u.name = em.name
+          WHERE em.event_id = $1 AND em.id::text = $2`,
+        [eventId, userId],
+      )
+      .catch(() => ({ rows: [] as { role: string | null }[] }));
+    return rows[0]?.role === "coordinator";
   }
 
   // ─── Remote requests ───────────────────────────────────────────────────────

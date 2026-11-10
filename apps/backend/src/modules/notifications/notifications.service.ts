@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { DbService } from "../infra/db.service";
 
 interface PushMessage {
@@ -96,14 +96,69 @@ function looksLikeIos(deviceId: string | null): boolean {
   return /\bi(phone|pad|pod)\b/i.test(deviceId ?? "");
 }
 
+/** What became of the last push sent to one device. */
+export interface PushDelivery {
+  at: string;
+  ok: boolean;
+  /** Expo's error code (`DeviceNotRegistered`, `MessageRateExceeded` …) or message. */
+  error?: string;
+}
+
+interface ExpoTicket {
+  status?: "ok" | "error";
+  id?: string;
+  message?: string;
+  details?: { error?: string };
+}
+
+/** Expo accepts up to 100 messages per send and 1000 ids per receipt lookup. */
+const SEND_CHUNK = 100;
+const RECEIPT_CHUNK = 300;
+/** How often accepted pushes are checked for what the carrier did with them. */
+const RECEIPT_SWEEP_MS = 2 * 60_000;
+/** Receipts are not instant; asking sooner just returns nothing. */
+const RECEIPT_MIN_AGE_MS = 45_000;
+/** Expo keeps receipts for about a day; past this an answer is not coming. */
+const RECEIPT_GIVE_UP_MS = 60 * 60_000;
+/** Bound on tickets awaiting a receipt, so a broadcast storm cannot grow it without limit. */
+const MAX_PENDING_RECEIPTS = 5000;
+
+/** Last 8 characters — enough to tell two devices apart in a log, not enough to push. */
+function tokenTail(token: string): string {
+  return token.replace(/\]$/, "").slice(-8);
+}
+
 @Injectable()
-export class NotificationsService implements OnModuleInit {
+export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly expoUrl = "https://exp.host/--/api/v2/push/send";
+  private readonly expoReceiptsUrl = "https://exp.host/--/api/v2/push/getReceipts";
+
+  /**
+   * Whether pushes actually get through, per device token.
+   *
+   * "We have a token" was the only thing this service ever knew, and it is not
+   * the same as "the phone hears us": Expo answers 200 to a send whose token is
+   * dead, and reports the failure in the per-message ticket — or only later, in
+   * the receipt, once Apple/Google have refused it. Both are read now.
+   */
+  private readonly delivery = new Map<string, PushDelivery>();
+  /** Accepted tickets whose receipt has not been read yet: id → device. */
+  private readonly pendingReceipts = new Map<string, { token: string; sentAt: number }>();
+  private receiptTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly db: DbService) {}
 
+  onModuleDestroy() {
+    if (this.receiptTimer) clearInterval(this.receiptTimer);
+    this.receiptTimer = null;
+  }
+
   async onModuleInit() {
+    this.receiptTimer = setInterval(() => void this.sweepReceipts(), RECEIPT_SWEEP_MS);
+    // Never the reason a shutdown hangs.
+    this.receiptTimer.unref?.();
+
     await this.db.query(`
       CREATE TABLE IF NOT EXISTS push_tokens (
         id         BIGSERIAL PRIMARY KEY,
@@ -331,11 +386,32 @@ export class NotificationsService implements OnModuleInit {
     await this.sendMessages(rows.map((r) => buildMessage(r.token, title, body, data, opts)));
   }
 
+  /**
+   * The newest delivery outcome for each user with a device on this event.
+   * Users whose pushes have simply never been attempted are absent.
+   */
+  async deliveryForEvent(eventId: string): Promise<Map<string, PushDelivery>> {
+    const out = new Map<string, PushDelivery>();
+    if (this.delivery.size === 0) return out;
+    const { rows } = await this.db.query<{ user_id: string; token: string }>(
+      `SELECT user_id, token FROM push_tokens WHERE event_id = $1`,
+      [eventId],
+    );
+    for (const row of rows) {
+      const seen = this.delivery.get(row.token);
+      if (!seen) continue;
+      const current = out.get(row.user_id);
+      // Several devices: a failure anywhere is the one worth showing.
+      if (!current || (current.ok && !seen.ok) || (current.ok === seen.ok && seen.at > current.at)) {
+        out.set(row.user_id, seen);
+      }
+    }
+    return out;
+  }
+
   private async sendMessages(messages: PushMessage[]): Promise<void> {
-    // Expo push API accepts up to 100 messages per request
-    const chunkSize = 100;
-    for (let i = 0; i < messages.length; i += chunkSize) {
-      const chunk = messages.slice(i, i + chunkSize);
+    for (let i = 0; i < messages.length; i += SEND_CHUNK) {
+      const chunk = messages.slice(i, i + SEND_CHUNK);
       try {
         const res = await fetch(this.expoUrl, {
           method: "POST",
@@ -347,10 +423,84 @@ export class NotificationsService implements OnModuleInit {
         });
         if (!res.ok) {
           this.logger.warn(`Expo push API returned ${res.status}: ${await res.text()}`);
+          continue;
         }
+        // A 200 only means Expo took the request. Whether each message was
+        // accepted is in its ticket, in the order the messages were sent.
+        const parsed = (await res.json().catch(() => null)) as { data?: ExpoTicket[] } | null;
+        await this.readTickets(chunk, Array.isArray(parsed?.data) ? parsed.data : []);
       } catch (err) {
         this.logger.warn(`Failed to send push notifications: ${(err as Error).message}`);
       }
+    }
+  }
+
+  private async readTickets(sent: PushMessage[], tickets: ExpoTicket[]): Promise<void> {
+    const now = Date.now();
+    for (let i = 0; i < sent.length; i += 1) {
+      const token = sent[i]!.to;
+      const ticket = tickets[i];
+      if (!ticket) continue;
+      if (ticket.status === "ok") {
+        this.delivery.set(token, { at: new Date(now).toISOString(), ok: true });
+        if (ticket.id && this.pendingReceipts.size < MAX_PENDING_RECEIPTS) {
+          this.pendingReceipts.set(ticket.id, { token, sentAt: now });
+        }
+        continue;
+      }
+      await this.noteFailure(token, ticket.details?.error ?? ticket.message ?? "rejected", "ticket");
+    }
+  }
+
+  /**
+   * Ask Expo what Apple/Google did with the pushes it accepted. This is where
+   * a dead token actually surfaces: the ticket for it is usually "ok".
+   */
+  private async sweepReceipts(): Promise<void> {
+    const now = Date.now();
+    const due: string[] = [];
+    for (const [id, entry] of this.pendingReceipts) {
+      const age = now - entry.sentAt;
+      if (age > RECEIPT_GIVE_UP_MS) this.pendingReceipts.delete(id);
+      else if (age >= RECEIPT_MIN_AGE_MS) due.push(id);
+    }
+    for (let i = 0; i < due.length; i += RECEIPT_CHUNK) {
+      const ids = due.slice(i, i + RECEIPT_CHUNK);
+      try {
+        const res = await fetch(this.expoReceiptsUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        if (!res.ok) {
+          this.logger.warn(`Expo receipts API returned ${res.status}`);
+          continue;
+        }
+        const parsed = (await res.json().catch(() => null)) as { data?: Record<string, ExpoTicket> } | null;
+        for (const [id, receipt] of Object.entries(parsed?.data ?? {})) {
+          const entry = this.pendingReceipts.get(id);
+          this.pendingReceipts.delete(id);
+          if (!entry || receipt.status !== "error") continue;
+          await this.noteFailure(entry.token, receipt.details?.error ?? receipt.message ?? "failed", "receipt");
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to read push receipts: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private async noteFailure(token: string, error: string, source: "ticket" | "receipt"): Promise<void> {
+    this.delivery.set(token, { at: new Date().toISOString(), ok: false, error });
+    this.logger.warn(`Push to device …${tokenTail(token)} failed (${source}): ${error}`);
+    // The one failure with a known cure: the token is dead (app uninstalled,
+    // or re-issued). Keeping it means every alarm "goes out" to nobody, and the
+    // dashboard keeps saying the medic is reachable. Dropping it makes them
+    // show up as unregistered until the phone opens the app and re-registers.
+    if (error === "DeviceNotRegistered") {
+      const { rowCount } = await this.db
+        .query(`DELETE FROM push_tokens WHERE token = $1`, [token])
+        .catch(() => ({ rowCount: 0 }));
+      if (rowCount) this.logger.warn(`Dropped dead push registration …${tokenTail(token)}`);
     }
   }
 }

@@ -26,6 +26,8 @@ import { useSessionStore } from "../security/session-store";
 import { isOnline } from "../offline/connectivity";
 import * as Updates from "expo-updates";
 import { APP_VERSION, NATIVE_BUILD, useBuildInfo } from "./build-info";
+import { useRosterStore } from "../security/roster-store";
+import { TeamPhones, TeamTabBar, useTeamPhones } from "./TeamPhones";
 
 const API_BASE_URL = resolveLocalhostUrl(
   process.env.EXPO_PUBLIC_API_URL ?? "https://events-api.hackohackob.com/api",
@@ -95,6 +97,12 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
   const locationQueueSize = useBatteryDiagnostics((s) => s.locationQueueSize);
   const buildInfo = useBuildInfo();
 
+  // Coordinators also get the whole team's phones here. Nobody else even
+  // fetches them — and the server refuses anyone who tries.
+  const isCoordinator = useRosterStore((s) => s.amCoordinator);
+  const [view, setView] = useState<"phone" | "team">("phone");
+  const team = useTeamPhones(isCoordinator);
+
   const [fgPerm, setFgPerm] = useState<string>("?");
   const [bgPerm, setBgPerm] = useState<string>("?");
   const [taskRegistered, setTaskRegistered] = useState<boolean | null>(null);
@@ -163,6 +171,10 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
           <View style={{ width: 36 }} />
         </View>
       ) : null}
+      {isCoordinator ? <TeamTabBar view={view} onChange={setView} attention={team.attention} /> : null}
+      {isCoordinator && view === "team" ? (
+        <TeamPhones state={team} />
+      ) : (
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -306,6 +318,7 @@ export function LocationScreen({ onClose }: { onClose?: () => void }) {
         <EnergyRow kind="reachProbe" windowCounts={windowCounts} totals={energyTotals} />
       </Section>
       </ScrollView>
+      )}
     </View>
   );
 }

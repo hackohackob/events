@@ -57,6 +57,15 @@ const PING_COOLDOWN_BACKOFF_MS = 30 * 60_000;
  */
 const GIVE_UP_AFTER_MS = 6 * 60 * 60_000;
 
+/**
+ * How long a phone's own "I have no background location permission" report is
+ * believed. Long enough to cover an event day; short enough that a phone which
+ * was fixed and then went quiet without ever reporting again gets pinged again.
+ */
+const NO_PERMISSION_TRUST_MS = 24 * 60 * 60_000;
+/** Re-read a medic's permission state at most this often. */
+const PERMISSION_CACHE_MS = 5 * 60_000;
+
 interface PingState {
   /** When we last sent a silent push to this medic. */
   lastPingAt: number;
@@ -70,6 +79,8 @@ interface PingState {
 export class MedicSilenceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MedicSilenceService.name);
   private readonly pings = new Map<string, PingState>();
+  /** medic key → "cannot answer a ping", with when that was last looked up. */
+  private readonly unreachable = new Map<string, { checkedAt: number; value: boolean; logged: boolean }>();
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -138,6 +149,13 @@ export class MedicSilenceService implements OnModuleInit, OnModuleDestroy {
           : PING_COOLDOWN_MS;
         if (state && now - state.lastPingAt < cooldown) continue;
 
+        // A phone without background location permission cannot answer: the
+        // push wakes it, the OS refuses the reading, and it goes back to sleep.
+        // At Pushka (Nov 2026) one such iPhone was pinged 35 times in a day.
+        // The cure is on the phone, and the Location page says so — a push is
+        // not it.
+        if (await this.cannotAnswer(key, row, now)) continue;
+
         const devices = await this.notifications.sendSilentToUser(row.medic_id, row.event_id, {
           kind: "location_ping",
           eventId: row.event_id,
@@ -161,5 +179,48 @@ export class MedicSilenceService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`Medic silence sweep failed: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Has this phone told us it has no background location permission? Read from
+   * the newest diagnostic line that carries the permission state, so granting
+   * "Always" (which the app reports on its next start) turns the pings back on.
+   *
+   * Any failure answers "no" — pinging a phone that cannot reply wastes a
+   * push; not pinging one that could is a medic missing from the map.
+   */
+  private async cannotAnswer(
+    key: string,
+    row: { medic_id: string; event_id: string; name: string | null },
+    now: number,
+  ): Promise<boolean> {
+    const cached = this.unreachable.get(key);
+    if (cached && now - cached.checkedAt < PERMISSION_CACHE_MS) return cached.value;
+    let value = false;
+    try {
+      const { rows } = await this.db.query<{ background: string | null; at: string }>(
+        `SELECT data->>'background' AS background, at
+           FROM location_diagnostics
+          WHERE event_id = $1 AND medic_id = $2 AND data ? 'background'
+          ORDER BY at DESC
+          LIMIT 1`,
+        [row.event_id, row.medic_id],
+      );
+      const latest = rows[0];
+      value =
+        !!latest &&
+        latest.background === "denied" &&
+        now - new Date(latest.at).getTime() < NO_PERMISSION_TRUST_MS;
+    } catch {
+      value = false;
+    }
+    const logged = value && (cached?.logged ?? false);
+    if (value && !logged) {
+      this.logger.log(
+        `Not pinging ${row.name ?? row.medic_id} — the phone reported no background location permission and cannot answer`,
+      );
+    }
+    this.unreachable.set(key, { checkedAt: now, value, logged: value });
+    return value;
   }
 }
