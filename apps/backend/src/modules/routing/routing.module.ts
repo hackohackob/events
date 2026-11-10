@@ -5,6 +5,7 @@ import { MedicsModule } from "../medics/medics.module";
 import { ClosestMedicsService } from "./closest-medics.service";
 import { ExitPointsService } from "./exit-points.service";
 import { GraphHopperClient } from "./graphhopper.client";
+import { LineSnapService } from "./line-snap.service";
 import { RoutingController } from "./routing.controller";
 import { RoutingService } from "./routing.service";
 import { TrackAccessService } from "./track-access.service";
@@ -14,6 +15,6 @@ import { TrackAccessService } from "./track-access.service";
   // closest-medic search) introduces no cycle.
   imports: [EventsModule, MedicsModule, IncidentsModule],
   controllers: [RoutingController],
-  providers: [GraphHopperClient, RoutingService, ExitPointsService, ClosestMedicsService, TrackAccessService],
+  providers: [GraphHopperClient, RoutingService, ExitPointsService, ClosestMedicsService, TrackAccessService, LineSnapService],
 })
 export class RoutingModule {}

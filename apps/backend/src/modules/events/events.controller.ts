@@ -156,6 +156,63 @@ export class EventsController {
     return this.eventsService.removeZone(user.eventId, zoneId);
   }
 
+  // ─── Drawings — sketched on the dashboard, read by the whole team ──────────
+
+  private assertDrawingAccess(user: RequestUser): void {
+    if (user.role === "runner" || user.role === "spectator") {
+      throw new ForbiddenException("Drawings are not available to participants");
+    }
+  }
+
+  @Get("drawings")
+  drawings(@CurrentUser() user: RequestUser) {
+    this.assertDrawingAccess(user);
+    return this.eventsService.listDrawingsForEvent(user.eventId);
+  }
+
+  @Post("drawings")
+  createDrawing(
+    @CurrentUser() user: RequestUser,
+    @Body()
+    body: {
+      name?: string;
+      color?: string;
+      lines: [number, number][][];
+      note?: string | null;
+      dashed?: boolean;
+      snapped?: boolean;
+      visible?: boolean;
+    },
+  ) {
+    this.assertDrawingAccess(user);
+    return this.eventsService.createDrawing(user.eventId, body);
+  }
+
+  @Patch("drawings/:drawingId")
+  updateDrawing(
+    @CurrentUser() user: RequestUser,
+    @Param("drawingId") drawingId: string,
+    @Body()
+    body: {
+      name?: string;
+      color?: string;
+      lines?: [number, number][][];
+      note?: string | null;
+      dashed?: boolean;
+      snapped?: boolean;
+      visible?: boolean;
+    },
+  ) {
+    this.assertDrawingAccess(user);
+    return this.eventsService.updateDrawing(user.eventId, drawingId, body);
+  }
+
+  @Delete("drawings/:drawingId")
+  removeDrawing(@CurrentUser() user: RequestUser, @Param("drawingId") drawingId: string) {
+    this.assertDrawingAccess(user);
+    return this.eventsService.removeDrawing(user.eventId, drawingId);
+  }
+
   // ─── Deployment plan ───────────────────────────────────────────────────────
 
   /** The plan is a coordinator working document — never served to the field. */

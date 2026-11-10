@@ -6,9 +6,11 @@ import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapPin } from 'lucide-react'
 import type { PointOfInterest, POIType } from '@/lib/types'
-import type { EventZone, MedicState, MedicTrail } from '@events/contracts'
+import type { EventDrawing, EventZone, MedicState, MedicTrail, UpdateDrawingRequest } from '@events/contracts'
 import { MEDIC_LATE_AFTER_MS, MEDIC_OFFLINE_AFTER_MS } from '@events/contracts'
 import TrailLayers from '@/components/trails/TrailLayers'
+import DrawingLayers from '@/components/map/drawings/DrawingLayers'
+import type { DrawingDraft } from '@/hooks/useDrawingDraft'
 import { smoothZonePolygon, zoneFeature } from '@/lib/zone-geometry'
 import { POI_CONFIGS } from '@/lib/constants'
 import { PoiIcon } from '@/lib/poi-icons'
@@ -167,6 +169,18 @@ interface MapClientProps {
   trailCursorMs?: number | null
   /** Highlight one trail and fade the rest. */
   trailFocusMedicId?: string | null
+  /** Free-form team drawings to render (hidden-from-team ones are drawn faded). */
+  drawings?: EventDrawing[]
+  /** The drawing tool's state; present whenever the page offers drawing. */
+  drawingDraft?: DrawingDraft
+  /** Colour/dash the in-progress drawing is previewed in. */
+  drawingDraftStyle?: { color: string; dashed: boolean }
+  selectedDrawingId?: string | null
+  onSelectDrawing?: (id: string | null) => void
+  onUpdateDrawing?: (id: string, patch: UpdateDrawingRequest) => void
+  onDeleteDrawing?: (drawing: EventDrawing) => void
+  /** Frame a drawing on the map; the nonce re-triggers for the same one. */
+  drawingFocus?: { id: string; nonce: number } | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1295,7 +1309,19 @@ export default function MapClient({
   trails = [],
   trailCursorMs = null,
   trailFocusMedicId = null,
+  drawings = [],
+  drawingDraft,
+  drawingDraftStyle,
+  selectedDrawingId = null,
+  onSelectDrawing,
+  onUpdateDrawing,
+  onDeleteDrawing,
+  drawingFocus = null,
 }: MapClientProps) {
+  // The drawing tool owns every click on the map while it is open.
+  const drawingToolOpen = drawingDraft?.phase === 'drawing'
+  const drawingToolOpenRef = useRef(false)
+  drawingToolOpenRef.current = drawingToolOpen
   const mapRef = useRef<MapRef>(null)
   const [liveZoom, setLiveZoom] = useState(zoom)
 
@@ -1443,6 +1469,7 @@ export default function MapClient({
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
+      if (drawingToolOpenRef.current) return
       if (pickLocationActive && onPickLocation) {
         onPickLocation([e.lngLat.lng, e.lngLat.lat])
         return
@@ -1517,7 +1544,7 @@ export default function MapClient({
       mapStyle={styleFor(applied.base, applied.is3d)}
       maxPitch={70}
       style={{ width: '100%', height: '100%' }}
-      cursor={zoneDrawActive ? 'crosshair' : interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
+      cursor={zoneDrawActive || drawingToolOpen ? 'crosshair' : interactivePOI && selectedPOIType ? 'crosshair' : 'grab'}
       onClick={handleClick}
       onLoad={handleLoad}
       onMoveEnd={(e) => setLiveZoom(e.viewState.zoom)}
@@ -1532,6 +1559,7 @@ export default function MapClient({
       attributionControl={false}
       onContextMenu={(e: MapLayerMouseEvent) => {
         e.preventDefault?.()
+        if (drawingToolOpenRef.current) return
         if (onAddPoi) onAddPoi([e.lngLat.lng, e.lngLat.lat])
       }}
     >
@@ -1618,6 +1646,23 @@ export default function MapClient({
           />
         </Source>
       ))}
+
+      {/* Team drawings + the drawing tool. After the tracks so a line traced
+          along the course sits on top of it, not underneath. */}
+      {(drawings.length > 0 || drawingDraft) && onSelectDrawing && onUpdateDrawing && onDeleteDrawing && (
+        <DrawingLayers
+          drawings={drawings}
+          selectedId={selectedDrawingId}
+          onSelect={onSelectDrawing}
+          onUpdate={onUpdateDrawing}
+          onDelete={onDeleteDrawing}
+          draft={drawingDraft}
+          draftStyle={drawingDraftStyle}
+          focus={drawingFocus}
+          zoom={liveZoom}
+          stackKey={visibleTracks.map(t => `${t.id}:${t.coordinates.length}`).join('|')}
+        />
+      )}
 
       {/* Km distance chips — above the track lines, below every live marker. */}
       {kmMarksVisible && kmMarks.map(mark => (

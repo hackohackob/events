@@ -525,6 +525,79 @@ export interface UpdateZoneRequest {
   alarm?: boolean;
 }
 
+// ─── Drawings ────────────────────────────────────────────────────────────────
+
+/**
+ * A free-form sketch on the map: a way round a hard stretch of course, an
+ * arrow, a ring round a hazard, a line that says "do not cross". One drawing is
+ * one or more strokes sharing a name, colour and note.
+ *
+ * Drawn on the dashboard only; the field apps display them and never edit them.
+ * Team-only, exactly like {@link EventZone}: the API and the realtime
+ * broadcasts are both closed to participants.
+ */
+export interface EventDrawing {
+  id: string;
+  eventId: string;
+  /** Shown as the map label. Empty = an unlabelled sketch. */
+  name: string;
+  /** Display colour (hex). */
+  color: string;
+  /** The strokes, each a `[lng, lat]` line in drawing order. */
+  lines: [number, number][][];
+  /** Free-text guidance shown with the drawing ("4x4 only", "closed after rain"). */
+  note?: string | null;
+  /** Dashed instead of solid — reads as "alternative", not "the course". */
+  dashed: boolean;
+  /** Total length along every stroke, metres — computed server-side. */
+  distanceMeters: number;
+  /** True when at least one stroke was snapped to the road/path network. */
+  snapped: boolean;
+  /** Shown on team maps. A hidden drawing stays in the dashboard list as a draft. */
+  visible: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDrawingRequest {
+  name?: string;
+  color?: string;
+  lines: [number, number][][];
+  note?: string | null;
+  dashed?: boolean;
+  snapped?: boolean;
+  visible?: boolean;
+}
+
+export interface UpdateDrawingRequest {
+  name?: string;
+  color?: string;
+  lines?: [number, number][][];
+  note?: string | null;
+  dashed?: boolean;
+  snapped?: boolean;
+  visible?: boolean;
+}
+
+/** Network a drawn line may be snapped to. */
+export type SnapProfile = "foot" | "rescue_4x4" | "car";
+
+/** `POST /routing/snap-line` — pull a rough line onto the road/path network. */
+export interface SnapLineRequest {
+  /** Waypoints to pass through in order, `[lng, lat]` (2–25). */
+  points: [number, number][];
+  profile?: SnapProfile;
+}
+
+export interface SnapLineResponse {
+  /** False when no usable road was found — `coordinates` is then the input. */
+  snapped: boolean;
+  coordinates: [number, number][];
+  distanceMeters: number;
+  /** Why the line was left as drawn, for the dashboard to say so. */
+  reason?: "no_road_nearby" | "no_route" | "engine_unavailable";
+}
+
 // ─── Legacy location (kept for backwards compat) ─────────────────────────────
 
 export interface LocationUpdate {

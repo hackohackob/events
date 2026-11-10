@@ -96,8 +96,12 @@ import { PoiIcon } from "./poi-icons";
 import { POI_TYPES } from "./poi-types";
 import { useForegroundInterval } from "../ui/useForegroundInterval";
 import { OfflineControlButton } from "./OfflineControlButton";
-import type { EventZone, VehicleType } from "@events/contracts";
+import type { EventDrawing, EventZone, VehicleType } from "@events/contracts";
 import { useZonesStore } from "./zones/zones-store";
+import { useDrawingsStore } from "./drawings/drawings-store";
+import { DrawingsLayer } from "./drawings/DrawingsLayer";
+import { DrawingsList } from "./drawings/DrawingsList";
+import { boundsOf, type LngLat as DrawingLngLat } from "./drawings/drawing-geometry";
 import { useZoneDrawStore } from "./zones/zone-draw-store";
 import { ZonesLayer } from "./zones/ZonesLayer";
 import { ZoneSketchLayer } from "./zones/ZoneSketchLayer";
@@ -191,7 +195,7 @@ const TRACK_STUDIO_CAMERA_PADDING = {
 
 type AppViewMode = "runner" | "paramedic";
 /** Tabs inside the layers popup — keeps zones/tracks from bloating one list. */
-type LayersTab = "layers" | "tracks" | "zones";
+type LayersTab = "layers" | "tracks" | "zones" | "drawings";
 
 interface EventTrackResponse {
   id: string;
@@ -1520,6 +1524,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
   const sessionRole = useSessionStore((state) => state.role);
   const isTeamRole = sessionRole !== "runner" && sessionRole !== "spectator";
   const zones = useZonesStore((state) => state.zones);
+  // Team drawings from the dashboard — display only. The tab appears once the
+  // coordinators have actually shared one.
+  const sharedDrawingCount = useDrawingsStore((state) => state.drawings.filter((d) => d.visible).length);
   // Per-device zone visibility (the layers switch writes here, not to the server).
   const zoneOverrides = useZoneVisibilityStore((state) => state.overrides);
   const zoneDrawPhase = useZoneDrawStore((state) => state.phase);
@@ -1836,11 +1843,14 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     void refreshIncidents();
     void loadRoster();
     if (isTeamRole) void useZonesStore.getState().load();
+    if (isTeamRole) void useDrawingsStore.getState().load();
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "active") {
         void refreshActiveMedics();
         void refreshIncidents();
         if (isTeamRole) void useZonesStore.getState().load();
+        // Also the catch-up for drawings changed while the socket was down.
+        if (isTeamRole) void useDrawingsStore.getState().load();
       }
     });
     return () => sub.remove();
@@ -2203,6 +2213,11 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
     socket.on("zone.updated", (zone: EventZone) => useZonesStore.getState().upsert(zone));
     socket.on("zone.removed", (payload: { id: string }) => useZonesStore.getState().remove(payload.id));
 
+    // Team drawings — made on the dashboard, same medic-only room as zones.
+    socket.on("drawing.created", (drawing: EventDrawing) => useDrawingsStore.getState().upsert(drawing));
+    socket.on("drawing.updated", (drawing: EventDrawing) => useDrawingsStore.getState().upsert(drawing));
+    socket.on("drawing.removed", (payload: { id: string }) => useDrawingsStore.getState().remove(payload.id));
+
     return () => {
       setMapFeedOwnedByScreen(false);
       if (locationFlushTimer != null) clearTimeout(locationFlushTimer);
@@ -2220,6 +2235,9 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
       socket.off("zone.created");
       socket.off("zone.updated");
       socket.off("zone.removed");
+      socket.off("drawing.created");
+      socket.off("drawing.updated");
+      socket.off("drawing.removed");
     };
     // Re-subscribe when the session token changes: getSocket() reconnects with
     // the new identity, so we must re-attach listeners to the fresh socket.
@@ -3797,6 +3815,8 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
 
         {/* Team zones (medic-only) + the live freehand sketch while drawing. */}
         {isTeamRole ? <ZonesLayer zones={zones} /> : null}
+        {/* Team drawings from the dashboard (display only). */}
+        {isTeamRole ? <DrawingsLayer zoom={mapZoom} /> : null}
         {isTeamRole ? <ZoneSketchLayer /> : null}
 
         {/* Hospital pins — only while the hospitals drawer is open. */}
@@ -4523,6 +4543,7 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
               { key: "layers", label: "Layers" },
               { key: "tracks", label: "Tracks" },
               ...(isTeamRole ? [{ key: "zones", label: "Zones" } as const] : []),
+              ...(isTeamRole && sharedDrawingCount > 0 ? [{ key: "drawings", label: "Drawings" } as const] : []),
             ] as Array<{ key: LayersTab; label: string }>).map(({ key, label }) => {
               const active = layersTab === key;
               return (
@@ -4713,6 +4734,22 @@ export function MapScreen({ viewMode }: { viewMode: AppViewMode }) {
                 <Text style={styles.drawZoneButtonText}>Draw zone</Text>
               </Pressable>
             </>
+          ) : null}
+
+          {/* Team drawings — what the coordinators sketched, with their notes. */}
+          {layersTab === "drawings" && isTeamRole ? (
+            <DrawingsList
+              onOpen={(drawing) => {
+                const bounds = boundsOf(drawing.lines as DrawingLngLat[][]);
+                if (!bounds) return;
+                setLayersOpen(false);
+                setMenuOpen(false);
+                cameraRef.current?.fitBounds(bounds, {
+                  padding: { top: 120, right: 48, bottom: 160, left: 48 },
+                  duration: 620,
+                });
+              }}
+            />
           ) : null}
 
           {layersTab === "tracks" ? (

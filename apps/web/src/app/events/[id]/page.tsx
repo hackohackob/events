@@ -25,6 +25,11 @@ import { useEventChat } from '@/hooks/useEventChat'
 import { useParticipants } from '@/hooks/useParticipants'
 import { useZones } from '@/hooks/useZones'
 import ZonesPanel from '@/components/map/ZonesPanel'
+import { useDrawings } from '@/hooks/useDrawings'
+import { useDrawingDraft } from '@/hooks/useDrawingDraft'
+import DrawingToolbar, { type DrawingSaveInput } from '@/components/map/drawings/DrawingToolbar'
+import DrawingsPanel from '@/components/map/drawings/DrawingsPanel'
+import { DEFAULT_DRAWING_COLOR } from '@/components/map/drawings/drawing-style'
 import TracksPanel, { TrackElevationOverlay } from '@/components/map/TracksPanel'
 import TrailsPanel from '@/components/trails/TrailsPanel'
 import { TRAIL_WINDOWS, type TrailWindow } from '@/api/trails'
@@ -35,7 +40,7 @@ import { PoiIcon } from '@/lib/poi-icons'
 import { fetchGpxTrack, type GpxTrack } from '@/lib/gpx'
 import { getMedicRoster } from '@/api/medics'
 import { createPoi, updatePoi, archivePoi } from '@/api/events'
-import type { EventMedic, MedicState } from '@events/contracts'
+import type { EventDrawing, EventMedic, MedicState } from '@events/contracts'
 import { medicPresence } from '@events/contracts'
 import type { PointOfInterest, POIType } from '@/lib/types'
 
@@ -251,8 +256,11 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   // Individually hidden tracks (Layers → Tracks). Kept as the *hidden* set so a
   // track that appears later (GPX still loading, day filter change) is visible.
   const [hiddenTrackIds, setHiddenTrackIds] = useState<string[]>([])
-  // Track whose elevation profile is open as a strip over the map, plus the
-  // point currently hovered on that profile (marked on the track).
+  // The one track being VIEWED, if any: alone on the map, framed, with its
+  // elevation profile open as a strip across the bottom. A single id on purpose
+  // — the course on the map and the profile under it are the same choice and
+  // cannot drift apart. Plus the point hovered on that profile (marked on the
+  // track).
   const [profileTrackId, setProfileTrackId] = useState<string | null>(null)
   const [elevHoverCoord, setElevHoverCoord] = useState<[number, number] | null>(null)
   // Km distance chips along tracks + their spacing (km). Tucked into a closed
@@ -277,6 +285,8 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const [baseLayer, setBaseLayer] = useState<BaseLayer>('streets')
   const [map3d, setMap3d] = useState(false)
   const [layersOpen, setLayersOpen] = useState(true)
+  // What the Layers panel was doing before the drawing tool borrowed its space.
+  const layersOpenBeforeDrawing = useRef<boolean | null>(null)
   // -1 = All days, 0+ = specific day index
   const [selectedDayIdx, setSelectedDayIdx] = useState<number>(-1)
   const [addPoiCoords, setAddPoiCoords] = useState<[number, number] | null>(null)
@@ -289,6 +299,69 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const { zones, createZone, updateZone: patchZone, removeZone } = useZones(id)
   const [zoneDraw, setZoneDraw] = useState(false)
   const [pendingZonePolygon, setPendingZonePolygon] = useState<[number, number][] | null>(null)
+
+  // Free-form team drawings (ways round hard sections, arrows, lines not to
+  // cross). Made here only; the field apps just display them.
+  const { drawings, createDrawing, updateDrawing: patchDrawing, removeDrawing, restoreDrawing } = useDrawings(id)
+  const drawingDraft = useDrawingDraft()
+  const [showDrawings, setShowDrawings] = useState(true)
+  const [drawingStyle, setDrawingStyle] = useState({ color: DEFAULT_DRAWING_COLOR, dashed: false })
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const [drawingFocus, setDrawingFocus] = useState<{ id: string; nonce: number } | null>(null)
+  // One-line confirmation under the Draw button: "saved", or "deleted · Undo".
+  const [drawingToast, setDrawingToast] = useState<
+    { id: number; text: string; undo?: EventDrawing } | null
+  >(null)
+  useEffect(() => {
+    if (!drawingToast) return
+    const t = setTimeout(() => setDrawingToast(null), drawingToast.undo ? 7000 : 3200)
+    return () => clearTimeout(t)
+  }, [drawingToast])
+
+  // Opening the tool clears the stage: no zone sketch, no selected drawing,
+  // and the Layers panel folds away so the toolbar has the top of the map.
+  const drawingPhase = drawingDraft.phase
+  useEffect(() => {
+    if (drawingPhase === 'idle') {
+      if (layersOpenBeforeDrawing.current !== null) {
+        setLayersOpen(layersOpenBeforeDrawing.current)
+        layersOpenBeforeDrawing.current = null
+      }
+      return
+    }
+    if (layersOpenBeforeDrawing.current === null) {
+      setLayersOpen(prev => {
+        layersOpenBeforeDrawing.current = prev
+        return false
+      })
+    }
+    setZoneDraw(false)
+    setPendingZonePolygon(null)
+    setSelectedDrawingId(null)
+    setShowDrawings(true)
+  }, [drawingPhase])
+
+  async function saveDrawing({ name, note, visible }: DrawingSaveInput) {
+    const created = await createDrawing({
+      name,
+      note: note || null,
+      color: drawingStyle.color,
+      dashed: drawingStyle.dashed,
+      lines: drawingDraft.lines,
+      snapped: drawingDraft.snappedAny,
+      visible,
+    })
+    if (!created) throw new Error('not saved')
+    drawingDraft.reset()
+    setShowDrawings(true)
+    setDrawingToast({ id: Date.now(), text: visible ? 'Saved — now on the team’s maps' : 'Saved as a draft — hidden from the team' })
+  }
+
+  function deleteDrawing(drawing: EventDrawing) {
+    setSelectedDrawingId(null)
+    void removeDrawing(drawing.id)
+    setDrawingToast({ id: Date.now(), text: `Deleted ${drawing.name ? `“${drawing.name}”` : 'drawing'}`, undo: drawing })
+  }
 
   // POI edits are broadcast to the field over WS, but the dashboard reads its
   // points off the event document — so refetch it after every change.
@@ -498,10 +571,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   // Per-track visibility (Layers → Tracks). Tracks not listed here are hidden;
   // anything newly discovered defaults to visible.
   const trackIds = allTracks.map(t => t.id)
+  // A viewed track is alone on the map; otherwise everything not hidden shows.
+  // Keyed on the resolved track, not the raw id, so a day filter that removes
+  // the viewed course falls back to all tracks instead of an empty map.
+  const viewedTrackId = profileTrack?.id ?? null
   const visibleTrackIds = useMemo(
-    () => new Set(trackIds.filter(id => !hiddenTrackIds.includes(id))),
+    () => new Set(viewedTrackId ? [viewedTrackId] : trackIds.filter(id => !hiddenTrackIds.includes(id))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [trackIds.join('|'), hiddenTrackIds],
+    [trackIds.join('|'), hiddenTrackIds, viewedTrackId],
   )
 
   // Every point of the event as the map/drawer model. The server id is carried
@@ -529,10 +606,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   const selectedPoi = allPoiPoints.find(p => p.id === selectedPoiId) ?? null
 
   const mapFitBounds = useMemo(() => {
-    const coords: [number, number][] = [
-      ...allTracks.flatMap(t => t.coordinates),
-      ...mapPois.map(p => p.coordinates),
-    ]
+    // Viewing one track frames that course; otherwise the whole event.
+    const viewed = allTracks.find(t => t.id === profileTrackId)
+    const coords: [number, number][] = viewed && viewed.coordinates.length > 0
+      ? viewed.coordinates
+      : [
+          ...allTracks.flatMap(t => t.coordinates),
+          ...mapPois.map(p => p.coordinates),
+        ]
     if (coords.length === 0) return undefined
     const lngs = coords.map(c => c[0])
     const lats = coords.map(c => c[1])
@@ -540,7 +621,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
       [Math.min(...lngs), Math.min(...lats)],
       [Math.max(...lngs), Math.max(...lats)],
     ] as [[number, number], [number, number]]
-  }, [allTracks, mapPois])
+  }, [allTracks, mapPois, profileTrackId])
 
   if (isLoading) {
     return (
@@ -1280,7 +1361,52 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             trails={trailsEnabled ? trails : []}
             trailCursorMs={trailCursorMs}
             trailFocusMedicId={trailFocusMedicId}
+            drawings={showDrawings ? drawings : []}
+            drawingDraft={drawingDraft}
+            drawingDraftStyle={drawingStyle}
+            selectedDrawingId={selectedDrawingId}
+            onSelectDrawing={setSelectedDrawingId}
+            onUpdateDrawing={(drawingId, patch) => void patchDrawing(drawingId, patch)}
+            onDeleteDrawing={deleteDrawing}
+            drawingFocus={drawingFocus}
           />
+
+          {/* Drawing tool: the Draw button, the toolbar, the save card. Steps
+              aside while another "click the map" mode has the floor. */}
+          {!zoneDraw && !pendingZonePolygon && !movingIncident && !movingPoi && (
+            <DrawingToolbar
+              draft={drawingDraft}
+              style={drawingStyle}
+              onStyleChange={setDrawingStyle}
+              onSave={saveDrawing}
+            />
+          )}
+          {drawingToast && drawingDraft.phase === 'idle' && (
+            <div
+              key={drawingToast.id}
+              className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2.5 pl-3.5 pr-1.5 rounded-full text-xs font-semibold fade-in"
+              style={{
+                top: 60, zIndex: 20, height: 34, maxWidth: 'calc(100% - 24px)',
+                background: 'rgba(10,18,34,0.94)', backdropFilter: 'blur(16px)',
+                border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 36px rgba(0,0,0,0.5)', color: '#e2e8f0',
+              }}
+            >
+              <span className="truncate pr-2">{drawingToast.text}</span>
+              {drawingToast.undo && (
+                <button
+                  onClick={() => {
+                    const drawing = drawingToast.undo!
+                    setDrawingToast(null)
+                    void restoreDrawing(drawing)
+                  }}
+                  className="px-2.5 rounded-full font-bold flex-shrink-0"
+                  style={{ height: 24, background: 'rgba(249,115,22,0.2)', color: '#fb923c' }}
+                >
+                  Undo
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Replay transport, pinned across the bottom of the map. */}
           {replayOpen && replayWindow && (
@@ -1405,6 +1531,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 { key: 'medics', label: 'Medics', count: medics.length, color: '#22c55e', active: showMedics, toggle: () => setShowMedics(v => !v) },
                 { key: 'pois', label: 'POIs', count: totalPois, color: '#ef4444', active: showPois, toggle: () => setShowPois(v => !v) },
                 { key: 'incidents', label: 'Incidents', count: liveIncidents.length, color: '#f87171', active: showIncidents, toggle: () => setShowIncidents(v => !v) },
+                { key: 'drawings', label: 'Drawings', count: drawings.length, color: '#f97316', active: showDrawings, toggle: () => setShowDrawings(v => !v) },
                 // Participants, Heatmap and Archived are deliberately NOT here.
                 // Participant dots come on via "Locate" in the Participants tab;
                 // the heatmap and archive review are off by default.
@@ -1416,7 +1543,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                   style={{
                     background: active ? `${color}18` : 'rgba(255,255,255,0.03)',
                     border: `1px solid ${active ? color + '40' : 'rgba(148,163,184,0.08)'}`,
-                    opacity: count === 0 && key !== 'participants' && key !== 'incidents' ? 0.4 : 1,
+                    opacity: count === 0 && key !== 'participants' && key !== 'incidents' && key !== 'drawings' ? 0.4 : 1,
                   }}
                 >
                   <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: active ? color : '#334155' }} />
@@ -1447,10 +1574,13 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     prev.includes(trackId) ? prev.filter(x => x !== trackId) : [...prev, trackId],
                   )
                 }
-                profileTrackId={profileTrackId}
-                onToggleProfile={(trackId) => {
+                focusedId={viewedTrackId}
+                onFocus={(trackId) => {
                   setElevHoverCoord(null)
-                  setProfileTrackId(cur => (cur === trackId ? null : trackId))
+                  setProfileTrackId(trackId)
+                  // Asking to see a track while the Tracks layer is off means
+                  // "show me" — turn it back on rather than view nothing.
+                  if (trackId) setShowTracks(true)
                 }}
               />
 
@@ -1511,11 +1641,34 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 )}
               </div>
 
+              {/* Team drawings — the list; the tool itself lives on the map. */}
+              <DrawingsPanel
+                drawings={drawings}
+                selectedId={selectedDrawingId}
+                drawing={drawingDraft.phase !== 'idle'}
+                onDraw={drawingDraft.begin}
+                onOpen={(drawing) => {
+                  setShowDrawings(true)
+                  setSelectedIncidentId(null)
+                  setSelectedMedicId(null)
+                  setSelectedPoiId(null)
+                  setSelectedDrawingId(drawing.id)
+                  setDrawingFocus({ id: drawing.id, nonce: Date.now() })
+                }}
+                onToggleVisible={(drawing) => void patchDrawing(drawing.id, { visible: !drawing.visible })}
+                onDelete={deleteDrawing}
+              />
+
               {/* Team zones — collapsible section within the Layers panel. */}
               <ZonesPanel
                 zones={zones}
                 drawActive={zoneDraw}
-                onToggleDraw={() => { setPendingZonePolygon(null); setZoneDraw(v => !v) }}
+                onToggleDraw={() => {
+                  // One "the map is listening" mode at a time.
+                  if (drawingDraft.phase !== 'idle') return
+                  setPendingZonePolygon(null)
+                  setZoneDraw(v => !v)
+                }}
                 pendingPolygon={pendingZonePolygon}
                 onSavePending={({ name, color, alarm }) => {
                   const polygon = pendingZonePolygon

@@ -36,12 +36,17 @@ export interface PanelIncident {
 
 interface Props {
   tracks: PanelTrack[]
-  /** Ids currently drawn on the map. */
+  /** Ids drawn on the map when no single track is being viewed. */
   visibleIds: string[]
   onToggleVisible: (trackId: string) => void
-  /** Track whose elevation profile is open over the map, if any. */
-  profileTrackId: string | null
-  onToggleProfile: (trackId: string) => void
+  /**
+   * The one track being viewed, if any: it is alone on the map AND its
+   * elevation profile is open. One piece of state on purpose — the track you
+   * are looking at and the profile you are reading can never disagree.
+   */
+  focusedId: string | null
+  /** View a track (map + profile together); null goes back to all tracks. */
+  onFocus: (trackId: string | null) => void
 }
 
 /** Metres between two `[lng, lat]` points (equirectangular — fine at these scales). */
@@ -158,37 +163,50 @@ function totalAscent(profile: { elevation: number }[]): number {
   return Math.round(gain)
 }
 
+/** "21.1 km · ↑540 m" from the event's own figures, falling back to the profile. */
+function trackFigures(track: PanelTrack): string {
+  const km = track.distanceKm ?? track.elevationProfile[track.elevationProfile.length - 1]?.distance
+  const gain = track.ascentMeters ?? (track.elevationProfile.length > 1 ? totalAscent(track.elevationProfile) : undefined)
+  const parts: string[] = []
+  if (km != null && km > 0) parts.push(`${km.toFixed(km < 10 ? 1 : 0)} km`)
+  if (gain != null && gain > 0) parts.push(`↑${gain.toLocaleString()} m`)
+  return parts.join(' · ')
+}
+
 /**
- * Tracks section, embedded as a collapsible block inside the Layers panel —
- * same shape as ZonesPanel. Each track can be shown/hidden individually, and
- * the mountain button opens its elevation profile as a strip over the map (see
- * {@link TrackElevationOverlay}) rather than inside this cramped popup.
+ * Tracks section, embedded as a collapsible block inside the Layers panel.
+ *
+ * Clicking a track VIEWS it: the map shows that course alone, framed, and its
+ * elevation profile opens across the bottom (see {@link TrackElevationOverlay}).
+ * Clicking it again, or "All tracks", goes back to the whole event. The eye is
+ * a separate, quieter control: which courses are drawn in the all-tracks view.
  */
-export default function TracksPanel({
-  tracks,
-  visibleIds,
-  onToggleVisible,
-  profileTrackId,
-  onToggleProfile,
-}: Props) {
-  const [open, setOpen] = useState(false)
+export default function TracksPanel({ tracks, visibleIds, onToggleVisible, focusedId, onFocus }: Props) {
+  const [open, setOpen] = useState(true)
+  const focused = tracks.find(t => t.id === focusedId) ?? null
 
   return (
     <div className="flex flex-col gap-1.5" style={{ borderTop: '1px solid rgba(148,163,184,0.1)', marginTop: 8, paddingTop: 8 }}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center justify-between w-full"
+        className="flex items-center justify-between w-full gap-3"
         style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
       >
         <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#334155' }}>
           Tracks
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold" style={{ color: '#475569' }}>
-            {visibleIds.length}/{tracks.length}
-          </span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          {focused ? (
+            <span className="text-[10px] font-bold truncate" style={{ color: focused.color, maxWidth: 110 }}>
+              {focused.name}
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold" style={{ color: '#475569' }}>
+              {visibleIds.length}/{tracks.length}
+            </span>
+          )}
           <ChevronDown
-            className="w-3.5 h-3.5 transition-transform"
+            className="w-3.5 h-3.5 transition-transform flex-shrink-0"
             style={{ color: '#64748b', transform: open ? 'rotate(180deg)' : 'none' }}
           />
         </span>
@@ -200,38 +218,76 @@ export default function TracksPanel({
             <div className="text-[11px] px-1" style={{ color: '#475569' }}>No tracks on this event.</div>
           )}
 
+          {tracks.length > 1 && (
+            <button
+              onClick={() => onFocus(null)}
+              aria-pressed={!focused}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors"
+              style={{
+                background: !focused ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${!focused ? 'rgba(59,130,246,0.45)' : 'rgba(148,163,184,0.08)'}`,
+              }}
+            >
+              {/* The event's colours, stacked — "all of them". */}
+              <span className="flex flex-col gap-[2px] flex-shrink-0" style={{ width: 12 }}>
+                {tracks.slice(0, 3).map(t => (
+                  <span key={t.id} className="block rounded-full" style={{ height: 2, background: t.color, opacity: !focused ? 1 : 0.5 }} />
+                ))}
+              </span>
+              <span className="flex-1 text-xs font-medium" style={{ color: !focused ? '#e2e8f0' : '#64748b' }}>
+                All tracks
+              </span>
+            </button>
+          )}
+
           {tracks.map(track => {
-            const visible = visibleIds.includes(track.id)
+            const active = track.id === focusedId
+            const shownInAll = visibleIds.includes(track.id)
             const hasProfile = track.elevationProfile.length > 1
-            const profileOpen = profileTrackId === track.id
+            const figures = trackFigures(track)
+            // While one track is being viewed the rest are off the map, so they
+            // read as resting — whatever their eye says.
+            const lit = active || (!focused && shownInAll)
             return (
               <div
                 key={track.id}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-lg"
+                className="flex items-stretch rounded-lg overflow-hidden transition-colors"
                 style={{
-                  background: visible ? `${track.color}14` : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${visible ? track.color + '40' : 'rgba(148,163,184,0.08)'}`,
+                  maxWidth: 236,
+                  background: active ? `${track.color}26` : lit ? `${track.color}12` : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${active ? track.color + 'b3' : lit ? track.color + '38' : 'rgba(148,163,184,0.08)'}`,
                 }}
               >
-                <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: track.color }} />
-                <span className="flex-1 text-xs font-medium truncate" style={{ color: visible ? '#e2e8f0' : '#64748b' }}>
-                  {track.name}
-                </span>
                 <button
-                  onClick={() => hasProfile && onToggleProfile(track.id)}
-                  disabled={!hasProfile}
-                  title={hasProfile ? 'Elevation profile' : 'This track has no elevation data'}
-                  style={{ color: profileOpen ? '#f97316' : hasProfile ? '#64748b' : '#334155', cursor: hasProfile ? 'pointer' : 'default' }}
+                  onClick={() => onFocus(active ? null : track.id)}
+                  aria-pressed={active}
+                  title={active ? 'Back to all tracks' : hasProfile ? 'View this track and its elevation profile' : 'View this track'}
+                  className="flex items-center gap-2 flex-1 min-w-0 pl-0 pr-1 py-1.5 text-left"
                 >
-                  <Mountain className="w-3.5 h-3.5" />
+                  <span
+                    className="self-stretch flex-shrink-0 rounded-r-sm transition-all"
+                    style={{ width: active ? 4 : 3, background: track.color, opacity: lit ? 1 : 0.35 }}
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-xs font-medium truncate" style={{ color: lit ? '#e2e8f0' : '#64748b' }}>
+                      {track.name}
+                    </span>
+                    <span className="flex items-center gap-1 text-[9px] font-semibold tabular-nums" style={{ color: active ? track.color : '#475569' }}>
+                      {active && hasProfile && <Mountain className="w-2.5 h-2.5" />}
+                      {active && !hasProfile ? 'no elevation data' : figures || (hasProfile ? 'profile' : 'no elevation data')}
+                    </span>
+                  </span>
                 </button>
-                <button
-                  onClick={() => onToggleVisible(track.id)}
-                  title={visible ? 'Hide track' : 'Show track'}
-                  style={{ color: visible ? '#22c55e' : '#475569' }}
-                >
-                  {visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </button>
+                {!active && (
+                  <button
+                    onClick={() => onToggleVisible(track.id)}
+                    title={shownInAll ? 'Shown with all tracks — click to hide' : 'Hidden from the all-tracks view — click to show'}
+                    className="flex items-center px-1.5 transition-colors hover:bg-white/10"
+                    style={{ color: shownInAll ? (focused ? '#475569' : '#22c55e') : '#334155' }}
+                  >
+                    {shownInAll ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                )}
               </div>
             )
           })}
@@ -328,7 +384,7 @@ export function TrackElevationOverlay({
         </span>
         <button
           onClick={onClose}
-          title="Close elevation profile"
+          title="Close — back to all tracks"
           className="p-1 rounded-lg flex-shrink-0"
           style={{ color: '#64748b', background: 'rgba(255,255,255,0.04)' }}
         >

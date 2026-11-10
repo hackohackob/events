@@ -227,3 +227,57 @@ input[type='date']::-webkit-calendar-picker-indicator {
   border-top-color: #0a1320 !important;
   border-bottom-color: #0a1320 !important;
 }
+
+/* ─── Map drawings ─────────────────────────────────────────────────────────── */
+
+/* Card on a selected drawing — the dark popup card, with no tip so it floats
+   over the line instead of pointing at one vertex of it. */
+.drawing-popup .maplibregl-popup-content {
+  background: #0a1320;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.6);
+}
+.drawing-popup .maplibregl-popup-tip {
+  border-top-color: #0a1320 !important;
+  border-bottom-color: #0a1320 !important;
+}
+
+/* Text fields inside the drawing card and the save card. */
+.drawing-input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(2, 8, 20, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.drawing-input::placeholder {
+  color: #475569;
+  font-weight: 500;
+}
+.drawing-input:focus {
+  border-color: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.14);
+}
+
+/* While the drawing tool is open, markers must not swallow the pointer: a line
+   has to be able to start, pass and end on top of a medic or a POI. */
+.drawing-active .maplibregl-marker,
+.drawing-active .maplibregl-marker * {
+  pointer-events: none !important;
+}
+/* Cursors are set by class rather than on the canvas itself — react-map-gl
+   owns the canvas's inline cursor and would not put it back. */
+.drawing-active .maplibregl-canvas {
+  cursor: crosshair !important;
+}
+.drawing-active.drawing-pan .maplibregl-canvas {
+  cursor: grab !important;
+}
+.drawing-hover .maplibregl-canvas {
+  cursor: pointer !important;
+}

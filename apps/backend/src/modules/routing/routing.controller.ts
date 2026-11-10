@@ -1,11 +1,12 @@
-import { BadRequestException, Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Post, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "../common/guards/auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequestUser } from "../common/types/request-user.type";
-import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPES, type VehicleType } from "@events/contracts";
+import { DEFAULT_VEHICLE_TYPE, VEHICLE_TYPES, type SnapProfile, type VehicleType } from "@events/contracts";
 import { RouteRequestDto } from "./dto/route-request.dto";
 import { ClosestMedicsService } from "./closest-medics.service";
 import { ExitPointsService } from "./exit-points.service";
+import { LineSnapService } from "./line-snap.service";
 import { RoutingService } from "./routing.service";
 import { TrackAccessService } from "./track-access.service";
 import type { LngLat, RouteResponse } from "./routing.types";
@@ -18,6 +19,7 @@ export class RoutingController {
     private readonly exitPoints: ExitPointsService,
     private readonly closestMedicsService: ClosestMedicsService,
     private readonly trackAccess: TrackAccessService,
+    private readonly lineSnap: LineSnapService,
   ) {}
 
   /**
@@ -76,6 +78,28 @@ export class RoutingController {
     const coordinates = body.coordinates.map(validatePoint);
     const bins = Math.max(8, Math.min(240, Math.round(Number(body.bins) || 96)));
     return this.trackAccess.report(coordinates, bins);
+  }
+
+  /**
+   * Pull a hand-drawn line onto the road/path network (dashboard drawings).
+   * Always answers with a line: when nothing routable is near, it is the input
+   * back with `snapped: false` and the reason, never an error.
+   */
+  @Post("snap-line")
+  async snapLine(@CurrentUser() user: RequestUser, @Body() body: { points?: unknown; profile?: string }) {
+    if (user.role === "runner" || user.role === "spectator") {
+      throw new ForbiddenException("Not available to participants");
+    }
+    if (!Array.isArray(body.points) || body.points.length < 2) {
+      throw new BadRequestException("points must be a [lng, lat] line of at least two points");
+    }
+    if (body.points.length > 25) {
+      throw new BadRequestException("send at most 25 waypoints — simplify the sketch first");
+    }
+    const points = body.points.map(validatePoint);
+    const profile: SnapProfile =
+      body.profile === "car" || body.profile === "rescue_4x4" ? body.profile : "foot";
+    return this.lineSnap.snap(points, profile);
   }
 
   /** Nearest paved-road access points around a location (e.g. an incident).  /** Nearest paved-road access points around a location (e.g. an incident).

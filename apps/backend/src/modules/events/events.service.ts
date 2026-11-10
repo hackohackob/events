@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { EMPTY_EVENT_PLAN, normalizeVehicleType } from "@events/contracts";
 import type {
   EventActiveHours,
@@ -77,6 +77,85 @@ export interface StoredZone {
   updatedAt: string;
 }
 
+/**
+ * A free-form sketch on the map (a way round a hard stretch, an arrow, a ring
+ * round a hazard). Team-only like zones, and kept off EventSummary for the same
+ * reason: summaries are served to runners.
+ */
+export interface StoredDrawing {
+  id: string;
+  name: string;
+  color: string;
+  /** The strokes, each a [lng, lat] line in drawing order. */
+  lines: [number, number][][];
+  note?: string | null;
+  dashed: boolean;
+  distanceMeters: number;
+  /** At least one stroke was snapped to the road/path network. */
+  snapped: boolean;
+  /** Shown on team maps. */
+  visible: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A snapped 30 km line is ~3 000 vertices; this leaves room for a few. */
+const DRAWING_MAX_POINTS = 12000;
+const DRAWING_MAX_LINES = 200;
+const DRAWING_NAME_MAX = 80;
+const DRAWING_NOTE_MAX = 400;
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+/** Validate + copy client-sent strokes; throws on anything that is not a line. */
+function sanitizeDrawingLines(raw: unknown): [number, number][][] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new BadRequestException("A drawing needs at least one line");
+  }
+  if (raw.length > DRAWING_MAX_LINES) {
+    throw new BadRequestException(`A drawing is limited to ${DRAWING_MAX_LINES} strokes`);
+  }
+  let total = 0;
+  const lines: [number, number][][] = [];
+  for (const stroke of raw) {
+    if (!Array.isArray(stroke) || stroke.length < 2) {
+      throw new BadRequestException("Every stroke of a drawing needs at least 2 points");
+    }
+    total += stroke.length;
+    if (total > DRAWING_MAX_POINTS) {
+      throw new BadRequestException(`A drawing is limited to ${DRAWING_MAX_POINTS} points`);
+    }
+    const line: [number, number][] = [];
+    for (const point of stroke) {
+      const lng = Array.isArray(point) ? Number(point[0]) : NaN;
+      const lat = Array.isArray(point) ? Number(point[1]) : NaN;
+      if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        throw new BadRequestException("A drawing point is not a valid [lng, lat] pair");
+      }
+      // ~1 cm of precision — a sketch never needs the 15 digits a browser sends.
+      line.push([Math.round(lng * 1e7) / 1e7, Math.round(lat * 1e7) / 1e7]);
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+function drawingLengthMeters(lines: [number, number][][]): number {
+  const R = 6_371_000;
+  const rad = Math.PI / 180;
+  let total = 0;
+  for (const line of lines) {
+    for (let i = 1; i < line.length; i += 1) {
+      const [lng1, lat1] = line[i - 1]!;
+      const [lng2, lat2] = line[i]!;
+      const dLat = (lat2 - lat1) * rad;
+      const dLng = (lng2 - lng1) * rad;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+      total += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+  }
+  return Math.round(total);
+}
+
 export interface StoredLocation {
   name: string;
   lng: number;
@@ -109,6 +188,8 @@ export interface EventRecord {
   days: StoredDay[];
   /** Medic-only map regions — never included in summaries served to runners. */
   zones?: StoredZone[];
+  /** Free-form map sketches — team-only, like zones. */
+  drawings?: StoredDrawing[];
   /**
    * Pre-event deployment plan (discipline timings + medic move schedule). Kept
    * off {@link EventSummary} on purpose: summaries are served to runners, and
@@ -1014,6 +1095,102 @@ export class EventsService implements OnModuleInit {
       payload: { id: zoneId },
     });
     return { id: zoneId };
+  }
+
+  // ─── Drawings (free-form map sketches) ─────────────────────────────────────
+  // Same audience as zones, so the same `:incidents` room carries the events.
+
+  listDrawingsForEvent(eventId: string): StoredDrawing[] {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    return event.drawings ?? [];
+  }
+
+  async createDrawing(
+    eventId: string,
+    input: {
+      name?: string;
+      color?: string;
+      lines: unknown;
+      note?: string | null;
+      dashed?: boolean;
+      snapped?: boolean;
+      visible?: boolean;
+    },
+  ): Promise<StoredDrawing> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    const lines = sanitizeDrawingLines(input.lines);
+    const now = new Date().toISOString();
+    const color = input.color?.trim() ?? "";
+    const drawing: StoredDrawing = {
+      id: randomUUID(),
+      // Deliberately allowed to be empty: an arrow or a ring needs no label.
+      name: input.name?.trim().slice(0, DRAWING_NAME_MAX) ?? "",
+      color: HEX_COLOR_RE.test(color) ? color : "#f97316",
+      lines,
+      note: input.note?.trim().slice(0, DRAWING_NOTE_MAX) || null,
+      dashed: input.dashed === true,
+      distanceMeters: drawingLengthMeters(lines),
+      snapped: input.snapped === true,
+      // On by default — unlike a zone, a drawing is made to be seen.
+      visible: input.visible ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    event.drawings = [...(event.drawings ?? []), drawing];
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, { type: "drawing.created", payload: drawing });
+    return drawing;
+  }
+
+  async updateDrawing(
+    eventId: string,
+    drawingId: string,
+    patch: {
+      name?: string;
+      color?: string;
+      lines?: unknown;
+      note?: string | null;
+      dashed?: boolean;
+      snapped?: boolean;
+      visible?: boolean;
+    },
+  ): Promise<StoredDrawing> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    const drawing = event.drawings?.find((d) => d.id === drawingId);
+    if (!drawing) throw new NotFoundException(`Drawing ${drawingId} not found`);
+    if (patch.name !== undefined) drawing.name = String(patch.name).trim().slice(0, DRAWING_NAME_MAX);
+    if (patch.color !== undefined && HEX_COLOR_RE.test(String(patch.color).trim())) {
+      drawing.color = String(patch.color).trim();
+    }
+    if (patch.note !== undefined) drawing.note = patch.note?.trim().slice(0, DRAWING_NOTE_MAX) || null;
+    if (patch.lines !== undefined) {
+      drawing.lines = sanitizeDrawingLines(patch.lines);
+      drawing.distanceMeters = drawingLengthMeters(drawing.lines);
+    }
+    if (typeof patch.dashed === "boolean") drawing.dashed = patch.dashed;
+    if (typeof patch.snapped === "boolean") drawing.snapped = patch.snapped;
+    if (typeof patch.visible === "boolean") drawing.visible = patch.visible;
+    drawing.updatedAt = new Date().toISOString();
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, { type: "drawing.updated", payload: drawing });
+    return drawing;
+  }
+
+  async removeDrawing(eventId: string, drawingId: string): Promise<{ id: string }> {
+    const event = this.events.find((e) => e.id === eventId);
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    const before = event.drawings?.length ?? 0;
+    event.drawings = (event.drawings ?? []).filter((d) => d.id !== drawingId);
+    if (event.drawings.length === before) throw new NotFoundException(`Drawing ${drawingId} not found`);
+    await this.persist();
+    await this.redisService.publish(`event:${eventId}:incidents`, {
+      type: "drawing.removed",
+      payload: { id: drawingId },
+    });
+    return { id: drawingId };
   }
 
   private async syncMedicRoster(event: EventRecord): Promise<void> {
