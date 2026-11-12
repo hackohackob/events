@@ -262,6 +262,9 @@ const config: ExpoConfig = {
       {
         android: {
           extraMavenRepos: [notifeeMavenRepo],
+          // Real phones are ARM; dropping the emulator-only x86 ABIs halves the
+          // sideloaded APK (see android/gradle.properties).
+          buildArchs: ["armeabi-v7a", "arm64-v8a"],
         },
       },
     ],
